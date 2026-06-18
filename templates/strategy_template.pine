@@ -1,0 +1,117 @@
+//@version=6
+// ─── Tên Strategy — Mô tả ngắn gọn ───
+// Tác giả: [Tên]
+// Ngày tạo: [Ngày]
+// Phiên bản: 1.0
+strategy(
+    title="Tên Strategy",
+    shorttitle="VIẾT_TẮT",
+    overlay=true,
+
+    // ─── Quản Lý Vốn ───
+    initial_capital=100000000,              // 100 triệu VND
+    default_qty_type=strategy.percent_of_equity,
+    default_qty_value=100,                  // 100% vốn mỗi lệnh
+
+    // ─── Phí Giao Dịch ───
+    commission_type=strategy.commission.percent,
+    commission_value=0.15,                  // 0.15% (môi giới + thuế)
+    slippage=2,                             // 2 tick trượt giá
+
+    // ─── Giới Hạn ───
+    pyramiding=1,                           // 1 lệnh tại một thời điểm
+    max_bars_back=500,
+    process_orders_on_close=true,
+
+    // ─── Backtest ───
+    calc_on_every_tick=false
+)
+
+// ╔══════════════════════════════════════════╗
+// ║              INPUTS                      ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Dữ Liệu ───
+src = input.source(title="Nguồn Dữ Liệu", defval=close, group="Dữ Liệu")
+
+// ─── Tham Số Chiến Lược ───
+fast_len = input.int(title="Chu Kỳ Nhanh", defval=9, minval=1, group="Chiến Lược")
+slow_len = input.int(title="Chu Kỳ Chậm", defval=21, minval=1, group="Chiến Lược")
+
+// ─── Quản Lý Rủi Ro ───
+use_tp = input.bool(title="Dùng Take Profit", defval=true, group="Quản Lý Rủi Ro")
+tp_pct = input.float(title="Take Profit (%)", defval=5.0, step=0.5, group="Quản Lý Rủi Ro") / 100
+use_sl = input.bool(title="Dùng Stop Loss", defval=true, group="Quản Lý Rủi Ro")
+sl_pct = input.float(title="Stop Loss (%)", defval=2.0, step=0.5, group="Quản Lý Rủi Ro") / 100
+
+// ─── Lọc Giao Dịch ───
+use_time_filter = input.bool(title="Lọc Giờ Giao Dịch", defval=false, group="Lọc Giao Dịch")
+session_start = input.int(title="Giờ Bắt Đầu", defval=9, minval=0, maxval=23, group="Lọc Giao Dịch")
+session_end   = input.int(title="Giờ Kết Thúc", defval=14, minval=0, maxval=23, group="Lọc Giao Dịch")
+
+// ╔══════════════════════════════════════════╗
+// ║           HÀM HELPER                     ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Lọc giờ giao dịch ───
+in_session() =>
+    hour >= session_start and hour <= session_end
+
+// ╔══════════════════════════════════════════╗
+// ║           TÍNH TOÁN                      ║
+// ╚══════════════════════════════════════════╝
+
+// Logic tính toán chính ở đây
+
+// ─── Điều kiện vào lệnh ───
+long_cond = false   // Thay bằng điều kiện thực tế
+short_cond = false  // Thay bằng điều kiện thực tế
+
+// ─── Thêm bộ lọc ───
+long_cond := long_cond and barstate.isconfirmed
+short_cond := short_cond and barstate.isconfirmed
+if (use_time_filter)
+    long_cond := long_cond and in_session()
+    short_cond := short_cond and in_session()
+
+// ╔══════════════════════════════════════════╗
+// ║           GIAO DỊCH                      ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Vào lệnh ───
+if (long_cond)
+    strategy.entry("Long", strategy.long)
+
+if (short_cond)
+    strategy.entry("Short", strategy.short)
+
+// ─── Thoát lệnh: Take Profit / Stop Loss ───
+if (use_tp and use_sl)
+    strategy.exit("TP/SL Long", "Long",
+        limit=strategy.position_avg_price * (1 + tp_pct),
+        stop=strategy.position_avg_price * (1 - sl_pct))
+
+if (use_tp and use_sl)
+    strategy.exit("TP/SL Short", "Short",
+        limit=strategy.position_avg_price * (1 - tp_pct),
+        stop=strategy.position_avg_price * (1 + sl_pct))
+
+// ─── Thoát lệnh: Tín hiệu ngược ───
+if (short_cond)
+    strategy.close("Long", comment="Tín hiệu Short")
+if (long_cond)
+    strategy.close("Short", comment="Tín hiệu Long")
+
+// ╔══════════════════════════════════════════╗
+// ║           PLOTS / HIỂN THỊ               ║
+// ╚══════════════════════════════════════════╝
+
+// Hiển thị lên chart ở đây
+
+// ╔══════════════════════════════════════════╗
+// ║           ALERTS                         ║
+// ╚══════════════════════════════════════════╝
+
+// Điều kiện cảnh báo ở đây
+// alertcondition(long_cond, title="Tín Hiệu Mua", message="...")
+// alertcondition(short_cond, title="Tín Hiệu Bán", message="...")

@@ -1,0 +1,10 @@
+{
+  "description": "Dự án phát triển Pine Script cho TradingView — indicator, strategy, backtest, library. Hỗ trợ chứng khoán Việt Nam.",
+  "language": "vi",
+  "permissions": {
+    "allow": [
+      "Write(cwd)",
+      "Bash(cwd:*)"
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+# Hệ điều hành
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Claude
+.claude/plans/
+
+# Backup
+*.bak
+*.backup
+
+# Windows
+*.lnk

@@ -1,0 +1,51 @@
+//@version=6
+// ─── Tên Indicator — Mô tả ngắn gọn ───
+// Tác giả: [Tên]
+// Ngày tạo: [Ngày]
+// Phiên bản: 1.0
+indicator(
+    title="Tên Indicator",
+    shorttitle="VIẾT_TẮT",
+    overlay=true,          // true = đè lên giá, false = pane riêng
+    max_lines_count=500,
+    max_labels_count=500,
+    max_boxes_count=500
+)
+
+// ╔══════════════════════════════════════════╗
+// ║              INPUTS                      ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Dữ Liệu ───
+src = input.source(title="Nguồn Dữ Liệu", defval=close, group="Dữ Liệu")
+
+// ─── Tham Số ───
+len = input.int(title="Chu Kỳ", defval=14, minval=1, group="Tham Số")
+
+// ─── Hiển Thị ───
+show_signal = input.bool(title="Hiển Thị Tín Hiệu", defval=true, group="Hiển Thị")
+
+// ╔══════════════════════════════════════════╗
+// ║           HÀM HELPER                     ║
+// ╚══════════════════════════════════════════╝
+
+// Viết các hàm tiện ích ở đây
+
+// ╔══════════════════════════════════════════╗
+// ║           TÍNH TOÁN                      ║
+// ╚══════════════════════════════════════════╝
+
+// Logic tính toán chính ở đây
+
+// ╔══════════════════════════════════════════╗
+// ║           PLOTS / HIỂN THỊ               ║
+// ╚══════════════════════════════════════════╝
+
+// Hiển thị lên chart ở đây
+
+// ╔══════════════════════════════════════════╗
+// ║           ALERTS                         ║
+// ╚══════════════════════════════════════════╝
+
+// Điều kiện cảnh báo ở đây
+// alertcondition(condition, title="...", message="...")
