@@ -36,6 +36,31 @@ tv_pine/
 
 ## Quy Ước Code Pine Script
 
+### ⚠️ QUY TẮC SCOPE (đọc trước khi viết code)
+
+**Mọi biến có kiểu (`string`, `int`, `float`, `bool`, `color`, UDT, ...) phải được khai báo và khởi tạo ở scope cha, trước mọi `if`/`for` con.**
+
+```pinescript
+// ✅ ĐÚNG: Khai báo + khởi tạo ở scope for, trước if
+for i = 0 to 2
+    int     tr   = states.get(i).trend
+    string  txt  = tr == 1 ? "BULL" : tr == -1 ? "BEAR" : "WAIT"
+    float   val  = na(sh) ? 0.0 : sh
+    if is_active
+        // Chỉ dùng `:=` để gán lại, không khai báo biến mới ở đây
+        val := val + 1
+
+// ❌ SAI: Khai báo biến mới trong if lồng trong for
+for i = 0 to 2
+    if cond
+        string txt = "hello"  // LỖI: "end of line without line continuation"
+
+// ❌ SAI: Khai báo không khởi tạo rồi gán :=
+for i = 0 to 2
+    string txt
+    txt := "hello"  // LỖI
+```
+
 ### Cấu Trúc File
 
 1. Mở đầu bằng `//@version=6` (dùng v5 nếu có lý do cụ thể)
@@ -97,6 +122,12 @@ strategy(title="Tên Strategy", shorttitle="VIẾT_TẮT",
 | **Giới hạn drawings** | Max 500 lines/labels/boxes | Giới hạn số lượng đối tượng vẽ, dùng `max_lines_count=500` |
 | **Giới hạn labels** | Max 500 labels | Dùng `max_labels_count=500` |
 | **NaN propagation** | Biểu thức có NaN sẽ lan ra | Kiểm tra `na()` trước khi dùng giá trị |
+| **Khai báo biến trong `if`** | Không được khai báo biến mới (có kiểu) bên trong `if`, nhất là `if` lồng trong `for` | **Luôn khai báo tất cả biến ở đầu scope `for` hoặc scope hàm, trước mọi `if`.** Dùng ternary `? :` thay vì `if/else` để gán giá trị. |
+| **Khai báo không khởi tạo** | `string x` rồi `x := "val"` trong `for`/`if` gây lỗi "end of line without line continuation" | Luôn khởi tạo ngay khi khai báo: `string x = "default"` hoặc dùng ternary 1 dòng: `string x = cond ? "A" : "B"` |
+| **`bool` vs `int`** | Không thể gán `1`/`0` cho `bool`, Pine v6 strict typing | Dùng `true`/`false`. Với UDT: `s.ready := true` không phải `s.ready := 1` |
+| **`for start > end` chạy 1 lần** | `for r = 4 to 3` vẫn chạy 1 lần với r=4 (khác các ngôn ngữ khác) | Luôn bọc trong `if start <= end` guard |
+| **UDT trong `for`+`if`** | Không thể khai báo biến UDT bên trong `if` lồng trong `for` | Khai báo biến UDT ở scope `for`, dùng ternary cho giá trị: `float sh = cond ? val : na` |
+| **Inline comment trong array literal** | `// comment` bên trong `[]` của `request.security()` có thể gây lỗi parser | Tránh comment `//` trong array/tuple literal. Đưa comment ra ngoài hoặc dùng `/* */`. |
 
 ## Pine Script v6 — Tính Năng Mới
 
