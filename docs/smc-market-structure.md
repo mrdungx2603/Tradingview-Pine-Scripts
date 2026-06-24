@@ -1,8 +1,8 @@
 # SMC Market Structure Indicator — Tài Liệu Hướng Dẫn
 
-> **Script Base**: [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) (v1.2)
+> **Script**: [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) (v1.4)
 > **Script MTF**: [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) (v1.4)
-> **Ngày tạo**: 2026-06-18
+> **Ngày tạo**: 2026-06-18 / **Cập nhật**: 2026-06-21
 > **Pine Script**: v6
 > **Loại**: Indicator (overlay)
 
@@ -16,11 +16,13 @@
 4. [Kiến Trúc Hệ Thống](#kiến-trúc-hệ-thống)
 5. [Luồng Hoạt Động](#luồng-hoạt-động)
 6. [Các Tín Hiệu Trên Chart](#các-tín-hiệu-trên-chart)
-7. [Bảng Thống Kê (Dashboard)](#bảng-thống-kê-dashboard)
-8. [Hướng Dẫn Sử Dụng](#hướng-dẫn-sử-dụng)
-9. [Hạn Chế & Lưu Ý](#hạn-chế--lưu-ý)
-10. [Multi-Timeframe (MTF) Trend](#multi-timeframe-mtf-trend--chỉ-có-trong-bản-mtf)
-11. [Kế Hoạch Phát Triển](#kế-hoạch-phát-triển)
+7. [Imbalance Detection (FVG / OG / VI)](#imbalance-detection-fvg--og--vi)
+8. [Order Blocks (OB)](#order-blocks-ob)
+9. [Bảng Thống Kê (Dashboard)](#bảng-thống-kê-dashboard)
+10. [Hướng Dẫn Sử Dụng](#hướng-dẫn-sử-dụng)
+11. [Hạn Chế & Lưu Ý](#hạn-chế--lưu-ý)
+12. [Multi-Timeframe (MTF) Trend](#multi-timeframe-mtf-trend--chỉ-có-trong-bản-mtf)
+13. [Kế Hoạch Phát Triển](#kế-hoạch-phát-triển)
 
 ---
 
@@ -38,6 +40,10 @@ Indicator tự động phát hiện và đánh dấu:
 | **Lower High** | `LH` | Đỉnh thấp hơn đỉnh trước — duy trì xu hướng giảm |
 | **Break of Structure** | `BoS` | Phá vỡ cấu trúc cùng chiều xu hướng |
 | **Change of Character** | `CHoCH` | Phá vỡ cấu trúc ngược chiều — tín hiệu đảo xu hướng |
+| **Fair Value Gap** | `FVG` | Khoảng trống giá trị hợp lý (mô hình 3 nến) |
+| **Opening Gap** | `OG` | Khoảng trống mở cửa giữa 2 nến liên tiếp |
+| **Volume Imbalance** | `VI` | Mất cân bằng khối lượng giữa 2 nến |
+| **Order Block** | `OB` | Vùng giá của nến gốc tạo ra imbalance |
 | **Vị trí Premium/Discount** | `% trong Swing` | Giá đang ở vùng Premium (>50%) hay Discount (<50%) |
 
 ---
@@ -99,6 +105,33 @@ Swing High ──────────────────── 100% (Pr
 Swing Low  ────────────────────   0% (Discount Zone)
 ```
 
+### Imbalance & Order Blocks
+
+**Imbalance** (mất cân bằng) là các vùng giá mà tại đó lực mua hoặc lực bán mạnh đến mức tạo ra khoảng trống giá (gap). Có 3 loại:
+
+| Loại | Mô Hình | Ý Nghĩa |
+|---|---|---|
+| **FVG** (Fair Value Gap) | Mô hình 3 nến: nến 1 và 3 không chồng lấp | Vùng giá chưa được "giao dịch công bằng", giá có xu hướng quay lại lấp |
+| **OG** (Opening Gap) | Khoảng trống giữa close nến trước và open nến sau | Gap mở cửa, thường thấy ở chứng khoán có thanh khoản thấp |
+| **VI** (Volume Imbalance) | 2 nến chồng lấp nhưng quan hệ open/close bất thường | Dấu hiệu dòng tiền lớn đẩy giá đi xa |
+
+**Order Block (OB)** là vùng giá của **nến đầu tiên (origin)** trước khi imbalance xảy ra — đây là nơi các tổ chức lớn đặt lệnh. OB có 2 trạng thái:
+
+```
+OB Active (chưa bị phá):
+┌─────────────┐
+│ origin bar  │ ═══════▶ kéo dài đến bar hiện tại (nét đứt, mờ)
+└─────────────┘
+
+OB Mitigated (đã bị phá):
+┌─────────────┐
+│ origin bar  │ ═══════▶ đến nến mitigation (nét liền, đậm hơn)
+└─────────────┘
+```
+
+- **Bullish OB (Demand)**: Bị mitigation khi `low <= top` (giá quay lại chạm vùng OB từ trên xuống)
+- **Bearish OB (Supply)**: Bị mitigation khi `high >= bottom` (giá quay lại chạm vùng OB từ dưới lên)
+
 ---
 
 ## Tham Số Đầu Vào
@@ -115,34 +148,30 @@ Swing Low  ────────────────────   0% (Di
 - Dùng `ta.pivothigh()` và `ta.pivotlow()` để tìm đỉnh/đáy đầu tiên
 - Từ 2 pivot đó, suy ra xu hướng ban đầu (uptrend hay downtrend)
 - **Phù hợp**: Mọi khung thời gian (kể cả Daily, Weekly)
-- **Logic**: Dựa vào thứ tự thời gian của Pivot High và Pivot Low
-  - Pivot High xuất hiện **sau** Pivot Low → Uptrend (đỉnh cao hơn đáy)
-  - Pivot Low xuất hiện **sau** Pivot High → Downtrend (đáy thấp hơn đỉnh)
 
 #### Seed Mode: Session Seed
 
 - Dùng bar đầu tiên của phiên giao dịch làm cấu trúc tham chiếu
-- `trend = 0` (chưa xác định xu hướng), chờ breakout đầu tiên để xác lập
+- `trend = 0` (chưa xác định xu hướng), chờ breakout đầu tiên
 - Tự động reset vào đầu mỗi phiên mới
 - **Phù hợp**: Khung thời gian phút (1m, 5m, 15m, 30m, 1H)
-- **Lưu ý**: Sẽ báo lỗi `runtime.error` nếu dùng với khung thời gian Daily trở lên
 
 ### Nhóm "BoS" (Break of Structure)
 
 | Tham Số | Loại | Mặc Định | Mô Tả |
 |---|---|---|---|
-| **Hiển Thị** | `bool` | `true` | Bật/tắt toàn bộ đường BoS và label |
-| **Tiêu Đề Label** | `string` | `"BoS"` | Nội dung text hiển thị trên label BoS |
+| **Hiển Thị** | `bool` | `true` | Bật/tắt đường BoS và label |
+| **Tiêu Đề Label** | `string` | `"BoS"` | Text hiển thị trên label BoS |
 | **Kiểu Đường** | `string` | `"Solid"` | `Solid` / `Dashed` / `Dotted` |
-| **Màu Đường BoS Tăng** | `color` | `blue` | Màu đường và label BoS trong xu hướng tăng |
-| **Màu Đường BoS Giảm** | `color` | `red` | Màu đường và label BoS trong xu hướng giảm |
+| **Màu Đường BoS Tăng** | `color` | `blue` | Màu BoS trong xu hướng tăng |
+| **Màu Đường BoS Giảm** | `color` | `red` | Màu BoS trong xu hướng giảm |
 
 ### Nhóm "CHoCH" (Change of Character)
 
 | Tham Số | Loại | Mặc Định | Mô Tả |
 |---|---|---|---|
-| **Hiển Thị** | `bool` | `true` | Bật/tắt toàn bộ đường CHoCH và label |
-| **Tiêu Đề Label** | `string` | `"CHoCH"` | Nội dung text hiển thị trên label CHoCH |
+| **Hiển Thị** | `bool` | `true` | Bật/tắt đường CHoCH và label |
+| **Tiêu Đề Label** | `string` | `"CHoCH"` | Text hiển thị trên label CHoCH |
 | **Kiểu Đường** | `string` | `"Dashed"` | `Solid` / `Dashed` / `Dotted` |
 | **Màu Đường CHoCH** | `color` | `orange` | Màu đường và label CHoCH |
 
@@ -151,15 +180,69 @@ Swing Low  ────────────────────   0% (Di
 | Tham Số | Loại | Mặc Định | Mô Tả |
 |---|---|---|---|
 | **Hiển Thị** | `bool` | `true` | Bật/tắt label HH/HL/LL/LH |
-| **Màu Label Bull (HH/HL)** | `color` | `blue` | Màu cho label HH và HL |
-| **Màu Label Bear (LL/LH)** | `color` | `red` | Màu cho label LL và LH |
+| **Màu Label Bull (HH/HL)** | `color` | `blue` | Màu cho HH và HL |
+| **Màu Label Bear (LL/LH)** | `color` | `red` | Màu cho LL và LH |
 
 ### Nhóm "Dashboard"
 
 | Tham Số | Loại | Mặc Định | Mô Tả |
 |---|---|---|---|
 | **Hiển Thị** | `bool` | `true` | Bật/tắt bảng thống kê SMC |
-| **Vị Trí** | `string` | `"Top Right"` | Góc đặt bảng: `Top Right` / `Top Left` / `Bottom Right` / `Bottom Left` |
+| **Vị Trí** | `string` | `"Top Right"` | Góc đặt bảng |
+
+### Nhóm "FVG" (Fair Value Gaps)
+
+| Tham Số | Loại | Mặc Định | Mô Tả |
+|---|---|---|---|
+| **Hiển Thị** | `bool` | `true` | Bật/tắt FVG |
+| **Màu FVG Tăng** | `color` | `#2157f3` | Màu Bullish FVG |
+| **Màu FVG Giảm** | `color` | `#ff1100` | Màu Bearish FVG |
+| **Kéo Dài FVG** | `int` | `0` | Số bar kéo dài box FVG về phải |
+
+### Nhóm "OG" (Opening Gaps)
+
+| Tham Số | Loại | Mặc Định | Mô Tả |
+|---|---|---|---|
+| **Hiển Thị** | `bool` | `true` | Bật/tắt OG |
+| **Màu OG Tăng** | `color` | `#2157f3` | Màu Bullish OG |
+| **Màu OG Giảm** | `color` | `#ff1100` | Màu Bearish OG |
+| **Kéo Dài OG** | `int` | `0` | Số bar kéo dài box OG về phải |
+
+### Nhóm "VI" (Volume Imbalance)
+
+| Tham Số | Loại | Mặc Định | Mô Tả |
+|---|---|---|---|
+| **Hiển Thị** | `bool` | `true` | Bật/tắt VI |
+| **Màu VI Tăng** | `color` | `#2157f3` | Màu Bullish VI |
+| **Màu VI Giảm** | `color` | `#ff1100` | Màu Bearish VI |
+| **Kéo Dài VI** | `int` | `0` | Số bar kéo dài box VI về phải |
+
+### Nhóm "OB" (Order Blocks)
+
+| Tham Số | Loại | Mặc Định | Mô Tả |
+|---|---|---|---|
+| **Hiển Thị OB** | `bool` | `true` | Bật/tắt OB |
+| **Số OB Active Tối Đa** | `int` | `30` | Giới hạn số OB active hiển thị (0=không giới hạn) |
+| **Bộ Lọc OB Đã Mitigated** | `string` | `"All"` | `All` / `Active` / `Mitigated` |
+| **Màu OB Tăng (Demand)** | `color` | `#089981` | Màu Bullish OB |
+| **Màu OB Giảm (Supply)** | `color` | `#f23645` | Màu Bearish OB |
+| **Độ Trong Suốt OB Active** | `int` | `70` | 0–100, càng cao càng trong suốt |
+
+### Nhóm "Bộ Lọc Imbalance"
+
+| Tham Số | Loại | Mặc Định | Mô Tả |
+|---|---|---|---|
+| **Lọc Theo Độ Rộng** | `bool` | `false` | Bật lọc kích thước tối thiểu |
+| **Độ Rộng Tối Thiểu** | `float` | `0` | Ngưỡng lọc |
+| **Đơn Vị** | `string` | `"Points"` | `Points` / `%` / `ATR` |
+
+### Nhóm "Dashboard Imbalance"
+
+| Tham Số | Loại | Mặc Định | Mô Tả |
+|---|---|---|---|
+| **Hiển Thị Dashboard** | `bool` | `false` | Bật/tắt bảng thống kê imbalance |
+| **Vị Trí** | `string` | `"Bottom Right"` | Góc đặt bảng |
+| **Kích Thước Chữ** | `string` | `"Tiny"` | `Tiny` / `Small` / `Normal` |
 
 ---
 
@@ -188,63 +271,28 @@ Swing Low  ────────────────────   0% (Di
 │  cand_type = 1  → Đang săn HIGHER HIGH              │
 │  cand_type = -1 → Đang săn LOWER LOW                │
 │  cand_type = 0  → Không hoạt động (IDLE)            │
-│                                                     │
-│  cand_bar   → Bar nơi candidate form thành          │
-│  cand_high  → Giá cao nhất của candidate            │
-│  cand_low   → Giá thấp nhất của candidate           │
-│  trigger_bar → Bar nơi xảy ra breakout              │
 └─────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────┐
-│                  SESSION MANAGEMENT                  │
-│  seeded = true  → Đã khởi tạo cấu trúc xong         │
-│  seeded = false → Chưa hoặc cần khởi tạo lại         │
-│  is_new_session → Đầu phiên mới (Session Seed)      │
+│              ORDER BLOCK (OB) STATE                  │
+│  ob_list: array<OrderBlock> — danh sách tất cả OB   │
+│  ob_boxes: array<box> — pool box cho OB active       │
+│  ob_bull_count / ob_bear_count — tổng OB mỗi loại    │
+│  ob_bull_mitigated / ob_bear_mitigated — số đã lấp   │
 └─────────────────────────────────────────────────────┘
 ```
 
-### Sơ Đồ Máy Trạng Thái (State Machine)
+### UDT `OrderBlock`
 
-```
-                         ┌─────────────┐
-                         │   INIT      │
-                         │  trend = 0  │
-                         └──┬──────┬───┘
-                   close>HH│      │close<LL
-                           ▼      ▼
-                  ┌──────────┐ ┌──────────┐
-                  │ UPTREND  │ │DOWNTREND │
-                  │ trend=1  │ │trend=-1  │
-                  └──┬───┬───┘ └──┬───┬───┘
-        close>HH│    │   │close<HL  │   │close<LL
-       (săn HH) ▼    │   ▼(CHoCH)   │   ▼(săn LL)
-           ┌────────┐│ ┌──────────┐ │┌────────┐
-           │CAND=1  ││ │ CAND=-1  │ ││CAND=-1 │
-           │Săn HH  ││ │Săn LL↓   │ ││Săn LL  │
-           └───┬────┘│ └────┬─────┘ │└───┬────┘
-      close<low│     │      │close>high  │close>high
-       [Xác Nhận]    │      │[CHoCH XN]  │[Xác Nhận]
-               ▼      │      ▼           │    ▼
-        ┌───────────┐ │ ┌───────────┐   │┌───────────┐
-        │NEW HH+HL  │ │ │NEW LL+LH  │   ││NEW LL+LH  │
-        │Xu hướng   │ │ │CHUYỂN SANG│   ││Xu hướng   │
-        │tiếp diễn ▲│ │ │DOWNTREND  │   ││tiếp diễn ▼│
-        └───────────┘ │ └───────────┘   │└───────────┘
-                      │                 │
-        close>lh│    │                 │    │close<hl
-       (săn HH) ▼    │                 │    ▼(CHoCH)
-           ┌────────┐│                 │┌──────────┐
-           │CAND=1  ││                 ││ CAND=1   │
-           │Săn HH↑ ││                 ││Săn HH    │
-           └───┬────┘│                 │└────┬─────┘
-      close<low│     │                 │     │close>high
-       [CHoCH XN]    │                 │     │[CHoCH XN]
-               ▼     │                 │     ▼
-        ┌───────────┐│                 │┌───────────┐
-        │NEW HH+HL  ││                 ││NEW HH+HL  │
-        │CHUYỂN SANG│◄────────────────┘│Xu hướng   │
-        │UPTREND    │                  │tiếp diễn ▲ │
-        └───────────┘                  └───────────┘
+```pinescript
+type OrderBlock
+    int    bar_origin       // bar index của candle gốc
+    float  top              // giá high của candle origin
+    float  bottom           // giá low của candle origin
+    bool   is_bullish       // true = Demand OB, false = Supply OB
+    string source           // "FVG" | "OG" | "VI"
+    bool   is_mitigated     // đã bị mitigation chưa
+    int    bar_mitigation   // bar index lúc mitigation
 ```
 
 ---
@@ -257,70 +305,55 @@ Script chạy một lần duy nhất (hoặc mỗi phiên nếu dùng Session Se
 
 **Pivot Seed**:
 1. Dùng `ta.pivothigh()` và `ta.pivotlow()` với `pivotLength` để tìm pivot
-2. Khi cả Pivot High và Pivot Low đều đã xuất hiện, so sánh `bar_index`:
-   - `ph_bar > pl_bar` → đỉnh xuất hiện sau đáy → **Uptrend**
-   - `pl_bar > ph_bar` → đáy xuất hiện sau đỉnh → **Downtrend**
+2. Khi cả Pivot High và Pivot Low đều đã xuất hiện, so sánh `bar_index`
 3. Gán giá trị cho các biến `hh/hl/ll/lh` tương ứng
 
 **Session Seed**:
 1. Lấy bar đầu tiên của phiên: gán tất cả `hh/hl/ll/lh = bar_index`
-2. `trend = 0` — chưa xác định xu hướng
-3. Chờ breakout (close vượt HH hoặc LL) để xác định trend
+2. `trend = 0`, chờ breakout để xác định trend
 
 ### Bước 2: State Machine (Máy Trạng Thái)
 
-Sau khi seeded, mỗi bar mới đều được đánh giá qua máy trạng thái:
+Sau khi seeded, mỗi bar mới đều được đánh giá qua máy trạng thái để săn HH, HL, LL, LH và phát hiện BoS/CHoCH. Xem sơ đồ chi tiết ở [phần Kiến Trúc Hệ Thống](#kiến-trúc-hệ-thống).
 
-#### Chế Độ IDLE (`cand_type == 0`)
+### Bước 3: Imbalance Detection
 
-Script đang chờ tín hiệu breakout:
-- **Uptrend**: Đợi `close > HH` (bắt đầu săn HH mới) hoặc `close < HL` (CHoCH — cảnh báo đảo chiều)
-- **Downtrend**: Đợi `close < LL` (bắt đầu săn LL mới) hoặc `close > LH` (CHoCH — cảnh báo đảo chiều)
+Mỗi bar, script kiểm tra 3 loại imbalance:
 
-#### Chế Độ SĂN ĐIỂM CỰC TRỊ (`cand_type == 1` hoặc `-1`)
+1. **FVG** (Fair Value Gaps): Mô hình 3 nến — `low > high[2]` (bullish) hoặc `high < low[2]` (bearish), không trùng với OG
+2. **OG** (Opening Gaps): `low > high[1]` (bullish) hoặc `high < low[1]` (bearish)
+3. **VI** (Volume Imbalance): Chồng lấp giữa 2 nến nhưng quan hệ open/close bất thường
 
-Script đang theo dõi một candidate để xác nhận:
+Nếu bật bộ lọc độ rộng, imbalance chỉ được ghi nhận khi gap vượt ngưỡng (theo Points, %, hoặc ATR).
 
-**Săn HH (cand_type == 1 trong Uptrend)**:
-- Mỗi bar mới có `high > cand_high` → cập nhật candidate (bar hiện tại là đỉnh mới)
-- Khi `close < low` của bar candidate → **XÁC NHẬN**: HH form thành
-- Quét toàn bộ range từ HH cũ đến HH mới để tìm HL (đáy thấp nhất)
-- Reset `cand_type = 0` (về chế độ IDLE), tiếp tục uptrend
+### Bước 4: Order Block Creation
 
-**Săn LL (cand_type == -1 trong Downtrend)**:
-- Mỗi bar mới có `low < cand_low` → cập nhật candidate
-- Khi `close > high` của bar candidate → **XÁC NHẬN**: LL form thành
-- Quét toàn bộ range từ LL cũ đến LL mới để tìm LH (đỉnh cao nhất)
-- Reset `cand_type = 0`, tiếp tục downtrend
+Khi một imbalance (FVG/OG/VI) được phát hiện, OB được tạo từ **nến origin** (nến đầu tiên trước gap):
 
-**Săn CHoCH (cand_type ngược trend)**:
-- Uptrend + `cand_type == -1`: Đang săn đảo chiều → săn LL
-- Khi `close > high` của candidate → **CHoCH XÁC NHẬN**: Xu hướng chuyển từ UPTREND → DOWNTREND
-- Downtrend + `cand_type == 1`: Đang săn đảo chiều → săn HH
-- Khi `close < low` của candidate → **CHoCH XÁC NHẬN**: Xu hướng chuyển từ DOWNTREND → UPTREND
+| Imbalance | Origin Bar |
+|---|---|
+| Bullish/Bearish FVG | `bar_index - 2` |
+| Bullish/Bearish OG | `bar_index - 1` |
+| Bullish/Bearish VI | `bar_index - 1` |
 
-### Bước 3: Quét Range
+OB zone = `high[origin]` → `low[origin]`. Box được vẽ với border dashed và kéo dài đến bar hiện tại.
 
-Sau khi một điểm cực trị được xác nhận, script quét toàn bộ range giữa `trigger_bar` và điểm mới:
+Cơ chế FIFO: nếu số OB vượt `max_ob_active`, OB cũ nhất bị xóa (cả khỏi chart và array).
 
-- **HH form thành** → quét range tìm **đáy thấp nhất** (HL mới)
-- **LL form thành** → quét range tìm **đỉnh cao nhất** (LH mới)
+### Bước 5: Mitigation Check
 
-Điều này đảm bảo HL/LH luôn phản ánh chính xác điểm cực trị trong khoảng giữa 2 điểm cấu trúc.
+Mỗi bar, tất cả OB chưa mitigated được kiểm tra:
+- **Bullish OB**: `low <= ob.top` → mitigated
+- **Bearish OB**: `high >= ob.bottom` → mitigated
 
-### Bước 4: Vẽ Đồ Họa
+Khi mitigated: box đóng lại tại nến mitigation, border chuyển sang solid, màu đậm hơn.
 
-Mỗi sự kiện được vẽ ngay lập tức lên chart bằng `line.new()`, `label.new()`:
+### Bước 6: Bộ Lọc Hiển Thị OB
 
-| Sự Kiện | Đường Kẻ | Label | Màu |
-|---|---|---|---|
-| BoS (bull) | Solid ngang | `BoS` | Bullish Color |
-| BoS (bear) | Solid ngang | `BoS` | Bearish Color |
-| CHoCH | Dashed ngang | `CHoCH` | CHoCH Color |
-| HH | — | `HH` (dưới bar) | Bullish Color |
-| HL | — | `HL` (trên bar) | Bullish Color |
-| LL | — | `LL` (trên bar) | Bearish Color |
-| LH | — | `LH` (dưới bar) | Bearish Color |
+Dựa vào `ob_filter_mode`:
+- **All**: Hiển thị cả OB active (dashed, mờ) và OB mitigated (solid, đậm)
+- **Active**: Chỉ hiển thị OB chưa bị mitigation
+- **Mitigated**: Chỉ hiển thị OB đã bị mitigation
 
 ---
 
@@ -343,44 +376,151 @@ Mỗi sự kiện được vẽ ngay lập tức lên chart bằng `line.new()`,
                                     LL ▼
 ```
 
-**Chú giải ký hiệu**:
-- `───` Solid line = BoS (phá vỡ cùng chiều xu hướng)
-- `- - -` Dashed line = CHoCH (phá vỡ ngược chiều, đảo xu hướng)
-- `██` Label dưới bar = HH hoặc LH (đỉnh)
-- `▲` Label trên bar = HL (đáy trong uptrend)
-- `▼` Label trên bar = LL (đáy trong downtrend)
+| Ký Hiệu | Ý Nghĩa |
+|---|---|
+| `───` Solid line | BoS — phá vỡ cùng chiều xu hướng |
+| `- - -` Dashed line | CHoCH — phá vỡ ngược chiều |
+| `██` Label dưới bar | HH hoặc LH (đỉnh) |
+| `▲` Label trên bar | HL (đáy trong uptrend) |
+| `▼` Label trên bar | LL (đáy trong downtrend) |
+| ▓▓ Box tô màu | FVG hoặc OG zone |
+| ▯ Box viền dotted | VI zone |
+| ▣ Box dashed | OB active |
+| ▣ Box solid | OB mitigated |
 
 ### Ví Dụ Kịch Bản Giao Dịch
 
-#### Kịch bản 1: Mua theo Uptrend
+#### Kịch bản 1: Mua theo Uptrend + OB Demand + Discount
 
-1. Xuất hiện BoS (đường xanh solid) → xác nhận xu hướng tăng
-2. HH và HL liên tiếp được đánh dấu → cấu trúc uptrend vững
-3. Dashboard hiển thị vị trí Discount (<50%) → giá đang ở vùng rẻ
-4. → **Cân nhắc vào lệnh BUY** khi giá ở vùng Discount, dừng lỗ dưới HL gần nhất
+1. Dashboard hiển thị BULLISH → uptrend
+2. OB Demand (bullish) xuất hiện → vùng cầu tiềm năng
+3. Dashboard hiển thị vị trí Discount (<50%) → giá đang rẻ
+4. → **Cân nhắc BUY** khi giá retest OB Demand ở vùng Discount
 
-#### Kịch bản 2: Bán khi CHoCH xuất hiện
+#### Kịch bản 2: Bán khi CHoCH + OB Supply + Premium
 
-1. Đang trong uptrend, HL bị phá vỡ → xuất hiện CHoCH (đường cam dashed)
-2. Sau CHoCH, xuất hiện LL và LH → cấu trúc chuyển sang downtrend
-3. Dashboard chuyển từ BULLISH → BEARISH
-4. → **Cân nhắc vào lệnh SELL** sau khi CHoCH được xác nhận
+1. Đang trong uptrend, HL bị phá vỡ → xuất hiện CHoCH
+2. Dashboard chuyển sang BEARISH
+3. OB Supply (bearish) xuất hiện ở vùng Premium
+4. → **Cân nhắc SELL** khi giá retest OB Supply
 
-#### Kịch bản 3: Chốt lời theo Premium/Discount
+---
 
-1. Đang trong uptrend, giá ở vùng Premium (>50%)
-2. Giá gần Swing High → vùng quá mua
-3. → **Cân nhắc chốt lời** hoặc giảm vị thế
+## Imbalance Detection (FVG / OG / VI)
+
+### Fair Value Gaps (FVG)
+
+**Bullish FVG**: `low[0] > high[2]` và `close[1] > high[2]`
+```
+Nến 1  Nến 2  Nến 3
+  ┌─┐   ┌─┐
+  │ │   │ │   ┌─┐
+  │ │   │ │   │ │  ← gap giữa high[2] và low[0]
+  │ │   │ │   │ │
+  └─┘   │ │   │ │
+        │ │   └─┘
+        └─┘
+  ← FVG zone (vùng giá chưa được giao dịch)
+```
+Vẽ: Box tô màu + đường midline, kéo dài `fvg_extend` bars.
+
+**Bearish FVG**: `high[0] < low[2]` và `close[1] < low[2]`
+```
+Nến 1  Nến 2  Nến 3
+        ┌─┐   ┌─┐
+  ┌─┐   │ │   │ │
+  │ │   │ │   │ │
+  │ │   │ │   │ │  ← gap giữa low[2] và high[0]
+  └─┘   │ │   └─┘
+        └─┘
+  ← FVG zone
+```
+
+### Opening Gaps (OG)
+
+**Bullish OG**: `low[0] > high[1]` — giá mở cửa cao hơn toàn bộ nến trước
+**Bearish OG**: `high[0] < low[1]` — giá mở cửa thấp hơn toàn bộ nến trước
+
+Vẽ: Box tô màu với text "OG", kéo dài `og_extend` bars.
+
+### Volume Imbalance (VI)
+
+XYảy ra khi 2 nến chồng lấp nhưng có sự bất thường trong quan hệ open/close:
+
+**Bullish VI**: `open > close[1]` và `high[1] > low` và `close > close[1]` và `open > open[1]` và `high[1] < min(close, open)`
+
+**Bearish VI**: `open < close[1]` và `low[1] < high` và `close < close[1]` và `open < open[1]` và `low[1] > max(close, open)`
+
+Vẽ: Box viền dotted (không tô nền), kéo dài `vi_extend` bars.
+
+---
+
+## Order Blocks (OB)
+
+### Khái Niệm
+
+OB là vùng giá của **nến origin** — nến đầu tiên trong chuỗi tạo ra imbalance. Đây là nơi các tổ chức lớn (smart money) đặt lệnh, tạo ra vùng cung/cầu mạnh.
+
+### Vòng Đời OB
+
+```
+Imbalance xuất hiện
+       │
+       ▼
+┌─────────────┐
+│   ACTIVE    │  ← Box dashed, kéo dài đến bar hiện tại
+└─────────────┘
+       │  Khi wick chạm vùng OB
+       ▼
+┌─────────────┐
+│  MITIGATED  │  ← Box solid, đóng tại nến mitigation
+└─────────────┘
+```
+
+### OB Creation
+
+| Loại Imbalance | Origin Candle | OB Zone |
+|---|---|---|
+| Bullish FVG | `bar_index - 2` | `high[2] → low[2]` |
+| Bearish FVG | `bar_index - 2` | `high[2] → low[2]` |
+| Bullish OG | `bar_index - 1` | `high[1] → low[1]` |
+| Bearish OG | `bar_index - 1` | `high[1] → low[1]` |
+| Bullish VI | `bar_index - 1` | `high[1] → low[1]` |
+| Bearish VI | `bar_index - 1` | `high[1] → low[1]` |
+
+### Mitigation Rules
+
+| OB Type | Điều Kiện Mitigation |
+|---|---|
+| **Bullish (Demand)** | `low <= ob.top` |
+| **Bearish (Supply)** | `high >= ob.bottom` |
+
+### Bộ Lọc Hiển Thị
+
+| Chế Độ | Active OB | Mitigated OB |
+|---|---|---|
+| **All** | Hiện (dashed, mờ) | Hiện (solid, đậm) |
+| **Active** | Hiện | Ẩn |
+| **Mitigated** | Ẩn | Hiện |
+
+### Quota Control
+
+Indicator có giới hạn 500 boxes. Để tránh vượt quota:
+- `max_ob_active` (mặc định 30) giới hạn số OB active hiển thị
+- Khi vượt, OB cũ nhất bị xóa tự động (FIFO)
+- Đặt `max_ob_active = 0` để tắt giới hạn (không khuyến nghị)
 
 ---
 
 ## Bảng Thống Kê (Dashboard)
 
-Dashboard hiển thị ở góc trên bên phải chart, cập nhật real-time:
+### Dashboard SMC
+
+Hiển thị ở góc trên bên phải:
 
 ```
 ┌──────────────────────────┐
-│ THÔNG SỐ SMC  │ BULLISH  │  ← Tiêu đề + Trạng thái xu hướng
+│ THÔNG SỐ SMC  │ BULLISH  │
 ├──────────────────────────┤
 │ HH Price      │ 1,250.50 │  ← Swing High hiện tại
 ├──────────────────────────┤
@@ -392,22 +532,53 @@ Dashboard hiển thị ở góc trên bên phải chart, cập nhật real-time:
 └──────────────────────────┘
 ```
 
-| Hàng | Ý Nghĩa |
-|---|---|
-| **Hàng 1** | Tiêu đề bảng + Trạng thái BULLISH (xanh) hoặc BEARISH (đỏ) |
-| **Hàng 2** | Giá Swing High — HH (uptrend) hoặc LH (downtrend) |
-| **Hàng 3** | Giá Swing Low — HL (uptrend) hoặc LL (downtrend) |
-| **Hàng 4** | Vị trí % của giá trong Swing **(quan trọng nhất cho entry)** |
-
 ### Cách Đọc Vị Trí Premium/Discount
 
 | % | Ý Nghĩa | Hành Động |
 |---|---|---|
 | **0–25%** | Discount sâu (giá rẻ) | Cân nhắc BUY (trong uptrend) |
 | **25–50%** | Discount (giá hợp lý) | Có thể BUY |
-| **50%** | Midpoint (cân bằng) | Trung lập, chờ xác nhận |
+| **50%** | Midpoint (cân bằng) | Trung lập |
 | **50–75%** | Premium (giá đắt) | Có thể SELL (trong downtrend) |
 | **75–100%** | Premium sâu (giá rất đắt) | Cân nhắc SELL hoặc chốt lời BUY |
+
+### Dashboard Imbalance/OB
+
+Hiển thị ở góc dưới bên phải (tắt mặc định, bật trong Settings):
+
+```
+┌──────────┬──────────┬──────────┬──────────┬──────────┐
+│          │  〓 FVG  │  ◼ OG   │  ⬚ VI   │  ▣ OB   │
+├──────────┼──────────┼──────────┼──────────┼──────────┤
+│ Bullish  │ Tần Suất │    15    │    3     │    8     │   26    │
+│          │ Đã Lấp   │   60%    │   33%    │   50%    │   42%   │
+├──────────┼──────────┼──────────┼──────────┼──────────┤
+│ Bearish  │ Tần Suất │    12    │    2     │    7     │   21    │
+│          │ Đã Lấp   │   50%    │   50%    │   43%    │   38%   │
+└──────────┴──────────┴──────────┴──────────┴──────────┘
+```
+
+| Cột | Ý Nghĩa |
+|---|---|
+| **〓 FVG** | Fair Value Gaps — tần suất và % đã lấp bởi giá |
+| **◼ OG** | Opening Gaps |
+| **⬚ VI** | Volume Imbalances |
+| **▣ OB** | Order Blocks — thống kê active + mitigated |
+
+Bảng sử dụng nền tối `#1e222d` (không transparency) để đảm bảo độ tương phản cao trên mọi nền chart (kể cả nền trắng).
+
+### Alert Conditions
+
+Indicator cung cấp 10 alert conditions có thể dùng để tạo cảnh báo trên TradingView:
+
+| Alert | Kích Hoạt Khi |
+|---|---|
+| **Bullish FVG** | Xuất hiện Fair Value Gap tăng |
+| **Bearish FVG** | Xuất hiện Fair Value Gap giảm |
+| **Bullish OG** | Xuất hiện Opening Gap tăng |
+| **Bearish OG** | Xuất hiện Opening Gap giảm |
+| **Bullish VI** | Xuất hiện Volume Imbalance tăng |
+| **Bearish VI** | Xuất hiện Volume Imbalance giảm |
 
 ---
 
@@ -417,30 +588,30 @@ Dashboard hiển thị ở góc trên bên phải chart, cập nhật real-time:
 
 | Khung Thời Gian | Seed Mode Khuyên Dùng | Ghi Chú |
 |---|---|---|
-| **1m, 5m, 15m** | `Session Seed` | Phân tích intraday, reset mỗi phiên |
-| **30m, 1H** | `Pivot Seed` hoặc `Session Seed` | Linh hoạt cả hai |
-| **4H, Daily, Weekly** | `Pivot Seed` | Phân tích swing dài hạn |
+| **1m, 5m, 15m** | `Session Seed` | Phân tích intraday |
+| **30m, 1H** | `Pivot Seed` hoặc `Session Seed` | Linh hoạt |
+| **4H, Daily, Weekly** | `Pivot Seed` | Swing dài hạn |
 
 ### Bước 2: Điều Chỉnh Pivot Length
 
-- `pivotLength = 3–5`: Nhạy hơn, phát hiện nhiều cấu trúc nhỏ (scalping)
-- `pivotLength = 7–10`: Trung bình, phù hợp swing trade
-- `pivotLength = 15–30`: Chậm hơn, chỉ bắt các cấu trúc lớn (position trade)
+- `pivotLength = 3–5`: Nhạy, phát hiện nhiều cấu trúc nhỏ (scalping)
+- `pivotLength = 7–10`: Trung bình (swing trade)
+- `pivotLength = 15–30`: Chậm, chỉ bắt cấu trúc lớn (position trade)
 
 ### Bước 3: Đọc Tín Hiệu
 
-1. **Xác định xu hướng** từ Dashboard (BULLISH/BEARISH) và chuỗi HH/HL hoặc LL/LH
-2. **Tìm điểm entry** dựa vào vị trí Premium/Discount:
-   - Uptrend + Discount = cơ hội BUY
-   - Downtrend + Premium = cơ hội SELL
-3. **Xác nhận bằng BoS**: BoS mới xuất hiện = xu hướng còn mạnh
-4. **Cảnh báo bằng CHoCH**: CHoCH xuất hiện = cân nhắc thoát lệnh hoặc chuẩn bị đảo chiều
+1. **Xác định xu hướng** từ Dashboard và chuỗi HH/HL hoặc LL/LH
+2. **Quan sát OB** mới hình thành — đây là vùng giá tiềm năng cho entry
+3. **Kiểm tra vị trí Premium/Discount**:
+   - Uptrend + OB Demand ở Discount = tín hiệu BUY mạnh
+   - Downtrend + OB Supply ở Premium = tín hiệu SELL mạnh
+4. **Theo dõi OB mitigation**: OB bị mitigated → vùng cung/cầu đã được hấp thụ
 
 ### Bước 4: Quản Lý Rủi Ro
 
-- **Stop Loss trong Uptrend**: Dưới HL gần nhất
-- **Stop Loss trong Downtrend**: Trên LH gần nhất
-- **Take Profit**: Khi giá chạm vùng Premium (uptrend) hoặc Discount (downtrend)
+- **Stop Loss**: Dưới HL gần nhất (uptrend) / Trên LH gần nhất (downtrend)
+- **Take Profit**: Vùng Premium (uptrend) hoặc Discount (downtrend)
+- **Không giao dịch**: Khi OB đã bị mitigated (vùng giá không còn hiệu lực)
 
 ---
 
@@ -450,25 +621,23 @@ Dashboard hiển thị ở góc trên bên phải chart, cập nhật real-time:
 
 | Hạn Chế | Mô Tả | Cách Xử Lý |
 |---|---|---|
-| **Repainting** | `ta.pivothigh()`/`ta.pivotlow()` có độ trễ `pivotLength` bar, pivot có thể biến mất khi giá thay đổi | Dùng `barstate.isconfirmed` kiểm tra bar đã đóng |
-| **Vòng lặp `for`** | Các vòng quét range có thể nặng với cấu trúc dài | Đã giới hạn scope trong `trigger_bar → confirm_bar` |
-| **Giới hạn 500 objects** | TradingView giới hạn 500 lines và 500 labels | Đã khai báo `max_lines_count=500`, `max_labels_count=500`. Khi đầy, các đối tượng cũ sẽ tự động bị xóa |
-| **Không có historical labels** | Chỉ nhìn thấy cấu trúc từ thời điểm thêm indicator | Đây là hạn chế cố hữu của Pine Script, không thể vẽ lại quá khứ từ đầu chart |
-| **Session Seed chỉ dùng cho intraday** | Sẽ `runtime.error` nếu dùng Daily+ | Chuyển sang Pivot Seed cho timeframe lớn |
+| **Repainting** | `ta.pivothigh()`/`ta.pivotlow()` có độ trễ `pivotLength` bar | Dùng `barstate.isconfirmed` |
+| **Giới hạn 500 boxes** | FVG xuất hiện thường xuyên → dễ hết quota | Dùng `max_ob_active` và tắt bớt loại imbalance khi cần |
+| **Giới hạn 500 lines** | FVG midline + BoS/CHoCH cùng chia sẻ quota | Tắt FVG khi không cần, hoặc đặt `fvg_extend=0` |
+| **Giới hạn 500 labels** | HH/HL + BoS/CHoCH labels | Thường không phải vấn đề |
+| **Không có historical labels** | Chỉ thấy cấu trúc từ lúc thêm indicator | Hạn chế cố hữu của Pine Script |
 
 ### Cạm Bẫy Thường Gặp
 
-1. **CHoCH không có nghĩa là đảo chiều ngay lập tức**: CHoCH là tín hiệu cảnh báo sớm, thị trường có thể sideway hoặc retest trước khi đảo chiều thực sự.
+1. **CHoCH ≠ đảo chiều ngay**: CHoCH là cảnh báo sớm, thị trường có thể sideway trước khi đảo chiều.
 
-2. **Không giao dịch chỉ dựa trên 1 tín hiệu**: Market Structure nên được kết hợp với:
-   - Volume profile / Order block
-   - Liquidity sweep / Stop hunt
-   - FVG (Fair Value Gap)
-   - Các chỉ báo xác nhận khác (RSI divergence, volume spike)
+2. **Không giao dịch chỉ dựa trên 1 tín hiệu**: Market Structure nên kết hợp với OB, volume, RSI divergence.
 
-3. **Sideway market**: Trong thị trường đi ngang, BoS và CHoCH có thể xuất hiện liên tục (whipsaw), tạo tín hiệu nhiễu.
+3. **Sideway market**: BoS và CHoCH xuất hiện liên tục → tín hiệu nhiễu.
 
-4. **Khung thời gian thấp**: 1m-5m có nhiều nhiễu. Nên dùng multi-timeframe analysis: xác định xu hướng trên H1/H4, tìm entry trên M5/M15.
+4. **Khung thời gian thấp**: 1m-5m có nhiều nhiễu. Xác định trend trên H1/H4, tìm entry trên M5/M15.
+
+5. **OB đã mitigated**: Vùng OB đã bị giá xuyên qua không còn hiệu lực làm hỗ trợ/kháng cự.
 
 ---
 
@@ -478,79 +647,54 @@ Bản **SMC Market Structure + MTF** (`smc_market_structure_mtf.pine`) bổ sung
 
 ### Cách Hoạt Động
 
-Bảng MTF hiển thị trend (BULL/BEAR/WAIT) kèm theo giá trị Swing High/Low cho từng khung thời gian được chọn. Logic xác định trend dùng **trend score** dựa trên chuỗi 3 pivot:
+Bảng MTF hiển thị trend (BULL/BEAR/WAIT) kèm Swing High/Low cho từng khung thời gian. Logic dùng **trend score** từ chuỗi 3 pivot:
 
 ```
-Với mỗi pivot trong chuỗi:
-  HH → +1,  LH → -1
-  HL → +1,  LL → -1
-
+Với mỗi pivot: HH → +1, LH → -1, HL → +1, LL → -1
 Tổng score:
-  >= +2  →  BULL (cần ít nhất 2/4 tín hiệu đồng thuận)
+  >= +2  →  BULL
   <= -2  →  BEAR
-  -1..+1 →  Giữ trend cũ (không đủ mạnh để đổi)
+  -1..+1 →  Giữ trend cũ
 ```
-
-Cách tiếp cận này chống nhiễu tốt hơn so với việc chỉ so sánh 2 pivot đơn lẻ. Trend chỉ thay đổi khi có đủ tín hiệu xác nhận từ chuỗi pivot — bám sát nguyên lý state machine của indicator chính.
-
-### Cấu Trúc Bảng MTF
-
-```
-┌────────────────────────────────────────┐
-│         MTF TREND                      │
-├────────┬─────────┬─────────────────────┤
-│  D1    │  BULL   │ HH/HL: 1250 / 1180  │
-├────────┼─────────┼─────────────────────┤
-│  4H    │  BEAR   │ LH/LL: 1220 / 1150  │
-├────────┼─────────┼─────────────────────┤
-│  1H    │  WAIT   │ PH/PL: 1210 / 1165  │
-└────────┴─────────┴─────────────────────┘
-```
-
-| Cột | Nội Dung |
-|---|---|
-| **TF** | Tên khung thời gian |
-| **Trend** | BULL (xanh) / BEAR (đỏ) / WAIT (xám) |
-| **Swing** | Nhãn cấu trúc (HH/HL, LH/LL, hoặc PH/PL nếu WAIT) + giá trị |
-
-### Hiệu Năng
-
-- Khi `show_mtf = false` (tắt MTF): script không gọi `request.security()` → chạy nhẹ ngang bản base
-- Khi `show_mtf = true`: mỗi TF active gọi 1 `request.security()`, tối đa 3 lần
-- Có thể chọn "None" cho từng TF để giảm số lượng request
 
 ### So Sánh 2 Phiên Bản
 
-| | Base (v1.2) | MTF (v1.4) |
+| | Base (v1.4) | MTF (v1.4) |
 |---|---|---|
 | **File** | `indicators/smc_market_structure.pine` | `indicators/smc_market_structure_mtf.pine` |
-| **Input groups** | 5 (Tham Số Chính, BoS, CHoCH, Label, Dashboard) | 6 (+ Multi-Timeframe) |
-| **MTF toggle** | Không có | Có (`show_mtf`) |
-| **request.security()** | 0 | 0–3 (tùy số TF active) |
+| **Input groups** | 11 | 12 (+ Multi-Timeframe) |
+| **request.security()** | 0 | 0–3 |
 | **Phù hợp** | Máy yếu, chart đơn giản | Phân tích đa khung thời gian |
 
 ---
 
 ## Kế Hoạch Phát Triển
 
+### v1.4 (Đã Hoàn Thành — 2026-06-21)
+
+- [x] FVG (Fair Value Gap) detection + visualization
+- [x] OG (Opening Gap) detection + visualization
+- [x] VI (Volume Imbalance) detection + visualization
+- [x] Order Block (OB) detection từ FVG/OG/VI
+- [x] OB mitigation tracking + visualization
+- [x] Bộ lọc hiển thị OB (All / Active / Mitigated)
+- [x] Dashboard imbalance thống kê FVG + OG + VI + OB
+- [x] Alert conditions cho FVG, OG, VI
+- [x] Tối ưu giao diện bảng cho nền chart sáng
+- [x] Cơ chế giới hạn drawing objects (max_ob_active)
+
 ### v1.5 (Dự Kiến)
 
-- [ ] Thêm FVG (Fair Value Gap) detection
-- [ ] Thêm Order Block detection
-- [ ] Cảnh báo (alertcondition) cho BoS và CHoCH
-- [x] Multi-timeframe dashboard (hiển thị cấu trúc của timeframe cao hơn) ✓ Đã hoàn thành v1.4
-
-### v1.2 (Dự Kiến)
-
-- [ ] Chuyển đổi sang Strategy để backtest
+- [ ] Chuyển đổi sang Strategy để backtest tín hiệu OB
 - [ ] Liquidity sweep detection
 - [ ] Tự động vẽ trendline nối các điểm cấu trúc
-- [ ] Hỗ trợ Inducement (IDM) — cấu trúc phụ để tinh chỉnh entry
+- [ ] Inducement (IDM) — cấu trúc phụ để tinh chỉnh entry
+- [ ] Tín hiệu Buy/Sell dựa trên OB + Market Structure + Premium/Discount
 
 ### Ý Tưởng Xa Hơn
 
-- [ ] ICT Killzone highlight (London Open, New York Open, etc.)
-- [ ] Tích hợp với Volume Profile
+- [ ] ICT Killzone highlight (London Open, New York Open)
+- [ ] Tích hợp Volume Profile
 - [ ] Export thành Library để tái sử dụng
 
 ---
@@ -558,5 +702,5 @@ Cách tiếp cận này chống nhiễu tốt hơn so với việc chỉ so sán
 ## Tham Khảo
 
 - [Pine Script v6 Documentation](https://www.tradingview.com/pine-script-docs/en/v6/)
-- [Pine Script v6 Migration Guide](https://www.tradingview.com/pine-script-docs/en/v6/migration_guides/from_v5_to_v6.html)
-- Smart Money Concepts (SMC) — phương pháp giao dịch phổ biến trong cộng đồng Forex/Crypto, dựa trên hành vi của tổ chức lớn.
+- Smart Money Concepts (SMC) — phương pháp giao dịch dựa trên hành vi của tổ chức lớn
+- Imbalance Detector logic adapted from LuxAlgo (CC BY-NC-SA 4.0)

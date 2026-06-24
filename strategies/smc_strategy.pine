@@ -1,0 +1,896 @@
+//@version=6
+// ─── SMC Strategy — Chiến lược giao dịch dựa trên Smart Money Concepts ───
+// Tác giả: TV Pine
+// Ngày tạo: 2026-06-21
+// Phiên bản: 1.0
+// Mô tả: Strategy backtest dựa trên SMC Market Structure, Order Blocks,
+//        Premium/Discount, với 3 chế độ entry, SL/TP linh hoạt, trailing stop.
+// Logic core sao chép từ indicators/smc_market_structure.pine v1.4
+strategy(
+    title="SMC Strategy",
+    shorttitle="SMC_STRATEGY",
+    overlay=true,
+    initial_capital=100000000,       // 100 triệu VND
+    default_qty_type=strategy.cash,
+    default_qty_value=100000000,
+    commission_type=strategy.commission.percent,
+    commission_value=0.15,
+    slippage=2,
+    pyramiding=1
+)
+
+// ╔══════════════════════════════════════════╗
+// ║              INPUTS — Strategy           ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Backtest Date Filter ───
+use_date_filter = input.bool(false, "Lọc Theo Ngày", group="Backtest")
+start_date      = input.time(timestamp("01 Jan 2020"), "Ngày Bắt Đầu", group="Backtest")
+end_date        = input.time(timestamp("31 Dec 2026"), "Ngày Kết Thúc", group="Backtest")
+
+// ─── Seed Mode ───
+seedMode = input.string(
+    "Pivot Seed",
+    "Seed Mode",
+    options=["Pivot Seed", "Session Seed"],
+    group="Tham Số Chính"
+)
+
+pivotLength = input.int(
+    5,
+    "Pivot Length (cho Pivot Seed)",
+    minval=2,
+    maxval=50,
+    group="Tham Số Chính"
+)
+
+// ─── Entry Tín Hiệu ───
+entry_ob_retest   = input.bool(true, "OB Retest",       group="Tín Hiệu Vào Lệnh")
+entry_new_ob      = input.bool(true, "OB Mới Hình Thành", group="Tín Hiệu Vào Lệnh")
+entry_bos_choch   = input.bool(false, "BoS/CHoCH + OB",   group="Tín Hiệu Vào Lệnh")
+
+// ─── Bộ Lọc Vào Lệnh ───
+use_zone_filter  = input.bool(true, "Lọc Premium/Discount Zone", group="Bộ Lọc")
+long_in_discount  = input.bool(true, "Long Chỉ Ở Discount (<50%)", group="Bộ Lọc")
+short_in_premium  = input.bool(true, "Short Chỉ Ở Premium (>50%)", group="Bộ Lọc")
+
+// ─── OB Settings ───
+show_ob          = input.bool(true, "Hiển Thị OB",                  group="OB")
+max_ob_active    = input.int(30, "Số OB Active Tối Đa", minval=0, maxval=100, group="OB")
+ob_bull_color    = input.color(#089981, "Màu OB Tăng (Demand)",     group="OB")
+ob_bear_color    = input.color(#f23645, "Màu OB Giảm (Supply)",     group="OB")
+ob_transparency  = input.int(70, "Độ Trong Suốt OB Active", minval=0, maxval=100, group="OB")
+
+// ─── Imbalance Detection ───
+show_fvg          = input.bool(true, "Phát Hiện FVG", group="Imbalance")
+show_og           = input.bool(true, "Phát Hiện OG",  group="Imbalance")
+show_vi           = input.bool(true, "Phát Hiện VI",  group="Imbalance")
+imb_usewidth      = input.bool(false, "Lọc Độ Rộng Tối Thiểu", group="Imbalance")
+imb_gapwidth      = input.float(0, "Độ Rộng Tối Thiểu",        group="Imbalance")
+imb_width_method  = input.string("Points", "Đơn Vị",
+    options=["Points", "%", "ATR"], group="Imbalance")
+
+// ─── Risk Management ───
+risk_percent      = input.float(2.0, "% Vốn Rủi Ro Mỗi Lệnh", minval=0.1, maxval=10, step=0.1, group="Quản Lý Vốn")
+rr_ratio          = input.float(2.0, "Risk:Reward Ratio", minval=0.5, maxval=5.0, step=0.1, group="Quản Lý Vốn")
+sl_mode           = input.string("Swing Point", "Chế Độ SL",
+    options=["Swing Point", "ATR"], group="Quản Lý Vốn")
+sl_atr_mult       = input.float(1.5, "SL: ATR Multiplier", minval=0.5, maxval=5.0, step=0.1, group="Quản Lý Vốn")
+sl_atr_length     = input.int(14, "SL: ATR Length", minval=5, maxval=50, group="Quản Lý Vốn")
+
+// ─── Trailing Stop ───
+use_trailing      = input.bool(true, "Dùng Trailing Stop", group="Trailing Stop")
+trail_to_hl       = input.bool(true, "Trail Về HL/LL Mới", group="Trailing Stop")
+
+// ─── Exits ───
+exit_on_choch     = input.bool(true, "Thoát Khi CHoCH Ngược", group="Thoát Lệnh")
+exit_on_ob_mit    = input.bool(false, "Thoát Khi OB Bị Mitigation", group="Thoát Lệnh")
+
+// ╔══════════════════════════════════════════╗
+// ║           BIẾN TRẠNG THÁI                ║
+// ╚══════════════════════════════════════════╝
+
+var int trend       = 0   // 1 = UPTREND, -1 = DOWNTREND, 0 = INIT
+var int hh_bar      = na
+var float hh_price  = na
+var int hl_bar      = na
+var float hl_price  = na
+var int ll_bar      = na
+var float ll_price  = na
+var int lh_bar      = na
+var float lh_price  = na
+
+// Candidate hunting
+var int cand_bar    = na
+var float cand_high = na
+var float cand_low  = na
+var int cand_type   = 0   // 1 = săn HH, -1 = săn LL, 0 = không hoạt động
+var int trigger_bar = na
+
+// Session management
+var bool seeded     = false
+is_new_session      = timeframe.isminutes and session.isfirstbar_regular
+
+// ╔══════════════════════════════════════════╗
+// ║        ORDER BLOCK (OB) STATE            ║
+// ╚══════════════════════════════════════════╝
+
+type OrderBlock
+    int    bar_origin       // bar index của candle gốc
+    float  top              // giá high của candle origin
+    float  bottom           // giá low của candle origin
+    bool   is_bullish       // true = Demand OB, false = Supply OB
+    string source           // "FVG" | "OG" | "VI"
+    bool   is_mitigated     // đã bị mitigation chưa
+    int    bar_mitigation   // bar index lúc mitigation (na nếu chưa)
+
+var array<OrderBlock> ob_list           = array.new<OrderBlock>()
+var array<box>        ob_boxes          = array.new_box(0)
+var int               ob_bull_count      = 0
+var int               ob_bear_count      = 0
+var int               ob_bull_mitigated  = 0
+var int               ob_bear_mitigated  = 0
+
+// ─── Theo dõi OB của lệnh đang mở ───
+var int    entry_ob_idx     = na  // index trong ob_list của OB dùng để vào lệnh
+var bool   in_trade         = false
+var float  entry_price_val  = na
+var float  sl_price_val     = na
+var float  tp_price_val     = na
+var int    entry_direction  = 0   // 1 = Long, -1 = Short
+
+// ╔══════════════════════════════════════════╗
+// ║   BACKTEST DATE FILTER                   ║
+// ╚══════════════════════════════════════════╝
+
+bool in_date_range = not use_date_filter or (time >= start_date and time <= end_date)
+
+// ╔══════════════════════════════════════════╗
+// ║      TIMEFRAME CHECK & RESET             ║
+// ╚══════════════════════════════════════════╝
+
+if seedMode == "Session Seed" and not timeframe.isminutes
+    runtime.error("Session Seed chỉ áp dụng cho khung thời gian phút (< 1 giờ)!")
+
+if seedMode == "Session Seed" and is_new_session
+    trend     := 0
+    seeded    := false
+    hh_bar    := na
+    hh_price  := na
+    hl_bar    := na
+    hl_price  := na
+    ll_bar    := na
+    ll_price  := na
+    lh_bar    := na
+    lh_price  := na
+    cand_type := 0
+    cand_bar  := na
+
+// ╔══════════════════════════════════════════╗
+// ║           SEEDING LOGIC                  ║
+// ╚══════════════════════════════════════════╝
+
+if not seeded
+    if seedMode == "Pivot Seed"
+        ph = ta.pivothigh(pivotLength, pivotLength)
+        pl = ta.pivotlow(pivotLength, pivotLength)
+
+        var int last_ph_bar = na
+        var float last_ph_val = na
+        var int last_pl_bar = na
+        var float last_pl_val = na
+
+        if not na(ph)
+            last_ph_bar := bar_index - pivotLength
+            last_ph_val := ph
+        if not na(pl)
+            last_pl_bar := bar_index - pivotLength
+            last_pl_val := pl
+
+        if not na(last_ph_bar) and not na(last_pl_bar)
+            if last_ph_bar > last_pl_bar
+                trend    := 1
+                hh_bar   := last_ph_bar
+                hh_price := last_ph_val
+                hl_bar   := last_pl_bar
+                hl_price := last_pl_val
+                seeded   := true
+            else
+                trend    := -1
+                ll_bar   := last_pl_bar
+                ll_price := last_pl_val
+                lh_bar   := last_ph_bar
+                lh_price := last_ph_val
+                seeded   := true
+
+    else if seedMode == "Session Seed"
+        hh_bar   := bar_index
+        hh_price := high
+        hl_bar   := bar_index
+        hl_price := low
+        ll_bar   := bar_index
+        ll_price := low
+        lh_bar   := bar_index
+        lh_price := high
+        seeded   := true
+
+// ╔══════════════════════════════════════════╗
+// ║      HÀM HELPER — IMBALANCE              ║
+// ╚══════════════════════════════════════════╝
+
+float atr_val = ta.atr(200)
+
+imbalance_detection(bool show, bool usewidth, string method, float width, float top, float btm, bool condition) =>
+    var bool is_width = true
+    var int  count    = 0
+
+    if usewidth
+        float dist = top - btm
+        is_width := switch method
+            "Points" => dist > width
+            "%"      => dist / btm * 100 > width
+            "ATR"    => dist > atr_val * width
+
+    bool is_true = show and condition and is_width
+    count += is_true ? 1 : 0
+
+    [is_true, count]
+
+// ╔══════════════════════════════════════════╗
+// ║     STATE MACHINE & CANDIDATE HUNTING    ║
+// ╚══════════════════════════════════════════╝
+
+// Biến BoS/CHoCH flag cho entry signal
+var bool bull_bos_just_formed = false
+var bool bear_bos_just_formed = false
+var bool choch_just_formed    = false  // true = CHoCH sang bullish, false nếu sang bearish
+var int  choch_direction      = 0      // 1 = lên Uptrend, -1 = xuống Downtrend
+
+// Reset flags mỗi bar
+bull_bos_just_formed := false
+bear_bos_just_formed := false
+choch_just_formed    := false
+choch_direction      := 0
+
+if seeded
+
+    // ─── CASE 0: KHỞI TẠO (Chưa rõ Trend) ───
+    if trend == 0
+        if close > hh_price
+            cand_type   := 1
+            cand_bar    := bar_index
+            cand_high   := high
+            trigger_bar := bar_index
+            trend       := 1
+            bull_bos_just_formed := true
+
+        else if close < ll_price
+            cand_type   := -1
+            cand_bar    := bar_index
+            cand_low    := low
+            trigger_bar := bar_index
+            trend       := -1
+            bear_bos_just_formed := true
+
+    // ─── CASE 1: UPTREND ───
+    else if trend == 1
+
+        if cand_type == 0
+            if close > hh_price
+                cand_type   := 1
+                cand_bar    := bar_index
+                cand_high   := high
+                trigger_bar := hh_bar
+                bull_bos_just_formed := true
+
+            else if close < hl_price
+                cand_type   := -1
+                cand_bar    := bar_index
+                cand_low    := low
+                trigger_bar := hl_bar
+                choch_just_formed := true
+                choch_direction   := -1
+
+        else if cand_type == 1
+            if high > cand_high
+                cand_bar  := bar_index
+                cand_high := high
+            else if close < low[bar_index - cand_bar]
+                int new_hh_bar = cand_bar
+                float new_hh_price = cand_high
+
+                int start_scan = trigger_bar
+                int end_scan = new_hh_bar
+                int lowest_b = start_scan
+                float lowest_l = low[bar_index - start_scan]
+
+                for i = start_scan to end_scan
+                    if low[bar_index - i] < lowest_l
+                        lowest_l := low[bar_index - i]
+                        lowest_b := i
+
+                hl_bar   := lowest_b
+                hl_price := lowest_l
+
+                hh_bar    := new_hh_bar
+                hh_price  := new_hh_price
+                cand_type := 0
+
+        else if cand_type == -1
+            if low < cand_low
+                cand_bar := bar_index
+                cand_low := low
+            else if close > high[bar_index - cand_bar]
+                int new_ll_bar = cand_bar
+                float new_ll_price = cand_low
+
+                int start_scan = trigger_bar
+                int end_scan = new_ll_bar
+                int highest_b = start_scan
+                float highest_h = high[bar_index - start_scan]
+
+                for i = start_scan to end_scan
+                    if high[bar_index - i] > highest_h
+                        highest_h := high[bar_index - i]
+                        highest_b := i
+
+                lh_bar    := highest_b
+                lh_price  := highest_h
+
+                ll_bar    := new_ll_bar
+                ll_price  := new_ll_price
+                trend     := -1
+                cand_type := 0
+                choch_just_formed := true
+                choch_direction   := -1
+
+    // ─── CASE -1: DOWNTREND ───
+    else if trend == -1
+
+        if cand_type == 0
+            if close < ll_price
+                cand_type   := -1
+                cand_bar    := bar_index
+                cand_low    := low
+                trigger_bar := ll_bar
+                bear_bos_just_formed := true
+
+            else if close > lh_price
+                cand_type   := 1
+                cand_bar    := bar_index
+                cand_high   := high
+                trigger_bar := lh_bar
+                choch_just_formed := true
+                choch_direction   := 1
+
+        else if cand_type == -1
+            if low < cand_low
+                cand_bar := bar_index
+                cand_low := low
+            else if close > high[bar_index - cand_bar]
+                int new_ll_bar = cand_bar
+                float new_ll_price = cand_low
+
+                int start_scan = trigger_bar
+                int end_scan = new_ll_bar
+                int highest_b = start_scan
+                float highest_h = high[bar_index - start_scan]
+
+                for i = start_scan to end_scan
+                    if high[bar_index - i] > highest_h
+                        highest_h := high[bar_index - i]
+                        highest_b := i
+
+                lh_bar    := highest_b
+                lh_price  := highest_h
+
+                ll_bar    := new_ll_bar
+                ll_price  := new_ll_price
+                cand_type := 0
+
+        else if cand_type == 1
+            if high > cand_high
+                cand_bar  := bar_index
+                cand_high := high
+            else if close < low[bar_index - cand_bar]
+                int new_hh_bar = cand_bar
+                float new_hh_price = cand_high
+
+                int start_scan = trigger_bar
+                int end_scan = new_hh_bar
+                int lowest_b = start_scan
+                float lowest_l = low[bar_index - start_scan]
+
+                for i = start_scan to end_scan
+                    if low[bar_index - i] < lowest_l
+                        lowest_l := low[bar_index - i]
+                        lowest_b := i
+
+                hl_bar    := lowest_b
+                hl_price  := lowest_l
+
+                hh_bar    := new_hh_bar
+                hh_price  := new_hh_price
+                trend     := 1
+                cand_type := 0
+                choch_just_formed := true
+                choch_direction   := 1
+
+// ╔══════════════════════════════════════════╗
+// ║   IMBALANCE DETECTION (FVG / OG / VI)   ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Các biến flag imbalance (tính mới mỗi bar) ───
+
+// ─── Volume Imbalances (VI) ───
+float bull_gap_top = math.min(close, open)
+float bull_gap_btm = math.max(close[1], open[1])
+
+[bull_vi, bull_vi_count] = imbalance_detection(
+    show_vi, imb_usewidth, imb_width_method, imb_gapwidth,
+    bull_gap_top, bull_gap_btm,
+    open > close[1] and high[1] > low and close > close[1] and open > open[1] and high[1] < bull_gap_top)
+
+float bear_gap_top = math.min(close[1], open[1])
+float bear_gap_btm = math.max(close, open)
+
+[bear_vi, bear_vi_count] = imbalance_detection(
+    show_vi, imb_usewidth, imb_width_method, imb_gapwidth,
+    bear_gap_top, bear_gap_btm,
+    open < close[1] and low[1] < high and close < close[1] and open < open[1] and low[1] > bear_gap_btm)
+
+// ─── Opening Gaps (OG) ───
+[bull_og, bull_og_count] = imbalance_detection(
+    show_og, imb_usewidth, imb_width_method, imb_gapwidth,
+    bull_gap_top, bull_gap_btm,
+    low > high[1])
+
+[bear_og, bear_og_count] = imbalance_detection(
+    show_og, imb_usewidth, imb_width_method, imb_gapwidth,
+    bear_gap_top, bear_gap_btm,
+    high < low[1])
+
+// ─── Fair Value Gaps (FVG) ───
+[bull_fvg, bull_fvg_count] = imbalance_detection(
+    show_fvg, imb_usewidth, imb_width_method, imb_gapwidth,
+    low, high[2],
+    low > high[2] and close[1] > high[2] and not (bull_og or bull_og[1]))
+
+[bear_fvg, bear_fvg_count] = imbalance_detection(
+    show_fvg, imb_usewidth, imb_width_method, imb_gapwidth,
+    low[2], high,
+    high < low[2] and close[1] < low[2] and not (bear_og or bear_og[1]))
+
+// ╔══════════════════════════════════════════╗
+// ║   ORDER BLOCK (OB) CREATION              ║
+// ╚══════════════════════════════════════════╝
+
+// Biến flag — OB mới hình thành trong bar này
+var bool new_bull_ob_formed = false
+var bool new_bear_ob_formed = false
+var int  new_ob_list_idx    = na  // index của OB mới trong ob_list
+
+new_bull_ob_formed := false
+new_bear_ob_formed := false
+new_ob_list_idx    := na
+
+// ─── OB từ VI ───
+OrderBlock new_ob = OrderBlock.new(na, na, na, true, "", false, na)
+
+if show_ob and bull_vi
+    if max_ob_active > 0 and array.size(ob_list) >= max_ob_active
+        OrderBlock oldest = array.shift(ob_list)
+        if array.size(ob_boxes) > 0
+            box dead = array.shift(ob_boxes)
+            box.delete(dead)
+    new_ob := OrderBlock.new(bar_index - 1, high[1], low[1], true, "VI", false, na)
+    array.push(ob_list, new_ob)
+    ob_bull_count += 1
+    if show_ob
+        box b = box.new(bar_index - 1, high[1], bar_index + 1, low[1],
+            border_color=ob_bull_color, bgcolor=color.new(ob_bull_color, ob_transparency),
+            border_style=line.style_dashed)
+        array.push(ob_boxes, b)
+    new_ob_list_idx := array.size(ob_list) - 1
+    new_bull_ob_formed := true
+
+if show_ob and bear_vi
+    if max_ob_active > 0 and array.size(ob_list) >= max_ob_active
+        OrderBlock oldest = array.shift(ob_list)
+        if array.size(ob_boxes) > 0
+            box dead = array.shift(ob_boxes)
+            box.delete(dead)
+    new_ob := OrderBlock.new(bar_index - 1, high[1], low[1], false, "VI", false, na)
+    array.push(ob_list, new_ob)
+    ob_bear_count += 1
+    if show_ob
+        box b = box.new(bar_index - 1, high[1], bar_index + 1, low[1],
+            border_color=ob_bear_color, bgcolor=color.new(ob_bear_color, ob_transparency),
+            border_style=line.style_dashed)
+        array.push(ob_boxes, b)
+    new_ob_list_idx := array.size(ob_list) - 1
+    new_bear_ob_formed := true
+
+// ─── OB từ OG ───
+if show_ob and bull_og
+    if max_ob_active > 0 and array.size(ob_list) >= max_ob_active
+        OrderBlock oldest = array.shift(ob_list)
+        if array.size(ob_boxes) > 0
+            box dead = array.shift(ob_boxes)
+            box.delete(dead)
+    new_ob := OrderBlock.new(bar_index - 1, high[1], low[1], true, "OG", false, na)
+    array.push(ob_list, new_ob)
+    ob_bull_count += 1
+    if show_ob
+        box b = box.new(bar_index - 1, high[1], bar_index + 1, low[1],
+            border_color=ob_bull_color, bgcolor=color.new(ob_bull_color, ob_transparency),
+            border_style=line.style_dashed)
+        array.push(ob_boxes, b)
+    new_ob_list_idx := array.size(ob_list) - 1
+    new_bull_ob_formed := true
+
+if show_ob and bear_og
+    if max_ob_active > 0 and array.size(ob_list) >= max_ob_active
+        OrderBlock oldest = array.shift(ob_list)
+        if array.size(ob_boxes) > 0
+            box dead = array.shift(ob_boxes)
+            box.delete(dead)
+    new_ob := OrderBlock.new(bar_index - 1, high[1], low[1], false, "OG", false, na)
+    array.push(ob_list, new_ob)
+    ob_bear_count += 1
+    if show_ob
+        box b = box.new(bar_index - 1, high[1], bar_index + 1, low[1],
+            border_color=ob_bear_color, bgcolor=color.new(ob_bear_color, ob_transparency),
+            border_style=line.style_dashed)
+        array.push(ob_boxes, b)
+    new_ob_list_idx := array.size(ob_list) - 1
+    new_bear_ob_formed := true
+
+// ─── OB từ FVG ───
+if show_ob and bull_fvg
+    if max_ob_active > 0 and array.size(ob_list) >= max_ob_active
+        OrderBlock oldest = array.shift(ob_list)
+        if array.size(ob_boxes) > 0
+            box dead = array.shift(ob_boxes)
+            box.delete(dead)
+    new_ob := OrderBlock.new(bar_index - 2, high[2], low[2], true, "FVG", false, na)
+    array.push(ob_list, new_ob)
+    ob_bull_count += 1
+    if show_ob
+        box b = box.new(bar_index - 2, high[2], bar_index + 1, low[2],
+            border_color=ob_bull_color, bgcolor=color.new(ob_bull_color, ob_transparency),
+            border_style=line.style_dashed)
+        array.push(ob_boxes, b)
+    new_ob_list_idx := array.size(ob_list) - 1
+    new_bull_ob_formed := true
+
+if show_ob and bear_fvg
+    if max_ob_active > 0 and array.size(ob_list) >= max_ob_active
+        OrderBlock oldest = array.shift(ob_list)
+        if array.size(ob_boxes) > 0
+            box dead = array.shift(ob_boxes)
+            box.delete(dead)
+    new_ob := OrderBlock.new(bar_index - 2, high[2], low[2], false, "FVG", false, na)
+    array.push(ob_list, new_ob)
+    ob_bear_count += 1
+    if show_ob
+        box b = box.new(bar_index - 2, high[2], bar_index + 1, low[2],
+            border_color=ob_bear_color, bgcolor=color.new(ob_bear_color, ob_transparency),
+            border_style=line.style_dashed)
+        array.push(ob_boxes, b)
+    new_ob_list_idx := array.size(ob_list) - 1
+    new_bear_ob_formed := true
+
+// ╔══════════════════════════════════════════╗
+// ║   OB MITIGATION CHECK                    ║
+// ╚══════════════════════════════════════════╝
+
+// Flag OB vừa bị mitigation trong bar này (cho exit signal)
+var bool ob_just_mitigated  = false
+var int  ob_mitigated_idx   = na
+var bool ob_mit_is_bull     = false
+
+ob_just_mitigated  := false
+ob_mitigated_idx   := na
+ob_mit_is_bull     := false
+
+if show_ob
+    int ob_size = array.size(ob_list)
+    if ob_size > 0
+        for i = ob_size - 1 to 0
+            OrderBlock ob_chk = array.get(ob_list, i)
+            bool is_bull = ob_chk.is_bullish
+            bool is_mit  = ob_chk.is_mitigated
+            if not is_mit
+                bool triggered = is_bull ? (low <= ob_chk.top) : (high >= ob_chk.bottom)
+                if triggered
+                    ob_chk.is_mitigated   := true
+                    ob_chk.bar_mitigation := bar_index
+                    array.set(ob_list, i, ob_chk)
+                    if is_bull
+                        ob_bull_mitigated += 1
+                    else
+                        ob_bear_mitigated += 1
+
+                    ob_just_mitigated := true
+                    ob_mitigated_idx  := i
+                    ob_mit_is_bull    := is_bull
+
+                    // Cập nhật box
+                    if i < array.size(ob_boxes)
+                        box b_mit = array.get(ob_boxes, i)
+                        box.set_right(b_mit, bar_index)
+                        box.set_border_style(b_mit, line.style_solid)
+                        box.set_bgcolor(b_mit, color.new(
+                            is_bull ? ob_bull_color : ob_bear_color,
+                            math.min(ob_transparency + 15, 100)))
+
+    // Kéo dài box active
+    if array.size(ob_boxes) > 0 and array.size(ob_list) > 0
+        int box_ct = math.min(array.size(ob_list), array.size(ob_boxes))
+        for i = 0 to box_ct - 1
+            OrderBlock ob_ext = array.get(ob_list, i)
+            if not ob_ext.is_mitigated
+                box b_ext = array.get(ob_boxes, i)
+                box.set_right(b_ext, bar_index + 1)
+
+// ╔══════════════════════════════════════════╗
+// ║   PREMIUM / DISCOUNT ZONE                ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Tính % vị trí giá trong Swing hiện tại ───
+float swing_high = (trend == 1) ? hh_price : lh_price
+float swing_low  = (trend == 1) ? hl_price : ll_price
+float range_diff = swing_high - swing_low
+float pos_pct_raw = (range_diff != 0) ? ((close - swing_low) / range_diff) * 100 : 50
+
+// Bull: đảo ngược, % cao = Discount (gần Swing Low), % thấp = Premium (gần Swing High)
+// Bear: giữ nguyên, % thấp = Discount (gần Swing Low), % cao = Premium (gần Swing High)
+float pos_pct = (trend == 1) ? (100 - pos_pct_raw) : pos_pct_raw
+
+// ─── Zone check functions ───
+bool is_discount_zone = pos_pct > 50  // vị trí > 50% từ Swing High → gần Swing Low
+bool is_premium_zone  = pos_pct < 50  // vị trí < 50% từ Swing High → gần Swing High
+bool is_equilibrium   = pos_pct >= 45 and pos_pct <= 55
+
+// ╔══════════════════════════════════════════╗
+// ║   RETEST DETECTION                       ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Phát hiện giá retest OB ───
+// Trả về index OB được retest, hoặc -1 nếu không có
+detect_ob_retest(bool for_long) =>
+    int retest_idx = -1
+    int sz = array.size(ob_list)
+    if sz > 0
+        for i = 0 to sz - 1
+            OrderBlock ob_rt = array.get(ob_list, i)
+            if not ob_rt.is_mitigated and ob_rt.bar_origin < bar_index
+                if for_long and ob_rt.is_bullish
+                    // Long: giá chạm Demand OB zone (bottom → top)
+                    if low <= ob_rt.top and close > ob_rt.bottom
+                        retest_idx := i
+                        break
+                else if not for_long and not ob_rt.is_bullish
+                    // Short: giá chạm Supply OB zone (top → bottom)
+                    if high >= ob_rt.bottom and close < ob_rt.top
+                        retest_idx := i
+                        break
+    retest_idx
+
+// ─── Phát hiện giá retest OB trong bar này ───
+int bull_ob_retest_idx = detect_ob_retest(true)
+int bear_ob_retest_idx = detect_ob_retest(false)
+bool bull_ob_retested = bull_ob_retest_idx >= 0
+bool bear_ob_retested = bear_ob_retest_idx >= 0
+
+// ╔══════════════════════════════════════════╗
+// ║   TRADE STATE TRACKING                   ║
+// ╚══════════════════════════════════════════╝
+
+// Cập nhật trạng thái trade hiện tại
+in_trade := strategy.position_size != 0
+
+// ╔══════════════════════════════════════════╗
+// ║   ENTRY LOGIC                            ║
+// ╚══════════════════════════════════════════╝
+
+if in_date_range and not in_trade and trend != 0
+
+    // ─── LONG SIGNALS ───
+    bool long_signal = false
+    string long_reason = ""
+
+    // Long Signal 1: OB Retest
+    if entry_ob_retest and bull_ob_retested and trend == 1
+        bool zone_ok = not use_zone_filter or not long_in_discount or is_discount_zone
+        if zone_ok
+            long_signal := true
+            long_reason := "OB Retest"
+            entry_ob_idx := bull_ob_retest_idx
+
+    // Long Signal 2: New OB Formation
+    if not long_signal and entry_new_ob and new_bull_ob_formed and trend == 1
+        bool zone_ok = not use_zone_filter or not long_in_discount or is_discount_zone
+        if zone_ok
+            long_signal := true
+            long_reason := "OB Mới"
+            entry_ob_idx := new_ob_list_idx
+
+    // Long Signal 3: BoS/CHoCH + OB gần đó
+    if not long_signal and entry_bos_choch and (bull_bos_just_formed or (choch_just_formed and choch_direction == 1))
+        // Kiểm tra xem có OB bullish active gần đó không
+        int sz = array.size(ob_list)
+        int nearest_bull = -1
+        int min_dist = 999999
+        OrderBlock ob_n = OrderBlock.new(na, na, na, true, "", false, na)
+        if sz > 0
+            for i = 0 to sz - 1
+                ob_n := array.get(ob_list, i)
+                if ob_n.is_bullish and not ob_n.is_mitigated
+                    int dist = bar_index - ob_n.bar_origin
+                    if dist < min_dist
+                        min_dist := dist
+                        nearest_bull := i
+        if nearest_bull >= 0 and min_dist <= 20
+            long_signal := true
+            long_reason := "BoS/CHoCH + OB"
+            entry_ob_idx := nearest_bull
+
+    if long_signal
+        // Tính SL/TP
+        float entry_px = close
+
+        float sl_px = na
+        if sl_mode == "Swing Point"
+            sl_px := hl_price  // Swing Low gần nhất
+        else
+            sl_px := close - ta.atr(sl_atr_length) * sl_atr_mult
+
+        if na(sl_px) or sl_px >= entry_px
+            sl_px := entry_px - ta.atr(sl_atr_length) * 2  // fallback
+
+        float risk = entry_px - sl_px
+        float tp_px = entry_px + risk * rr_ratio
+
+        // Tính khối lượng dựa trên % rủi ro
+        float risk_amount = strategy.equity * risk_percent / 100
+        float qty = risk > 0 ? risk_amount / risk : na
+
+        if not na(qty) and qty > 0 and risk > 0
+            entry_price_val := entry_px
+            sl_price_val    := sl_px
+            tp_price_val    := tp_px
+            entry_direction := 1
+
+            strategy.entry("Long", strategy.long, qty, comment=long_reason)
+            strategy.exit("Long SL/TP", "Long", stop=sl_px, limit=tp_px, comment="SL/TP")
+
+    // ─── SHORT SIGNALS ───
+    if not long_signal
+        bool short_signal = false
+        string short_reason = ""
+
+        // Short Signal 1: OB Retest
+        if entry_ob_retest and bear_ob_retested and trend == -1
+            bool zone_ok = not use_zone_filter or not short_in_premium or is_premium_zone
+            if zone_ok
+                short_signal := true
+                short_reason := "OB Retest"
+                entry_ob_idx := bear_ob_retest_idx
+
+        // Short Signal 2: New OB Formation
+        if not short_signal and entry_new_ob and new_bear_ob_formed and trend == -1
+            bool zone_ok = not use_zone_filter or not short_in_premium or is_premium_zone
+            if zone_ok
+                short_signal := true
+                short_reason := "OB Mới"
+                entry_ob_idx := new_ob_list_idx
+
+        // Short Signal 3: BoS/CHoCH + OB
+        if not short_signal and entry_bos_choch and (bear_bos_just_formed or (choch_just_formed and choch_direction == -1))
+            int sz = array.size(ob_list)
+            int nearest_bear = -1
+            int min_dist = 999999
+            OrderBlock ob_n = OrderBlock.new(na, na, na, false, "", false, na)
+            if sz > 0
+                for i = 0 to sz - 1
+                    ob_n := array.get(ob_list, i)
+                    if not ob_n.is_bullish and not ob_n.is_mitigated
+                        int dist = bar_index - ob_n.bar_origin
+                        if dist < min_dist
+                            min_dist := dist
+                            nearest_bear := i
+            if nearest_bear >= 0 and min_dist <= 20
+                short_signal := true
+                short_reason := "BoS/CHoCH + OB"
+                entry_ob_idx := nearest_bear
+
+        if short_signal
+            float entry_px = close
+
+            float sl_px = na
+            if sl_mode == "Swing Point"
+                sl_px := lh_price  // Swing High gần nhất
+            else
+                sl_px := close + ta.atr(sl_atr_length) * sl_atr_mult
+
+            if na(sl_px) or sl_px <= entry_px
+                sl_px := entry_px + ta.atr(sl_atr_length) * 2  // fallback
+
+            float risk = sl_px - entry_px
+            float tp_px = entry_px - risk * rr_ratio
+
+            float risk_amount = strategy.equity * risk_percent / 100
+            float qty = risk > 0 ? risk_amount / risk : na
+
+            if not na(qty) and qty > 0 and risk > 0
+                entry_price_val := entry_px
+                sl_price_val    := sl_px
+                tp_price_val    := tp_px
+                entry_direction := -1
+
+                strategy.entry("Short", strategy.short, qty, comment=short_reason)
+                strategy.exit("Short SL/TP", "Short", stop=sl_px, limit=tp_px, comment="SL/TP")
+
+// ╔══════════════════════════════════════════╗
+// ║   EXIT LOGIC (NGOÀI SL/TP)               ║
+// ╚══════════════════════════════════════════╝
+
+if in_date_range and in_trade
+
+    // ─── Exit: CHoCH ngược hướng ───
+    if exit_on_choch
+        if entry_direction == 1 and choch_just_formed and choch_direction == -1
+            strategy.close("Long", comment="CHoCH Bear")
+            in_trade := false
+
+        else if entry_direction == -1 and choch_just_formed and choch_direction == 1
+            strategy.close("Short", comment="CHoCH Bull")
+            in_trade := false
+
+    // ─── Exit: OB bị mitigation ───
+    if in_trade and exit_on_ob_mit and ob_just_mitigated and ob_mitigated_idx == entry_ob_idx
+        if entry_direction == 1
+            strategy.close("Long", comment="OB Mitigated")
+        else
+            strategy.close("Short", comment="OB Mitigated")
+        in_trade := false
+
+// ╔══════════════════════════════════════════╗
+// ║   TRAILING STOP                          ║
+// ╚══════════════════════════════════════════╝
+
+if in_date_range and in_trade and use_trailing and trail_to_hl
+
+    // Cập nhật SL theo HL/LL mới (chỉ khi giá đã vào lời)
+    if entry_direction == 1
+        // Long: trail SL lên HL mới
+        float new_trail = hl_price
+        float min_profit_target = entry_price_val + (entry_price_val - sl_price_val) * 0.3
+        if close > min_profit_target and not na(new_trail) and new_trail > sl_price_val
+            sl_price_val := new_trail
+            strategy.exit("Long Trail", "Long", stop=new_trail, comment="Trail HL")
+
+    else if entry_direction == -1
+        // Short: trail SL xuống LH mới
+        float new_trail = lh_price
+        float min_profit_target = entry_price_val - (sl_price_val - entry_price_val) * 0.3
+        if close < min_profit_target and not na(new_trail) and new_trail < sl_price_val
+            sl_price_val := new_trail
+            strategy.exit("Short Trail", "Short", stop=new_trail, comment="Trail LH")
+
+// ╔══════════════════════════════════════════╗
+// ║   HIGHLIGHT TRADE STATE (OPTIONAL)       ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Vẽ nhãn trade state lên chart ───
+if in_trade and barstate.islast
+    string trade_text = entry_direction == 1 ? "LONG" : "SHORT"
+    color trade_color = entry_direction == 1 ? color.green : color.red
+    label.new(bar_index, entry_direction == 1 ? low : high,
+        text=trade_text + " | SL: " + str.tostring(sl_price_val, format.mintick) +
+        " | TP: " + str.tostring(tp_price_val, format.mintick),
+        color=trade_color, textcolor=color.white,
+        style=entry_direction == 1 ? label.style_label_up : label.style_label_down,
+        size=size.small)
