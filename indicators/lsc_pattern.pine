@@ -22,6 +22,7 @@ show_lsc_low  = input.bool(true,  "Hiển Thị LSC Low",   group="Hiển Thị"
 show_lsc_high = input.bool(true,  "Hiển Thị LSC High",  group="Hiển Thị")
 low_color     = input.color(#00bcd4, "Màu LSC Low (▲)",  group="Hiển Thị")
 high_color    = input.color(#ff5252, "Màu LSC High (▼)", group="Hiển Thị")
+show_bg       = input.bool(true,  "Hiển Thị Nền Label", group="Hiển Thị")
 
 // ╔══════════════════════════════════════════╗
 // ║        PHÁT HIỆN PATTERN                 ║
@@ -46,6 +47,12 @@ lsc_high = confirmed and
 // ║           HIỂN THỊ LABEL                 ║
 // ╚══════════════════════════════════════════╝
 
+// ─── Tính màu nền label (trong suốt nếu tắt nền) ───
+color bg_low   = show_bg ? low_color   : color.new(low_color,  100)
+color bg_high  = show_bg ? high_color  : color.new(high_color, 100)
+color txt_low  = show_bg ? color.white : low_color
+color txt_high = show_bg ? color.white : high_color
+
 // ─── Vẽ label ▲ cho LSC Low (dưới nến 2) ───
 if lsc_low and show_lsc_low
     label.new(
@@ -53,8 +60,8 @@ if lsc_low and show_lsc_low
         y=low[1],
         text="▲",
         style=label.style_label_up,
-        color=low_color,
-        textcolor=color.white,
+        color=bg_low,
+        textcolor=txt_low,
         size=size.normal
     )
 
@@ -65,8 +72,8 @@ if lsc_high and show_lsc_high
         y=high[1],
         text="▼",
         style=label.style_label_down,
-        color=high_color,
-        textcolor=color.white,
+        color=bg_high,
+        textcolor=txt_high,
         size=size.normal
     )
 
