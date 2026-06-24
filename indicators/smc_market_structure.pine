@@ -2,7 +2,7 @@
 // ─── SMC Market Structure Indicator — Phân tích cấu trúc thị trường theo Smart Money Concepts ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-06-18
-// Phiên bản: 1.4
+// Phiên bản: 1.5
 // Mô tả: Phát hiện cấu trúc xu hướng (HH/HL, LL/LH), Break of Structure (BoS),
 //        Change of Character (CHoCH), Fair Value Gaps (FVG), Opening Gaps (OG),
 //        Volume Imbalance (VI), Order Blocks (OB), Dashboard thống kê đầy đủ.
@@ -421,16 +421,21 @@ if seeded
                 float new_hh_price = cand_high
                 plot_label(new_hh_bar, "HH", bullColor, false)
 
-                // Quét Range tìm New HL (Thấp nhất từ HH cũ → HH mới)
+                // Quét Range tìm New HL (Thấp nhất từ HH cũ → HH mới, loại trừ chính HH)
                 int start_scan = trigger_bar
                 int end_scan = new_hh_bar
                 int lowest_b = start_scan
                 float lowest_l = low[bar_index - start_scan]
 
                 for i = start_scan to end_scan
-                    if low[bar_index - i] < lowest_l
+                    if i != new_hh_bar and low[bar_index - i] < lowest_l
                         lowest_l := low[bar_index - i]
                         lowest_b := i
+
+                // Fallback: nếu HL == HH → dùng start_scan
+                if lowest_b == new_hh_bar
+                    lowest_b := start_scan
+                    lowest_l := low[bar_index - start_scan]
 
                 hl_bar   := lowest_b
                 hl_price := lowest_l
@@ -451,16 +456,21 @@ if seeded
                 float new_ll_price = cand_low
                 plot_label(new_ll_bar, "LL", bearColor, true)
 
-                // Quét Range tìm New LH (Cao nhất từ HL cũ → LL mới)
+                // Quét Range tìm New LH (Cao nhất từ HL cũ → LL mới, loại trừ chính LL)
                 int start_scan = trigger_bar
                 int end_scan = new_ll_bar
                 int highest_b = start_scan
                 float highest_h = high[bar_index - start_scan]
 
                 for i = start_scan to end_scan
-                    if high[bar_index - i] > highest_h
+                    if i != new_ll_bar and high[bar_index - i] > highest_h
                         highest_h := high[bar_index - i]
                         highest_b := i
+
+                // Fallback: nếu LH == LL (không có bar nào khác) → dùng start_scan
+                if highest_b == new_ll_bar
+                    highest_b := start_scan
+                    highest_h := high[bar_index - start_scan]
 
                 lh_bar    := highest_b
                 lh_price  := highest_h
@@ -500,16 +510,21 @@ if seeded
                 float new_ll_price = cand_low
                 plot_label(new_ll_bar, "LL", bearColor, true)
 
-                // Quét Range tìm New LH (Cao nhất từ LL cũ → LL mới)
+                // Quét Range tìm New LH (Cao nhất từ LL cũ → LL mới, loại trừ chính LL)
                 int start_scan = trigger_bar
                 int end_scan = new_ll_bar
                 int highest_b = start_scan
                 float highest_h = high[bar_index - start_scan]
 
                 for i = start_scan to end_scan
-                    if high[bar_index - i] > highest_h
+                    if i != new_ll_bar and high[bar_index - i] > highest_h
                         highest_h := high[bar_index - i]
                         highest_b := i
+
+                // Fallback: nếu LH == LL → dùng start_scan
+                if highest_b == new_ll_bar
+                    highest_b := start_scan
+                    highest_h := high[bar_index - start_scan]
 
                 lh_bar    := highest_b
                 lh_price  := highest_h
@@ -530,16 +545,21 @@ if seeded
                 float new_hh_price = cand_high
                 plot_label(new_hh_bar, "HH", bullColor, false)
 
-                // Quét Range tìm New HL (Thấp nhất từ LH cũ → HH mới)
+                // Quét Range tìm New HL (Thấp nhất từ LH cũ → HH mới, loại trừ chính HH)
                 int start_scan = trigger_bar
                 int end_scan = new_hh_bar
                 int lowest_b = start_scan
                 float lowest_l = low[bar_index - start_scan]
 
                 for i = start_scan to end_scan
-                    if low[bar_index - i] < lowest_l
+                    if i != new_hh_bar and low[bar_index - i] < lowest_l
                         lowest_l := low[bar_index - i]
                         lowest_b := i
+
+                // Fallback: nếu HL == HH (không có bar nào khác) → dùng start_scan
+                if lowest_b == new_hh_bar
+                    lowest_b := start_scan
+                    lowest_l := low[bar_index - start_scan]
 
                 hl_bar    := lowest_b
                 hl_price  := lowest_l
