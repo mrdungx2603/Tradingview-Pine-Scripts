@@ -1,0 +1,83 @@
+//@version=6
+// ─── LSC Pattern Indicator — Phát hiện pattern 3 nến LSC Low/High ───
+// Tác giả: TV Pine
+// Ngày tạo: 2026-06-24
+// Phiên bản: 1.0
+// Mô tả: Phát hiện bộ 3 nến LSC:
+//   LSC Low  (▲): Nến 2 có Low thấp nhất, Nến 3 close > High nến 2 → tín hiệu tăng
+//   LSC High (▼): Nến 2 có High cao nhất, Nến 3 close < Low nến 2  → tín hiệu giảm
+indicator(
+    title="LSC Pattern",
+    shorttitle="LSC",
+    overlay=true,
+    max_labels_count=500
+)
+
+// ╔══════════════════════════════════════════╗
+// ║              INPUTS                      ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Hiển Thị ───
+show_lsc_low  = input.bool(true,  "Hiển Thị LSC Low",   group="Hiển Thị")
+show_lsc_high = input.bool(true,  "Hiển Thị LSC High",  group="Hiển Thị")
+low_color     = input.color(#00bcd4, "Màu LSC Low (▲)",  group="Hiển Thị")
+high_color    = input.color(#ff5252, "Màu LSC High (▼)", group="Hiển Thị")
+
+// ╔══════════════════════════════════════════╗
+// ║        PHÁT HIỆN PATTERN                 ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Đảm bảo nến đã đóng để tránh repaint ───
+confirmed = barstate.isconfirmed
+
+// ─── LSC Low: Nến 2 có Low thấp nhất & Nến 3 close > High nến 2 ───
+lsc_low = confirmed and
+          low[1] < low[0]  and
+          low[1] < low[2]  and
+          close  > high[1]
+
+// ─── LSC High: Nến 2 có High cao nhất & Nến 3 close < Low nến 2 ───
+lsc_high = confirmed and
+           high[1] > high[0]  and
+           high[1] > high[2]  and
+           close   < low[1]
+
+// ╔══════════════════════════════════════════╗
+// ║           HIỂN THỊ LABEL                 ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Vẽ label ▲ cho LSC Low (dưới nến 2) ───
+if lsc_low and show_lsc_low
+    label.new(
+        x=bar_index - 1,
+        y=low[1],
+        text="▲",
+        style=label.style_label_up,
+        color=low_color,
+        textcolor=color.white,
+        size=size.normal
+    )
+
+// ─── Vẽ label ▼ cho LSC High (trên nến 2) ───
+if lsc_high and show_lsc_high
+    label.new(
+        x=bar_index - 1,
+        y=high[1],
+        text="▼",
+        style=label.style_label_down,
+        color=high_color,
+        textcolor=color.white,
+        size=size.normal
+    )
+
+// ╔══════════════════════════════════════════╗
+// ║           ALERTS                         ║
+// ╚══════════════════════════════════════════╝
+
+alertcondition(lsc_low,
+    title="LSC Low (Tăng)",
+    message="LSC Low — Nến 2 Low thấp nhất, Close > High nến 2 → Tín hiệu tăng")
+
+alertcondition(lsc_high,
+    title="LSC High (Giảm)",
+    message="LSC High — Nến 2 High cao nhất, Close < Low nến 2 → Tín hiệu giảm")
