@@ -2,7 +2,7 @@
 // ─── SMC Market Structure Indicator — Phân tích cấu trúc thị trường theo Smart Money Concepts ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-06-18
-// Phiên bản: 1.5
+// Phiên bản: 1.6
 // Mô tả: Phát hiện cấu trúc xu hướng (HH/HL, LL/LH), Break of Structure (BoS),
 //        Change of Character (CHoCH), Fair Value Gaps (FVG), Opening Gaps (OG),
 //        Volume Imbalance (VI), Order Blocks (OB), Dashboard thống kê đầy đủ.
@@ -56,6 +56,7 @@ choch_color  = input.color(color.orange, "Màu Đường CHoCH",        group="C
 show_struct_labels = input.bool(true, "Hiển Thị",                  group="Label Cấu Trúc")
 bullColor = input.color(color.blue,  "Màu Label Bull (HH/HL)",     group="Label Cấu Trúc")
 bearColor = input.color(color.red,   "Màu Label Bear (LL/LH)",     group="Label Cấu Trúc")
+show_temp_pivot = input.bool(true, "Hiển Thị Pivot Tạm (HL?/LH?)", group="Label Cấu Trúc")
 
 // ─── Dashboard ───
 show_dashboard = input.bool(true, "Hiển Thị",                      group="Dashboard")
@@ -148,6 +149,11 @@ var int trigger_bar = na  // Lưu bar index lúc xảy ra Breakout để quét r
 // ─── Biến alert cho CHoCH ───
 var bool choch_bull_triggered = false
 var bool choch_bear_triggered = false
+
+// ─── Temp Pivot Label ───
+var label temp_pivot_label = na
+var int   temp_pivot_bar   = na
+var float temp_pivot_price = na
 
 // Quản lý phiên
 var bool seeded     = false
@@ -569,6 +575,56 @@ if seeded
                 hh_price  := new_hh_price
                 trend     := 1
                 cand_type := 0
+
+// ╔══════════════════════════════════════════╗
+// ║     TEMP PIVOT — HIỂN THỊ PIVOT TẠM THỜI ║
+// ╚══════════════════════════════════════════╝
+
+// Xóa temp label cũ mỗi bar để vẽ lại
+if not na(temp_pivot_label)
+    label.delete(temp_pivot_label)
+    temp_pivot_label := na
+
+// Vẽ temp pivot nếu đang trong quá trình săn (cand_type != 0)
+if show_temp_pivot and show_struct_labels and cand_type != 0 and seeded
+    // cand_type == 1  → đang săn đỉnh (HH) → temp pivot = đáy thấp nhất (HL?)
+    // cand_type == -1 → đang săn đáy (LL) → temp pivot = đỉnh cao nhất  (LH?)
+    bool is_hunting_high = (cand_type == 1)
+
+    int    scan_start = trigger_bar
+    int    scan_end   = cand_bar
+    bool   found      = false
+    float  best_price = na
+    int    best_bar   = na
+
+    if not na(scan_start) and not na(scan_end) and scan_start <= scan_end
+        for i = scan_start to scan_end
+            // Loại trừ chính cand_bar (bar cực trị đang săn)
+            if i != scan_end
+                if not found
+                    best_price := is_hunting_high ? low[bar_index - i] : high[bar_index - i]
+                    best_bar   := i
+                    found      := true
+                else
+                    if is_hunting_high
+                        if low[bar_index - i] < best_price
+                            best_price := low[bar_index - i]
+                            best_bar   := i
+                    else
+                        if high[bar_index - i] > best_price
+                            best_price := high[bar_index - i]
+                            best_bar   := i
+
+        if found
+            temp_pivot_label := label.new(
+                x=best_bar,
+                y=is_hunting_high ? low[bar_index - best_bar] : high[bar_index - best_bar],
+                text=is_hunting_high ? "HL?" : "LH?",
+                color=color.new(color.gray, 30),
+                textcolor=color.gray,
+                style=is_hunting_high ? label.style_label_up : label.style_label_down,
+                size=size.tiny
+            )
 
 // ╔══════════════════════════════════════════╗
 // ║   IMBALANCE DETECTION (FVG / OG / VI)   ║
