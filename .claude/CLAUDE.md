@@ -171,6 +171,19 @@ export f_ema(src, len) =>
 - Biên độ: HOSE 7%, HNX 10%, UPCOM 15% (có thể thay đổi)
 - Nhớ điều chỉnh `session` nếu cần lọc phiên giao dịch Việt Nam
 
+## Quản Lý Phiên Bản (Version)
+
+- **Tăng version** trong header file (`// Phiên bản: X.Y`) mỗi khi có thay đổi code.
+- **Backup ver cũ**: Trước khi tăng version, lưu bản hiện tại vào `indicators/hist/<tên_file>_vX.Y.pine`.
+- Dùng `git show <commit>:indicators/<file>.pine > indicators/hist/<file>_vX.Y.pine` để trích xuất.
+
+Ví dụ khi nâng từ v1.9 lên v2.0:
+```bash
+# Backup v1.9 trước khi sửa
+cp indicators/smc_market_structure.pine indicators/hist/smc_market_structure_v1.9.pine
+# ... sửa code, tăng version lên v2.0 ...
+```
+
 ## Kiểm Tra Script
 
 - Copy-paste vào TradingView Pine Editor
