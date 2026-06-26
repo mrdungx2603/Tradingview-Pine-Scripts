@@ -2,7 +2,7 @@
 // ─── SMC Market Structure Indicator — Phân tích cấu trúc thị trường theo Smart Money Concepts ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-06-18
-// Phiên bản: 2.0
+// Phiên bản: 1.9
 // Mô tả: Phát hiện cấu trúc xu hướng (HH/HL, LL/LH), Break of Structure (BoS),
 //        Change of Character (CHoCH), Fair Value Gaps (FVG), Opening Gaps (OG),
 //        Volume Imbalance (VI), Order Blocks (OB), Dashboard thống kê đầy đủ.
@@ -41,21 +41,21 @@ pivotLength = input.int(
 show_bos      = input.bool(true, "Hiển Thị",                      group="BoS")
 bos_title     = input.string("BoS", "Tiêu Đề Label",              group="BoS")
 bos_style     = input.string("Solid", "Kiểu Đường BoS",
-    options=["Solid", "Dashed", "Dotted"],                        group="Style — BoS")
-bos_bull_color = input.color(color.blue,  "Màu BoS Tăng",         group="Style — BoS")
-bos_bear_color = input.color(color.red,   "Màu BoS Giảm",         group="Style — BoS")
+    options=["Solid", "Dashed", "Dotted"],                        group="Style")
+bos_bull_color = input.color(color.blue,  "Màu BoS Tăng",         group="Style")
+bos_bear_color = input.color(color.red,   "Màu BoS Giảm",         group="Style")
 
 // ─── CHoCH (Change of Character) ───
 show_choch   = input.bool(true, "Hiển Thị",                         group="CHoCH")
 choch_title  = input.string("CHoCH", "Tiêu Đề Label",               group="CHoCH")
 choch_style  = input.string("Dashed", "Kiểu Đường CHoCH",
-    options=["Solid", "Dashed", "Dotted"],                          group="Style — CHoCH")
-choch_color  = input.color(color.orange, "Màu CHoCH",               group="Style — CHoCH")
+    options=["Solid", "Dashed", "Dotted"],                          group="Style")
+choch_color  = input.color(color.orange, "Màu CHoCH",               group="Style")
 
 // ─── Label Cấu Trúc (HH/HL/LL/LH) ───
 show_struct_labels = input.bool(true, "Hiển Thị",                  group="Label Cấu Trúc")
-bullColor = input.color(color.blue,  "Màu Label Bull (HH/HL)",     group="Style — Label Cấu Trúc")
-bearColor = input.color(color.red,   "Màu Label Bear (LL/LH)",     group="Style — Label Cấu Trúc")
+bullColor = input.color(color.blue,  "Màu Label Bull (HH/HL)",     group="Style")
+bearColor = input.color(color.red,   "Màu Label Bear (LL/LH)",     group="Style")
 show_temp_pivot = input.bool(true, "Hiển Thị Pivot Tạm (HL?/LH?)", group="Label Cấu Trúc")
 
 // ─── Dashboard ───
@@ -66,20 +66,20 @@ dashboard_pos = input.string("Top Right", "Vị Trí",
 
 // ─── Fair Value Gaps (FVG) ───
 show_fvg          = input.bool(true, "Hiển Thị",                      group="FVG")
-bull_fvg_color    = input.color(#2157f3, "Màu FVG Tăng",              group="Style — FVG")
-bear_fvg_color    = input.color(#ff1100, "Màu FVG Giảm",              group="Style — FVG")
+bull_fvg_color    = input.color(#2157f3, "Màu FVG Tăng",              group="Style")
+bear_fvg_color    = input.color(#ff1100, "Màu FVG Giảm",              group="Style")
 fvg_extend        = input.int(0, "Kéo Dài FVG (bars)", minval=0,     group="FVG")
 
 // ─── Opening Gaps (OG) ───
 show_og           = input.bool(true, "Hiển Thị",                      group="OG")
-bull_og_color     = input.color(#2157f3, "Màu OG Tăng",               group="Style — OG")
-bear_og_color     = input.color(#ff1100, "Màu OG Giảm",               group="Style — OG")
+bull_og_color     = input.color(#2157f3, "Màu OG Tăng",               group="Style")
+bear_og_color     = input.color(#ff1100, "Màu OG Giảm",               group="Style")
 og_extend         = input.int(0, "Kéo Dài OG (bars)", minval=0,      group="OG")
 
 // ─── Volume Imbalance (VI) ───
 show_vi           = input.bool(true, "Hiển Thị",                      group="VI")
-bull_vi_color     = input.color(#2157f3, "Màu VI Tăng",               group="Style — VI")
-bear_vi_color     = input.color(#ff1100, "Màu VI Giảm",               group="Style — VI")
+bull_vi_color     = input.color(#2157f3, "Màu VI Tăng",               group="Style")
+bear_vi_color     = input.color(#ff1100, "Màu VI Giảm",               group="Style")
 vi_extend         = input.int(0, "Kéo Dài VI (bars)", minval=0,      group="VI")
 
 // ─── Bộ Lọc Imbalance ───
@@ -100,9 +100,9 @@ show_ob          = input.bool(true, "Hiển Thị OB",                  group="O
 max_ob_active    = input.int(30, "Số OB Active Tối Đa", minval=0, maxval=100, group="OB")
 ob_filter_mode   = input.string("All", "Bộ Lọc OB Đã Mitigated",
     options=["All", "Active", "Mitigated"],                          group="OB")
-ob_bull_color    = input.color(#089981, "Màu OB Tăng (Demand)",      group="Style — OB")
-ob_bear_color    = input.color(#f23645, "Màu OB Giảm (Supply)",      group="Style — OB")
-ob_transparency  = input.int(70, "Độ Trong Suốt OB Active", minval=0, maxval=100, group="Style — OB")
+ob_bull_color    = input.color(#089981, "Màu OB Tăng (Demand)",      group="Style")
+ob_bear_color    = input.color(#f23645, "Màu OB Giảm (Supply)",      group="Style")
+ob_transparency  = input.int(70, "Độ Trong Suốt OB Active", minval=0, maxval=100, group="Style")
 show_last_ob     = input.bool(true, "Hiển Thị OB Vừa Mitigated",     group="OB")
 
 
