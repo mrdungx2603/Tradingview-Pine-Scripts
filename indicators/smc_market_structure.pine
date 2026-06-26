@@ -2,7 +2,7 @@
 // ─── SMC Market Structure Indicator — Phân tích cấu trúc thị trường theo Smart Money Concepts ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-06-18
-// Phiên bản: 1.6
+// Phiên bản: 1.7
 // Mô tả: Phát hiện cấu trúc xu hướng (HH/HL, LL/LH), Break of Structure (BoS),
 //        Change of Character (CHoCH), Fair Value Gaps (FVG), Opening Gaps (OG),
 //        Volume Imbalance (VI), Order Blocks (OB), Dashboard thống kê đầy đủ.
@@ -103,7 +103,7 @@ ob_filter_mode   = input.string("All", "Bộ Lọc OB Đã Mitigated",
 ob_bull_color    = input.color(#089981, "Màu OB Tăng (Demand)",     group="OB")
 ob_bear_color    = input.color(#f23645, "Màu OB Giảm (Supply)",     group="OB")
 ob_transparency  = input.int(70, "Độ Trong Suốt OB Active", minval=0, maxval=100, group="OB")
-show_last_ob_mitigated = input.bool(true, "Hiển Thị OB Vừa Mitigated", group="OB")
+
 
 // ╔══════════════════════════════════════════╗
 // ║        HÀM HELPER — CHUYỂN ĐỔI          ║
@@ -153,8 +153,6 @@ var bool choch_bear_triggered = false
 
 // ─── Temp Pivot Label ───
 var label temp_pivot_label = na
-var int   temp_pivot_bar   = na
-var float temp_pivot_price = na
 
 // Quản lý phiên
 var bool seeded     = false
@@ -181,7 +179,6 @@ var int               ob_bull_count      = 0
 var int               ob_bear_count      = 0
 var int               ob_bull_mitigated  = 0
 var int               ob_bear_mitigated  = 0
-var int               last_mitigated_idx = na  // index của OB vừa bị mitigation gần nhất
 
 // ╔══════════════════════════════════════════╗
 // ║      TIMEFRAME CHECK & RESET             ║
@@ -260,9 +257,9 @@ if not seeded
 // ║        HÀM HELPER — VẼ ĐỒ HỌA           ║
 // ╚══════════════════════════════════════════╝
 
-// Resolve kiểu đường 1 lần (tránh gọi switch mỗi bar)
-var line_style_bos   = get_line_style(bos_style)
-var line_style_choch = get_line_style(choch_style)
+// Resolve kiểu đường — không dùng var để phản ứng khi user đổi input
+line_style_bos   = get_line_style(bos_style)
+line_style_choch = get_line_style(choch_style)
 
 // ─── Vẽ Break of Structure (BoS) ───
 plot_bos(int start_b, int end_b, float lvl, color col) =>
@@ -377,6 +374,23 @@ bear_filled(bool condition, float top) =>
                 count += 1
     count
 
+// ─── Tìm cực trị trong range, loại trừ 1 bar ───
+// find_high = true → tìm highest high, false → tìm lowest low
+find_extreme_in_range(int start_bar, int end_bar, int exclude_bar, bool find_high) =>
+    int   best_bar   = start_bar
+    float best_price = find_high ? high[bar_index - start_bar] : low[bar_index - start_bar]
+    for i = start_bar to end_bar
+        if i != exclude_bar
+            if find_high
+                if high[bar_index - i] > best_price
+                    best_price := high[bar_index - i]
+                    best_bar   := i
+            else
+                if low[bar_index - i] < best_price
+                    best_price := low[bar_index - i]
+                    best_bar   := i
+    [best_bar, best_price]
+
 // ╔══════════════════════════════════════════╗
 // ║     STATE MACHINE & CANDIDATE HUNTING    ║
 // ╚══════════════════════════════════════════╝
@@ -430,20 +444,7 @@ if seeded
                 plot_label(new_hh_bar, "HH", bullColor, false)
 
                 // Quét Range tìm New HL (Thấp nhất từ HH cũ → HH mới, loại trừ chính HH)
-                int start_scan = trigger_bar
-                int end_scan = new_hh_bar
-                int lowest_b = start_scan
-                float lowest_l = low[bar_index - start_scan]
-
-                for i = start_scan to end_scan
-                    if i != new_hh_bar and low[bar_index - i] < lowest_l
-                        lowest_l := low[bar_index - i]
-                        lowest_b := i
-
-                // Fallback: nếu HL == HH → dùng start_scan
-                if lowest_b == new_hh_bar
-                    lowest_b := start_scan
-                    lowest_l := low[bar_index - start_scan]
+                [lowest_b, lowest_l] = find_extreme_in_range(trigger_bar, new_hh_bar, new_hh_bar, false)
 
                 hl_bar   := lowest_b
                 hl_price := lowest_l
@@ -465,20 +466,7 @@ if seeded
                 plot_label(new_ll_bar, "LL", bearColor, true)
 
                 // Quét Range tìm New LH (Cao nhất từ HL cũ → LL mới, loại trừ chính LL)
-                int start_scan = trigger_bar
-                int end_scan = new_ll_bar
-                int highest_b = start_scan
-                float highest_h = high[bar_index - start_scan]
-
-                for i = start_scan to end_scan
-                    if i != new_ll_bar and high[bar_index - i] > highest_h
-                        highest_h := high[bar_index - i]
-                        highest_b := i
-
-                // Fallback: nếu LH == LL (không có bar nào khác) → dùng start_scan
-                if highest_b == new_ll_bar
-                    highest_b := start_scan
-                    highest_h := high[bar_index - start_scan]
+                [highest_b, highest_h] = find_extreme_in_range(trigger_bar, new_ll_bar, new_ll_bar, true)
 
                 lh_bar    := highest_b
                 lh_price  := highest_h
@@ -519,20 +507,7 @@ if seeded
                 plot_label(new_ll_bar, "LL", bearColor, true)
 
                 // Quét Range tìm New LH (Cao nhất từ LL cũ → LL mới, loại trừ chính LL)
-                int start_scan = trigger_bar
-                int end_scan = new_ll_bar
-                int highest_b = start_scan
-                float highest_h = high[bar_index - start_scan]
-
-                for i = start_scan to end_scan
-                    if i != new_ll_bar and high[bar_index - i] > highest_h
-                        highest_h := high[bar_index - i]
-                        highest_b := i
-
-                // Fallback: nếu LH == LL → dùng start_scan
-                if highest_b == new_ll_bar
-                    highest_b := start_scan
-                    highest_h := high[bar_index - start_scan]
+                [highest_b, highest_h] = find_extreme_in_range(trigger_bar, new_ll_bar, new_ll_bar, true)
 
                 lh_bar    := highest_b
                 lh_price  := highest_h
@@ -554,20 +529,7 @@ if seeded
                 plot_label(new_hh_bar, "HH", bullColor, false)
 
                 // Quét Range tìm New HL (Thấp nhất từ LH cũ → HH mới, loại trừ chính HH)
-                int start_scan = trigger_bar
-                int end_scan = new_hh_bar
-                int lowest_b = start_scan
-                float lowest_l = low[bar_index - start_scan]
-
-                for i = start_scan to end_scan
-                    if i != new_hh_bar and low[bar_index - i] < lowest_l
-                        lowest_l := low[bar_index - i]
-                        lowest_b := i
-
-                // Fallback: nếu HL == HH (không có bar nào khác) → dùng start_scan
-                if lowest_b == new_hh_bar
-                    lowest_b := start_scan
-                    lowest_l := low[bar_index - start_scan]
+                [lowest_b, lowest_l] = find_extreme_in_range(trigger_bar, new_hh_bar, new_hh_bar, false)
 
                 hl_bar    := lowest_b
                 hl_price  := lowest_l
@@ -671,12 +633,6 @@ if show_ob and (bull_vi or bear_vi)
         if array.size(ob_boxes) > 0
             box dead = array.shift(ob_boxes)
             box.delete(dead)
-        // Điều chỉnh last_mitigated_idx sau khi shift
-        if not na(last_mitigated_idx)
-            if last_mitigated_idx == 0
-                last_mitigated_idx := na
-            else
-                last_mitigated_idx := last_mitigated_idx - 1
 
     if bull_vi
         int    origin_bar  = bar_index - 1
@@ -738,12 +694,6 @@ if show_ob and (bull_og or bear_og)
         if array.size(ob_boxes) > 0
             box dead = array.shift(ob_boxes)
             box.delete(dead)
-        // Điều chỉnh last_mitigated_idx sau khi shift
-        if not na(last_mitigated_idx)
-            if last_mitigated_idx == 0
-                last_mitigated_idx := na
-            else
-                last_mitigated_idx := last_mitigated_idx - 1
 
     if bull_og
         int    origin_bar  = bar_index - 1
@@ -809,12 +759,6 @@ if show_ob and (bull_fvg or bear_fvg)
         if array.size(ob_boxes) > 0
             box dead = array.shift(ob_boxes)
             box.delete(dead)
-        // Điều chỉnh last_mitigated_idx sau khi shift
-        if not na(last_mitigated_idx)
-            if last_mitigated_idx == 0
-                last_mitigated_idx := na
-            else
-                last_mitigated_idx := last_mitigated_idx - 1
 
     if bull_fvg
         int    origin_bar  = bar_index - 2
@@ -856,7 +800,6 @@ if show_ob
                     ob_chk.is_mitigated   := true
                     ob_chk.bar_mitigation := bar_index
                     array.set(ob_list, i, ob_chk)
-                    last_mitigated_idx := i
                     if is_bull
                         ob_bull_mitigated += 1
                     else
@@ -892,10 +835,9 @@ if show_ob
             bool       is_bull_f = ob_f.is_bullish
             color      border_c  = is_bull_f ? ob_bull_color : ob_bear_color
             color      bg_c      = is_bull_f ? ob_bull_color : ob_bear_color
-            bool       is_last_mitigated = (i == last_mitigated_idx)
 
             if ob_f.is_mitigated
-                if show_mitigated_ob and (show_last_ob_mitigated or not is_last_mitigated)
+                if show_mitigated_ob
                     box.set_border_color(b_f, border_c)
                     box.set_bgcolor(b_f, color.new(bg_c, math.min(ob_transparency + 15, 100)))
                 else
@@ -982,14 +924,6 @@ if show_dashboard and barstate.islast
 // ║   BẢNG THỐNG KÊ IMBALANCE (FVG/OG/VI)   ║
 // ╚══════════════════════════════════════════╝
 
-// ─── Chuyển đổi vị trí dashboard imbalance ───
-get_imb_dashboard_pos(string pos_name) =>
-    switch pos_name
-        "Top Right"     => position.top_right
-        "Bottom Right"  => position.bottom_right
-        "Bottom Left"   => position.bottom_left
-        => position.bottom_right
-
 // ─── Chuyển đổi kích thước chữ ───
 get_imb_text_size(string size_name) =>
     switch size_name
@@ -1019,7 +953,7 @@ set_imb_cells(table tb, int column, int bull_filled_val, int bull_count_val, int
 
 // ─── Khởi tạo bảng imbalance ───
 var table imb_table = table.new(
-    get_imb_dashboard_pos(imb_dashboard_pos),
+    get_dashboard_pos(imb_dashboard_pos),
     columns=6,
     rows=7,
     bgcolor=#1e222d,
