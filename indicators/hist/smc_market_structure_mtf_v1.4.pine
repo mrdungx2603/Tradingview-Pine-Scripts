@@ -1,0 +1,750 @@
+//@version=6
+// ─── SMC Market Structure Indicator + Multi-Timeframe — Phân tích cấu trúc thị trường theo SMC ───
+// Tác giả: TV Pine
+// Ngày tạo: 2026-06-18
+// Phiên bản: 1.4
+// Mô tả: Mở rộng từ bản base, bổ sung bảng Multi-Timeframe hiển thị trend của 3 khung
+//        thời gian khác nhau. Phát hiện cấu trúc xu hướng (HH/HL, LL/LH),
+//        Break of Structure (BoS), Change of Character (CHoCH), Premium/Discount.
+// Thay đổi v1.4: Viết lại MTF — dùng 3 pivot + bar_index + trend score, gắn nhãn HH/HL hoặc LH/LL cho swing.
+indicator(
+    title="SMC Market Structure + MTF",
+    shorttitle="SMC_STRUCTURE_MTF",
+    overlay=true,
+    max_lines_count=500,
+    max_labels_count=500
+)
+
+// ╔══════════════════════════════════════════╗
+// ║              INPUTS                      ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Seed Mode ───
+seedMode = input.string(
+    "Pivot Seed",
+    "Seed Mode",
+    options=["Pivot Seed", "Session Seed"],
+    group="Tham Số Chính"
+)
+
+// ─── Pivot ───
+pivotLength = input.int(
+    5,
+    "Pivot Length (cho Pivot Seed)",
+    minval=2,
+    maxval=50,
+    group="Tham Số Chính"
+)
+
+// ─── BoS (Break of Structure) ───
+show_bos      = input.bool(true, "Hiển Thị",                      group="BoS")
+bos_title     = input.string("BoS", "Tiêu Đề Label",              group="BoS")
+bos_style     = input.string("Solid", "Kiểu Đường",
+    options=["Solid", "Dashed", "Dotted"],                        group="BoS")
+bos_bull_color = input.color(color.blue,  "Màu Đường BoS Tăng",   group="BoS")
+bos_bear_color = input.color(color.red,   "Màu Đường BoS Giảm",   group="BoS")
+
+// ─── CHoCH (Change of Character) ───
+show_choch   = input.bool(true, "Hiển Thị",                        group="CHoCH")
+choch_title  = input.string("CHoCH", "Tiêu Đề Label",              group="CHoCH")
+choch_style  = input.string("Dashed", "Kiểu Đường",
+    options=["Solid", "Dashed", "Dotted"],                        group="CHoCH")
+choch_color  = input.color(color.orange, "Màu Đường CHoCH",        group="CHoCH")
+
+// ─── Label Cấu Trúc (HH/HL/LL/LH) ───
+show_struct_labels = input.bool(true, "Hiển Thị",                  group="Label Cấu Trúc")
+bullColor = input.color(color.blue,  "Màu Label Bull (HH/HL)",     group="Label Cấu Trúc")
+bearColor = input.color(color.red,   "Màu Label Bear (LL/LH)",     group="Label Cấu Trúc")
+
+// ─── Multi-Timeframe ───
+show_mtf     = input.bool(true, "Hiển Thị",                        group="Multi-Timeframe")
+mtf_tf1      = input.string("D",   "Khung TG 1",
+    options=["1", "5", "15", "30", "60", "240", "D", "W", "M", "None"],
+    group="Multi-Timeframe")
+mtf_tf2      = input.string("240", "Khung TG 2",
+    options=["1", "5", "15", "30", "60", "240", "D", "W", "M", "None"],
+    group="Multi-Timeframe")
+mtf_tf3      = input.string("60",  "Khung TG 3",
+    options=["1", "5", "15", "30", "60", "240", "D", "W", "M", "None"],
+    group="Multi-Timeframe")
+mtf_pos      = input.string("Bottom Right", "Vị Trí",
+    options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"],
+    group="Multi-Timeframe")
+
+// ─── Dashboard ───
+show_dashboard = input.bool(true, "Hiển Thị",                      group="Dashboard")
+dashboard_pos = input.string("Top Right", "Vị Trí",
+    options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"],
+    group="Dashboard")
+
+// ╔══════════════════════════════════════════╗
+// ║        HÀM HELPER — CHUYỂN ĐỔI          ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Chuyển đổi string → line style ───
+get_line_style(string style_name) =>
+    switch style_name
+        "Solid"  => line.style_solid
+        "Dashed" => line.style_dashed
+        "Dotted" => line.style_dotted
+        => line.style_solid
+
+// ─── Chuyển đổi string → vị trí bảng ───
+get_dashboard_pos(string pos_name) =>
+    switch pos_name
+        "Top Right"     => position.top_right
+        "Top Left"      => position.top_left
+        "Bottom Right"  => position.bottom_right
+        "Bottom Left"   => position.bottom_left
+        => position.top_right
+
+// ╔══════════════════════════════════════════╗
+// ║           BIẾN TRẠNG THÁI                ║
+// ╚══════════════════════════════════════════╝
+
+var int trend       = 0   // 1 = UPTREND, -1 = DOWNTREND, 0 = INIT
+var int hh_bar      = na
+var float hh_price  = na
+var int hl_bar      = na
+var float hl_price  = na
+var int ll_bar      = na
+var float ll_price  = na
+var int lh_bar      = na
+var float lh_price  = na
+
+// Hệ thống candidate (săn điểm cực trị)
+var int cand_bar    = na
+var float cand_high = na
+var float cand_low  = na
+var int cand_type   = 0   // 1 = săn HH, -1 = săn LL, 0 = không hoạt động
+var int trigger_bar = na  // Lưu bar index lúc xảy ra Breakout để quét range HL/LH
+
+// Quản lý phiên
+var bool seeded     = false
+is_new_session      = timeframe.isminutes and session.isfirstbar_regular
+
+// ╔══════════════════════════════════════════╗
+// ║      TIMEFRAME CHECK & RESET             ║
+// ╚══════════════════════════════════════════╝
+
+if seedMode == "Session Seed" and not timeframe.isminutes
+    runtime.error("Session Seed chỉ áp dụng cho khung thời gian phút (< 1 giờ)!")
+
+if seedMode == "Session Seed" and is_new_session
+    trend     := 0
+    seeded    := false
+    hh_bar    := na
+    hh_price  := na
+    hl_bar    := na
+    hl_price  := na
+    ll_bar    := na
+    ll_price  := na
+    lh_bar    := na
+    lh_price  := na
+    cand_type := 0
+    cand_bar  := na
+
+// ╔══════════════════════════════════════════╗
+// ║           SEEDING LOGIC                  ║
+// ╚══════════════════════════════════════════╝
+
+if not seeded
+    if seedMode == "Pivot Seed"
+        ph = ta.pivothigh(pivotLength, pivotLength)
+        pl = ta.pivotlow(pivotLength, pivotLength)
+
+        // Lưu trữ các pivot thực tế dựa trên offset
+        var int last_ph_bar = na
+        var float last_ph_val = na
+        var int last_pl_bar = na
+        var float last_pl_val = na
+
+        if not na(ph)
+            last_ph_bar := bar_index - pivotLength
+            last_ph_val := ph
+        if not na(pl)
+            last_pl_bar := bar_index - pivotLength
+            last_pl_val := pl
+
+        if not na(last_ph_bar) and not na(last_pl_bar)
+            if last_ph_bar > last_pl_bar
+                // High xuất hiện sau Low → Uptrend
+                trend    := 1
+                hh_bar   := last_ph_bar
+                hh_price := last_ph_val
+                hl_bar   := last_pl_bar
+                hl_price := last_pl_val
+                seeded   := true
+            else
+                // Low xuất hiện sau High → Downtrend
+                trend    := -1
+                ll_bar   := last_pl_bar
+                ll_price := last_pl_val
+                lh_bar   := last_ph_bar
+                lh_price := last_ph_val
+                seeded   := true
+
+    else if seedMode == "Session Seed"
+        // Lấy bar đầu tiên của session làm tham chiếu, trend = 0 chờ breakout
+        hh_bar   := bar_index
+        hh_price := high
+        hl_bar   := bar_index
+        hl_price := low
+        ll_bar   := bar_index
+        ll_price := low
+        lh_bar   := bar_index
+        lh_price := high
+        seeded   := true
+
+// ╔══════════════════════════════════════════╗
+// ║        HÀM HELPER — VẼ ĐỒ HỌA           ║
+// ╚══════════════════════════════════════════╝
+
+// Resolve kiểu đường 1 lần (tránh gọi switch mỗi bar)
+var line_style_bos   = get_line_style(bos_style)
+var line_style_choch = get_line_style(choch_style)
+
+// ─── Vẽ Break of Structure (BoS) ───
+plot_bos(int start_b, int end_b, float lvl, color col) =>
+    if show_bos
+        line.new(
+            x1=start_b, y1=lvl,
+            x2=end_b,   y2=lvl,
+            xloc=xloc.bar_index,
+            style=line_style_bos,
+            color=col,
+            width=1
+        )
+        label.new(
+            x=math.round((start_b + end_b) / 2),
+            y=lvl,
+            text=bos_title,
+            xloc=xloc.bar_index,
+            textcolor=col,
+            style=label.style_none,
+            size=size.small
+        )
+
+// ─── Vẽ Change of Character (CHoCH) ───
+plot_choch(int start_b, int end_b, float lvl, color col) =>
+    if show_choch
+        line.new(
+            x1=start_b, y1=lvl,
+            x2=end_b,   y2=lvl,
+            xloc=xloc.bar_index,
+            style=line_style_choch,
+            color=col,
+            width=1
+        )
+        label.new(
+            x=math.round((start_b + end_b) / 2),
+            y=lvl,
+            text=choch_title,
+            xloc=xloc.bar_index,
+            textcolor=col,
+            style=label.style_none,
+            size=size.small
+        )
+
+// ─── Vẽ Label cho HH/HL/LL/LH ───
+plot_label(int b_idx, string txt, color col, bool is_up) =>
+    if show_struct_labels
+        label.new(
+            x=b_idx,
+            y=is_up ? low[bar_index - b_idx] : high[bar_index - b_idx],
+            text=txt,
+            color=col,
+            textcolor=color.white,
+            style=is_up ? label.style_label_up : label.style_label_down,
+            size=size.small
+        )
+
+// ╔══════════════════════════════════════════╗
+// ║     STATE MACHINE & CANDIDATE HUNTING    ║
+// ╚══════════════════════════════════════════╝
+
+if seeded
+
+    // ─── CASE 0: KHỞI TẠO TỪ SESSION SEED (Chưa rõ Trend) ───
+    if trend == 0
+        if close > hh_price
+            cand_type   := 1
+            cand_bar    := bar_index
+            cand_high   := high
+            trigger_bar := bar_index
+            plot_bos(hh_bar, bar_index, hh_price, bos_bull_color)
+            trend       := 1
+        else if close < ll_price
+            cand_type   := -1
+            cand_bar    := bar_index
+            cand_low    := low
+            trigger_bar := bar_index
+            plot_bos(ll_bar, bar_index, ll_price, bos_bear_color)
+            trend       := -1
+
+    // ─── CASE 1: UPTREND ───
+    else if trend == 1
+
+        if cand_type == 0
+            if close > hh_price
+                cand_type   := 1
+                cand_bar    := bar_index
+                cand_high   := high
+                trigger_bar := hh_bar
+                plot_bos(hh_bar, bar_index, hh_price, bos_bull_color)
+            else if close < hl_price
+                cand_type   := -1
+                cand_bar    := bar_index
+                cand_low    := low
+                trigger_bar := hl_bar
+                plot_choch(hl_bar, bar_index, hl_price, choch_color)
+
+        else if cand_type == 1
+            // Đang săn NEW_HH
+            if high > cand_high
+                cand_bar  := bar_index
+                cand_high := high
+            else if close < low[bar_index - cand_bar]
+                // XÁC NHẬN NEW HH
+                int new_hh_bar = cand_bar
+                float new_hh_price = cand_high
+                plot_label(new_hh_bar, "HH", bullColor, false)
+
+                // Quét Range tìm New HL (Thấp nhất từ HH cũ → HH mới)
+                int start_scan = trigger_bar
+                int end_scan = new_hh_bar
+                int lowest_b = start_scan
+                float lowest_l = low[bar_index - start_scan]
+
+                for i = start_scan to end_scan
+                    if low[bar_index - i] < lowest_l
+                        lowest_l := low[bar_index - i]
+                        lowest_b := i
+
+                hl_bar   := lowest_b
+                hl_price := lowest_l
+                plot_label(hl_bar, "HL", bullColor, true)
+
+                hh_bar    := new_hh_bar
+                hh_price  := new_hh_price
+                cand_type := 0
+
+        else if cand_type == -1
+            // Đang săn Đảo chiều sang Downtrend (CHoCH)
+            if low < cand_low
+                cand_bar := bar_index
+                cand_low := low
+            else if close > high[bar_index - cand_bar]
+                // XÁC NHẬN NEW LL + CHUYỂN XU HƯỚNG
+                int new_ll_bar = cand_bar
+                float new_ll_price = cand_low
+                plot_label(new_ll_bar, "LL", bearColor, true)
+
+                // Quét Range tìm New LH (Cao nhất từ HL cũ → LL mới)
+                int start_scan = trigger_bar
+                int end_scan = new_ll_bar
+                int highest_b = start_scan
+                float highest_h = high[bar_index - start_scan]
+
+                for i = start_scan to end_scan
+                    if high[bar_index - i] > highest_h
+                        highest_h := high[bar_index - i]
+                        highest_b := i
+
+                lh_bar    := highest_b
+                lh_price  := highest_h
+                plot_label(lh_bar, "LH", bearColor, false)
+
+                ll_bar    := new_ll_bar
+                ll_price  := new_ll_price
+                trend     := -1
+                cand_type := 0
+
+    // ─── CASE -1: DOWNTREND ───
+    else if trend == -1
+
+        if cand_type == 0
+            if close < ll_price
+                cand_type   := -1
+                cand_bar    := bar_index
+                cand_low    := low
+                trigger_bar := ll_bar
+                plot_bos(ll_bar, bar_index, ll_price, bos_bear_color)
+            else if close > lh_price
+                cand_type   := 1
+                cand_bar    := bar_index
+                cand_high   := high
+                trigger_bar := lh_bar
+                plot_choch(lh_bar, bar_index, lh_price, choch_color)
+
+        else if cand_type == -1
+            // Đang săn NEW_LL
+            if low < cand_low
+                cand_bar := bar_index
+                cand_low := low
+            else if close > high[bar_index - cand_bar]
+                // XÁC NHẬN NEW LL
+                int new_ll_bar = cand_bar
+                float new_ll_price = cand_low
+                plot_label(new_ll_bar, "LL", bearColor, true)
+
+                // Quét Range tìm New LH (Cao nhất từ LL cũ → LL mới)
+                int start_scan = trigger_bar
+                int end_scan = new_ll_bar
+                int highest_b = start_scan
+                float highest_h = high[bar_index - start_scan]
+
+                for i = start_scan to end_scan
+                    if high[bar_index - i] > highest_h
+                        highest_h := high[bar_index - i]
+                        highest_b := i
+
+                lh_bar    := highest_b
+                lh_price  := highest_h
+                plot_label(lh_bar, "LH", bearColor, false)
+
+                ll_bar    := new_ll_bar
+                ll_price  := new_ll_price
+                cand_type := 0
+
+        else if cand_type == 1
+            // Đang săn Đảo chiều sang Uptrend (CHoCH)
+            if high > cand_high
+                cand_bar  := bar_index
+                cand_high := high
+            else if close < low[bar_index - cand_bar]
+                // XÁC NHẬN NEW HH + CHUYỂN XU HƯỚNG
+                int new_hh_bar = cand_bar
+                float new_hh_price = cand_high
+                plot_label(new_hh_bar, "HH", bullColor, false)
+
+                // Quét Range tìm New HL (Thấp nhất từ LH cũ → HH mới)
+                int start_scan = trigger_bar
+                int end_scan = new_hh_bar
+                int lowest_b = start_scan
+                float lowest_l = low[bar_index - start_scan]
+
+                for i = start_scan to end_scan
+                    if low[bar_index - i] < lowest_l
+                        lowest_l := low[bar_index - i]
+                        lowest_b := i
+
+                hl_bar    := lowest_b
+                hl_price  := lowest_l
+                plot_label(hl_bar, "HL", bullColor, true)
+
+                hh_bar    := new_hh_bar
+                hh_price  := new_hh_price
+                trend     := 1
+                cand_type := 0
+
+// ╔══════════════════════════════════════════╗
+// ║     MULTI-TIMEFRAME — PHÁT HIỆN TREND    ║
+// ╚══════════════════════════════════════════╝
+//
+// CÁCH TIẾP CẬN MỚI: Dùng 3 pivot highs + 3 pivot lows + bar_index để:
+//   1. Tính "trend score" dựa trên CHUỖI pivot (không chỉ 2 pivot)
+//      - Mỗi HH (+1), mỗi LH (-1), mỗi HL (+1), mỗi LL (-1)
+//      - Score >= 2 → BULL, Score <= -2 → BEAR, còn lại giữ trend cũ
+//   2. Pivot cuối cùng (dựa trên bar_index) dùng làm tiebreaker
+//   3. Swing high/low gắn với cấu trúc: BULL → HH/HL, BEAR → LH/LL
+//
+// Logic này bám sát indicator chính: chỉ đổi trend khi có đủ tín hiệu xác nhận.
+
+// ─── UDT cho MTF ───
+type MtfState
+    int   trend
+    float swing_high
+    float swing_low
+    int   score
+
+// ─── Hàm helper: lấy pivot value + bar_index từ TF đích ───
+//     Trả về tuple [ph_value, bar_index] — occurrence=0 → gần nhất
+f_ph(string tf, int occ) =>
+    request.security(syminfo.tickerid, tf,
+        ta.valuewhen(not na(ta.pivothigh(high, pivotLength, pivotLength)),
+            ta.pivothigh(high, pivotLength, pivotLength), occ),
+        lookahead=barmerge.lookahead_off)
+
+f_ph_bar(string tf, int occ) =>
+    request.security(syminfo.tickerid, tf,
+        ta.valuewhen(not na(ta.pivothigh(high, pivotLength, pivotLength)),
+            bar_index, occ),
+        lookahead=barmerge.lookahead_off)
+
+f_pl(string tf, int occ) =>
+    request.security(syminfo.tickerid, tf,
+        ta.valuewhen(not na(ta.pivotlow(low, pivotLength, pivotLength)),
+            ta.pivotlow(low, pivotLength, pivotLength), occ),
+        lookahead=barmerge.lookahead_off)
+
+f_pl_bar(string tf, int occ) =>
+    request.security(syminfo.tickerid, tf,
+        ta.valuewhen(not na(ta.pivotlow(low, pivotLength, pivotLength)),
+            bar_index, occ),
+        lookahead=barmerge.lookahead_off)
+
+// ─── Cập nhật state cho 1 TF (logic chính xác định trend) ───
+f_update_mtf(string tf, MtfState s) =>
+    float ph0 = f_ph(tf, 0), ph1 = f_ph(tf, 1), ph2 = f_ph(tf, 2)
+    float ph0_bar = f_ph_bar(tf, 0), ph1_bar = f_ph_bar(tf, 1)
+    float pl0 = f_pl(tf, 0), pl1 = f_pl(tf, 1), pl2 = f_pl(tf, 2)
+    float pl0_bar = f_pl_bar(tf, 0), pl1_bar = f_pl_bar(tf, 1)
+
+    // ─── Chỉ tính khi có đủ ít nhất 2 pivot mỗi loại ───
+    bool has_min_data = not na(ph0) and not na(ph1) and not na(pl0) and not na(pl1)
+    bool has_third   = not na(ph2) and not na(pl2)
+
+    if has_min_data
+        // ─── Xác định pivot CUỐI CÙNG là High hay Low? ───
+        bool last_is_ph = ph0_bar > pl0_bar
+
+        // ─── Tính trend score dựa trên chuỗi pivot ───
+        int trend_score = 0
+
+        // So sánh pivot highs: ph0 vs ph1, ph1 vs ph2
+        if ph0 > ph1
+            trend_score += 1
+        else if ph0 < ph1
+            trend_score -= 1
+
+        if has_third
+            if ph1 > ph2
+                trend_score += 1
+            else if ph1 < ph2
+                trend_score -= 1
+
+        // So sánh pivot lows: pl0 vs pl1, pl1 vs pl2
+        if pl0 > pl1
+            trend_score += 1
+        else if pl0 < pl1
+            trend_score -= 1
+
+        if has_third
+            if pl1 > pl2
+                trend_score += 1
+            else if pl1 < pl2
+                trend_score -= 1
+
+        s.score := trend_score
+
+        // ─── Quyết định trend dựa trên score ───
+        if trend_score >= 2
+            s.trend := 1
+        else if trend_score <= -2
+            s.trend := -1
+        else if s.trend == 0
+            if last_is_ph
+                s.trend := (ph0 > ph1) ? 1 : -1
+            else
+                s.trend := (pl0 > pl1) ? 1 : -1
+
+        // ─── Cập nhật swing high/low THEO TREND ───
+        if s.trend == 1
+            s.swing_high := ph0
+            s.swing_low  := pl0
+        else if s.trend == -1
+            s.swing_high := ph0
+            s.swing_low  := pl0
+    else
+        s.trend := 0
+
+    s
+
+// ─── Khởi tạo state cho 3 TF ───
+var MtfState state1 = MtfState.new()
+var MtfState state2 = MtfState.new()
+var MtfState state3 = MtfState.new()
+
+// ─── Hàm helper: đổi mã TF sang tên hiển thị ───
+f_tf_label(string tf_id) =>
+    switch tf_id
+        "1"   => "1m"
+        "5"   => "5m"
+        "15"  => "15m"
+        "30"  => "30m"
+        "60"  => "1H"
+        "240" => "4H"
+        "D"   => "D1"
+        "W"   => "W1"
+        "M"   => "MN"
+        => ""
+
+// ─── Helper: trend → text + màu ───
+f_trend_text(int t) =>
+    switch t
+        1  => "BULL"
+        -1 => "BEAR"
+        => "WAIT"
+
+f_trend_color(int t) =>
+    switch t
+        1  => bullColor
+        -1 => bearColor
+        => color.gray
+
+// ─── Cập nhật state từng TF (chỉ chạy khi MTF được bật) ───
+if show_mtf
+    if mtf_tf1 != "None"
+        state1 := f_update_mtf(mtf_tf1, state1)
+
+    if mtf_tf2 != "None"
+        state2 := f_update_mtf(mtf_tf2, state2)
+
+    if mtf_tf3 != "None"
+        state3 := f_update_mtf(mtf_tf3, state3)
+
+// ╔══════════════════════════════════════════╗
+// ║     BẢNG THỐNG KÊ CẤU TRÚC SMC          ║
+// ╚══════════════════════════════════════════╝
+
+var table smc_table = table.new(
+    get_dashboard_pos(dashboard_pos),
+    columns=2,
+    rows=4,
+    bgcolor=color.new(color.black, 30),
+    border_width=1,
+    border_color=color.gray
+)
+
+if show_dashboard and barstate.islast
+    // Xác định biên Swing hiện tại
+    float swing_high = (trend == 1) ? hh_price : lh_price
+    float swing_low  = (trend == 1) ? hl_price : ll_price
+
+    // Tính toán % vị trí giá hiện tại (Premium/Discount)
+    // Bull: 100 - giá trị gốc → % cao = Discount (gần Swing Low), % thấp = Premium (gần Swing High)
+    // Bear: giữ nguyên → % thấp = Discount (gần Swing Low), % cao = Premium (gần Swing High)
+    float range_diff = swing_high - swing_low
+    float pos_pct_raw = (range_diff != 0) ? ((close - swing_low) / range_diff) * 100 : 0
+    float pos_pct = (trend == 1) ? (100 - pos_pct_raw) : pos_pct_raw
+
+    // Nội dung hiển thị
+    string row1_col1 = (trend == 1) ? "HH Price" : "LH Price"
+    string row1_col2 = str.tostring(
+        (trend == 1) ? hh_price : lh_price,
+        format.mintick
+    )
+
+    string row2_col1 = (trend == 1) ? "HL Price" : "LL Price"
+    string row2_col2 = str.tostring(
+        (trend == 1) ? hl_price : ll_price,
+        format.mintick
+    )
+
+    string row3_col1 = "Vị trí trong Swing"
+    string row3_col2 = str.tostring(pos_pct, "#.##") + "%"
+
+    // Fill bảng
+    table.cell(smc_table, 0, 0, "THÔNG SỐ SMC",
+        text_color=color.white, text_size=size.small, bgcolor=color.gray)
+    table.cell(smc_table, 1, 0, (trend == 1 ? "BULLISH" : "BEARISH"),
+        text_color=color.white, text_size=size.small,
+        bgcolor=(trend == 1 ? bullColor : bearColor))
+
+    table.cell(smc_table, 0, 1, row1_col1,
+        text_color=color.white, text_size=size.small)
+    table.cell(smc_table, 1, 1, row1_col2,
+        text_color=color.white, text_size=size.small)
+
+    table.cell(smc_table, 0, 2, row2_col1,
+        text_color=color.white, text_size=size.small)
+    table.cell(smc_table, 1, 2, row2_col2,
+        text_color=color.white, text_size=size.small)
+
+    // Màu sắc: Bull → % cao = Discount (xanh), % thấp = Premium (đỏ)
+    //          Bear → % cao = Premium (đỏ), % thấp = Discount (xanh)
+    color pos_color = (trend == 1) ? (pos_pct > 50 ? color.green : color.red)
+                                  : (pos_pct > 50 ? color.red   : color.green)
+
+    table.cell(smc_table, 0, 3, row3_col1,
+        text_color=color.white, text_size=size.small)
+    table.cell(smc_table, 1, 3, row3_col2,
+        text_color=pos_color,
+        text_size=size.small)
+
+// ╔══════════════════════════════════════════╗
+// ║     BẢNG MULTI-TIMEFRAME TREND          ║
+// ╚══════════════════════════════════════════╝
+
+// Đếm số TF active để tính số dòng
+f_count_active() =>
+    int cnt = 0
+    if mtf_tf1 != "None"
+        cnt += 1
+    if mtf_tf2 != "None"
+        cnt += 1
+    if mtf_tf3 != "None"
+        cnt += 1
+    cnt
+
+var table mtf_table = table.new(
+    get_dashboard_pos(mtf_pos),
+    columns=3,
+    rows=4,
+    bgcolor=color.new(color.black, 30),
+    border_width=1,
+    border_color=color.gray
+)
+
+if show_mtf and barstate.islast
+    int n_active = f_count_active()
+
+    // Chỉ vẽ nếu có ít nhất 1 TF được chọn
+    if n_active > 0
+        // ─── Hàng 0: Tiêu đề bảng ───
+        table.cell(mtf_table, 0, 0, "MTF TREND",
+            text_color=color.white, text_size=size.small, bgcolor=color.gray)
+        table.cell(mtf_table, 1, 0, "",
+            text_color=color.white, text_size=size.small, bgcolor=color.gray)
+        table.cell(mtf_table, 2, 0, "",
+            text_color=color.white, text_size=size.small, bgcolor=color.gray)
+
+        // ─── Render từng TF active ───
+        int row = 0
+        MtfState[] states = array.from(state1, state2, state3)
+        string[]  tf_ids = array.from(mtf_tf1, mtf_tf2, mtf_tf3)
+
+        for i = 0 to 2
+            // Khai báo biến ở scope for (Pine Script không cho phép khai báo trong if lồng for)
+            bool    is_active  = tf_ids.get(i) != "None"
+            string  tf_name    = is_active ? f_tf_label(tf_ids.get(i)) : ""
+            color   trend_col  = is_active ? f_trend_color(states.get(i).trend) : color.gray
+            string  trend_txt  = is_active ? f_trend_text(states.get(i).trend) : ""
+            float   sh         = is_active ? states.get(i).swing_high : na
+            float   sl         = is_active ? states.get(i).swing_low  : na
+            int     tr         = is_active ? states.get(i).trend : 0
+            int     sc         = is_active ? states.get(i).score : 0
+
+            // Gắn nhãn HH/HL hoặc LH/LL dựa trên trend
+            string sw_label = tr == 1 ? "HH/HL" : tr == -1 ? "LH/LL" : "PH/PL"
+
+            string sw_val = na(sh) ? "-" : str.tostring(sh, format.mintick) + " / " + str.tostring(sl, format.mintick)
+            string sw_info = sw_label + ": " + sw_val
+
+            if is_active
+                row += 1
+
+                // Cột 0: Tên TF
+                table.cell(mtf_table, 0, row, tf_name,
+                    text_color=color.white, text_size=size.small,
+                    bgcolor=color.new(color.gray, 50))
+
+                // Cột 1: Trend text
+                table.cell(mtf_table, 1, row, trend_txt,
+                    text_color=color.white, text_size=size.small,
+                    bgcolor=trend_col)
+
+                // Cột 2: Cấu trúc + Giá Swing High / Swing Low
+                table.cell(mtf_table, 2, row, sw_info,
+                    text_color=color.white, text_size=size.small)
+
+        // ─── Xoá các dòng thừa (nếu TF bị bỏ chọn) ───
+        if n_active < 3
+            for r = n_active + 1 to 3
+                table.cell(mtf_table, 0, r, "",
+                    text_color=color.white, text_size=size.small)
+                table.cell(mtf_table, 1, r, "",
+                    text_color=color.white, text_size=size.small)
+                table.cell(mtf_table, 2, r, "",
+                    text_color=color.white, text_size=size.small)

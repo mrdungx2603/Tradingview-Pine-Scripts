@@ -2,10 +2,10 @@
 // ─── SMC Strategy — Chiến lược giao dịch dựa trên Smart Money Concepts ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-06-21
-// Phiên bản: 1.0
+// Phiên bản: 2.0
 // Mô tả: Strategy backtest dựa trên SMC Market Structure, Order Blocks,
 //        Premium/Discount, với 3 chế độ entry, SL/TP linh hoạt, trailing stop.
-// Logic core sao chép từ indicators/smc_market_structure.pine v1.4
+// Thay đổi v2.0: Import library smc_core, dùng UDT SwingState + pure state machine.
 strategy(
     title="SMC Strategy",
     shorttitle="SMC_STRATEGY",
@@ -18,6 +18,9 @@ strategy(
     slippage=2,
     pyramiding=1
 )
+
+// ─── Import Library ───
+import mrdungx2603/smc_core/1 as smc
 
 // ╔══════════════════════════════════════════╗
 // ║              INPUTS — Strategy           ║
@@ -90,26 +93,10 @@ exit_on_ob_mit    = input.bool(false, "Thoát Khi OB Bị Mitigation", group="Th
 // ║           BIẾN TRẠNG THÁI                ║
 // ╚══════════════════════════════════════════╝
 
-var int trend       = 0   // 1 = UPTREND, -1 = DOWNTREND, 0 = INIT
-var int hh_bar      = na
-var float hh_price  = na
-var int hl_bar      = na
-var float hl_price  = na
-var int ll_bar      = na
-var float ll_price  = na
-var int lh_bar      = na
-var float lh_price  = na
-
-// Candidate hunting
-var int cand_bar    = na
-var float cand_high = na
-var float cand_low  = na
-var int cand_type   = 0   // 1 = săn HH, -1 = săn LL, 0 = không hoạt động
-var int trigger_bar = na
+var smc.SwingState st = smc.f_init_state()
 
 // Session management
-var bool seeded     = false
-is_new_session      = timeframe.isminutes and session.isfirstbar_regular
+is_new_session = timeframe.isminutes and session.isfirstbar_regular
 
 // ╔══════════════════════════════════════════╗
 // ║        ORDER BLOCK (OB) STATE            ║
@@ -153,66 +140,20 @@ if seedMode == "Session Seed" and not timeframe.isminutes
     runtime.error("Session Seed chỉ áp dụng cho khung thời gian phút (< 1 giờ)!")
 
 if seedMode == "Session Seed" and is_new_session
-    trend     := 0
-    seeded    := false
-    hh_bar    := na
-    hh_price  := na
-    hl_bar    := na
-    hl_price  := na
-    ll_bar    := na
-    ll_price  := na
-    lh_bar    := na
-    lh_price  := na
-    cand_type := 0
-    cand_bar  := na
+    st := smc.f_init_state()
 
 // ╔══════════════════════════════════════════╗
 // ║           SEEDING LOGIC                  ║
 // ╚══════════════════════════════════════════╝
 
-if not seeded
+if not st.seeded
     if seedMode == "Pivot Seed"
         ph = ta.pivothigh(pivotLength, pivotLength)
         pl = ta.pivotlow(pivotLength, pivotLength)
-
-        var int last_ph_bar = na
-        var float last_ph_val = na
-        var int last_pl_bar = na
-        var float last_pl_val = na
-
-        if not na(ph)
-            last_ph_bar := bar_index - pivotLength
-            last_ph_val := ph
-        if not na(pl)
-            last_pl_bar := bar_index - pivotLength
-            last_pl_val := pl
-
-        if not na(last_ph_bar) and not na(last_pl_bar)
-            if last_ph_bar > last_pl_bar
-                trend    := 1
-                hh_bar   := last_ph_bar
-                hh_price := last_ph_val
-                hl_bar   := last_pl_bar
-                hl_price := last_pl_val
-                seeded   := true
-            else
-                trend    := -1
-                ll_bar   := last_pl_bar
-                ll_price := last_pl_val
-                lh_bar   := last_ph_bar
-                lh_price := last_ph_val
-                seeded   := true
+        st := smc.f_seed_pivot(st, ph, pl, pivotLength)
 
     else if seedMode == "Session Seed"
-        hh_bar   := bar_index
-        hh_price := high
-        hl_bar   := bar_index
-        hl_price := low
-        ll_bar   := bar_index
-        ll_price := low
-        lh_bar   := bar_index
-        lh_price := high
-        seeded   := true
+        st := smc.f_seed_session(st)
 
 // ╔══════════════════════════════════════════╗
 // ║      HÀM HELPER — IMBALANCE              ║
@@ -252,169 +193,31 @@ bear_bos_just_formed := false
 choch_just_formed    := false
 choch_direction      := 0
 
-if seeded
+if st.seeded
+    // Lưu state cũ để detect sự kiện
+    smc.SwingState old_st = st
 
-    // ─── CASE 0: KHỞI TẠO (Chưa rõ Trend) ───
-    if trend == 0
-        if close > hh_price
-            cand_type   := 1
-            cand_bar    := bar_index
-            cand_high   := high
-            trigger_bar := bar_index
-            trend       := 1
-            bull_bos_just_formed := true
+    // Chạy state machine qua library
+    st := smc.f_process_bar(st)
 
-        else if close < ll_price
-            cand_type   := -1
-            cand_bar    := bar_index
-            cand_low    := low
-            trigger_bar := bar_index
-            trend       := -1
-            bear_bos_just_formed := true
+    // ─── Phát hiện events cho entry signals ───
+    if st.event == 1
+        // BoS Bull
+        bull_bos_just_formed := true
 
-    // ─── CASE 1: UPTREND ───
-    else if trend == 1
+    else if st.event == -1
+        // BoS Bear
+        bear_bos_just_formed := true
 
-        if cand_type == 0
-            if close > hh_price
-                cand_type   := 1
-                cand_bar    := bar_index
-                cand_high   := high
-                trigger_bar := hh_bar
-                bull_bos_just_formed := true
+    else if st.event == 2
+        // CHoCH Bear (trong Uptrend → breakout dưới HL)
+        choch_just_formed := true
+        choch_direction   := -1
 
-            else if close < hl_price
-                cand_type   := -1
-                cand_bar    := bar_index
-                cand_low    := low
-                trigger_bar := hl_bar
-                choch_just_formed := true
-                choch_direction   := -1
-
-        else if cand_type == 1
-            if high > cand_high
-                cand_bar  := bar_index
-                cand_high := high
-            else if close < low[bar_index - cand_bar]
-                int new_hh_bar = cand_bar
-                float new_hh_price = cand_high
-
-                int start_scan = trigger_bar
-                int end_scan = new_hh_bar
-                int lowest_b = start_scan
-                float lowest_l = low[bar_index - start_scan]
-
-                for i = start_scan to end_scan
-                    if low[bar_index - i] < lowest_l
-                        lowest_l := low[bar_index - i]
-                        lowest_b := i
-
-                hl_bar   := lowest_b
-                hl_price := lowest_l
-
-                hh_bar    := new_hh_bar
-                hh_price  := new_hh_price
-                cand_type := 0
-
-        else if cand_type == -1
-            if low < cand_low
-                cand_bar := bar_index
-                cand_low := low
-            else if close > high[bar_index - cand_bar]
-                int new_ll_bar = cand_bar
-                float new_ll_price = cand_low
-
-                int start_scan = trigger_bar
-                int end_scan = new_ll_bar
-                int highest_b = start_scan
-                float highest_h = high[bar_index - start_scan]
-
-                for i = start_scan to end_scan
-                    if high[bar_index - i] > highest_h
-                        highest_h := high[bar_index - i]
-                        highest_b := i
-
-                lh_bar    := highest_b
-                lh_price  := highest_h
-
-                ll_bar    := new_ll_bar
-                ll_price  := new_ll_price
-                trend     := -1
-                cand_type := 0
-                choch_just_formed := true
-                choch_direction   := -1
-
-    // ─── CASE -1: DOWNTREND ───
-    else if trend == -1
-
-        if cand_type == 0
-            if close < ll_price
-                cand_type   := -1
-                cand_bar    := bar_index
-                cand_low    := low
-                trigger_bar := ll_bar
-                bear_bos_just_formed := true
-
-            else if close > lh_price
-                cand_type   := 1
-                cand_bar    := bar_index
-                cand_high   := high
-                trigger_bar := lh_bar
-                choch_just_formed := true
-                choch_direction   := 1
-
-        else if cand_type == -1
-            if low < cand_low
-                cand_bar := bar_index
-                cand_low := low
-            else if close > high[bar_index - cand_bar]
-                int new_ll_bar = cand_bar
-                float new_ll_price = cand_low
-
-                int start_scan = trigger_bar
-                int end_scan = new_ll_bar
-                int highest_b = start_scan
-                float highest_h = high[bar_index - start_scan]
-
-                for i = start_scan to end_scan
-                    if high[bar_index - i] > highest_h
-                        highest_h := high[bar_index - i]
-                        highest_b := i
-
-                lh_bar    := highest_b
-                lh_price  := highest_h
-
-                ll_bar    := new_ll_bar
-                ll_price  := new_ll_price
-                cand_type := 0
-
-        else if cand_type == 1
-            if high > cand_high
-                cand_bar  := bar_index
-                cand_high := high
-            else if close < low[bar_index - cand_bar]
-                int new_hh_bar = cand_bar
-                float new_hh_price = cand_high
-
-                int start_scan = trigger_bar
-                int end_scan = new_hh_bar
-                int lowest_b = start_scan
-                float lowest_l = low[bar_index - start_scan]
-
-                for i = start_scan to end_scan
-                    if low[bar_index - i] < lowest_l
-                        lowest_l := low[bar_index - i]
-                        lowest_b := i
-
-                hl_bar    := lowest_b
-                hl_price  := lowest_l
-
-                hh_bar    := new_hh_bar
-                hh_price  := new_hh_price
-                trend     := 1
-                cand_type := 0
-                choch_just_formed := true
-                choch_direction   := 1
+    else if st.event == -2
+        // CHoCH Bull (trong Downtrend → breakout trên LH)
+        choch_just_formed := true
+        choch_direction   := 1
 
 // ╔══════════════════════════════════════════╗
 // ║   IMBALANCE DETECTION (FVG / OG / VI)   ║
@@ -639,14 +442,14 @@ if show_ob
 // ╚══════════════════════════════════════════╝
 
 // ─── Tính % vị trí giá trong Swing hiện tại ───
-float swing_high = (trend == 1) ? hh_price : lh_price
-float swing_low  = (trend == 1) ? hl_price : ll_price
+float swing_high = (st.trend == 1) ? st.hh_price : st.lh_price
+float swing_low  = (st.trend == 1) ? st.hl_price : st.ll_price
 float range_diff = swing_high - swing_low
 float pos_pct_raw = (range_diff != 0) ? ((close - swing_low) / range_diff) * 100 : 50
 
 // Bull: đảo ngược, % cao = Discount (gần Swing Low), % thấp = Premium (gần Swing High)
 // Bear: giữ nguyên, % thấp = Discount (gần Swing Low), % cao = Premium (gần Swing High)
-float pos_pct = (trend == 1) ? (100 - pos_pct_raw) : pos_pct_raw
+float pos_pct = (st.trend == 1) ? (100 - pos_pct_raw) : pos_pct_raw
 
 // ─── Zone check functions ───
 bool is_discount_zone = pos_pct > 50  // vị trí > 50% từ Swing High → gần Swing Low
@@ -695,14 +498,14 @@ in_trade := strategy.position_size != 0
 // ║   ENTRY LOGIC                            ║
 // ╚══════════════════════════════════════════╝
 
-if in_date_range and not in_trade and trend != 0
+if in_date_range and not in_trade and st.trend != 0
 
     // ─── LONG SIGNALS ───
     bool long_signal = false
     string long_reason = ""
 
     // Long Signal 1: OB Retest
-    if entry_ob_retest and bull_ob_retested and trend == 1
+    if entry_ob_retest and bull_ob_retested and st.trend == 1
         bool zone_ok = not use_zone_filter or not long_in_discount or is_discount_zone
         if zone_ok
             long_signal := true
@@ -710,7 +513,7 @@ if in_date_range and not in_trade and trend != 0
             entry_ob_idx := bull_ob_retest_idx
 
     // Long Signal 2: New OB Formation
-    if not long_signal and entry_new_ob and new_bull_ob_formed and trend == 1
+    if not long_signal and entry_new_ob and new_bull_ob_formed and st.trend == 1
         bool zone_ok = not use_zone_filter or not long_in_discount or is_discount_zone
         if zone_ok
             long_signal := true
@@ -743,7 +546,7 @@ if in_date_range and not in_trade and trend != 0
 
         float sl_px = na
         if sl_mode == "Swing Point"
-            sl_px := hl_price  // Swing Low gần nhất
+            sl_px := st.hl_price  // Swing Low gần nhất
         else
             sl_px := close - ta.atr(sl_atr_length) * sl_atr_mult
 
@@ -772,7 +575,7 @@ if in_date_range and not in_trade and trend != 0
         string short_reason = ""
 
         // Short Signal 1: OB Retest
-        if entry_ob_retest and bear_ob_retested and trend == -1
+        if entry_ob_retest and bear_ob_retested and st.trend == -1
             bool zone_ok = not use_zone_filter or not short_in_premium or is_premium_zone
             if zone_ok
                 short_signal := true
@@ -780,7 +583,7 @@ if in_date_range and not in_trade and trend != 0
                 entry_ob_idx := bear_ob_retest_idx
 
         // Short Signal 2: New OB Formation
-        if not short_signal and entry_new_ob and new_bear_ob_formed and trend == -1
+        if not short_signal and entry_new_ob and new_bear_ob_formed and st.trend == -1
             bool zone_ok = not use_zone_filter or not short_in_premium or is_premium_zone
             if zone_ok
                 short_signal := true
@@ -811,7 +614,7 @@ if in_date_range and not in_trade and trend != 0
 
             float sl_px = na
             if sl_mode == "Swing Point"
-                sl_px := lh_price  // Swing High gần nhất
+                sl_px := st.lh_price  // Swing High gần nhất
             else
                 sl_px := close + ta.atr(sl_atr_length) * sl_atr_mult
 
@@ -866,7 +669,7 @@ if in_date_range and in_trade and use_trailing and trail_to_hl
     // Cập nhật SL theo HL/LL mới (chỉ khi giá đã vào lời)
     if entry_direction == 1
         // Long: trail SL lên HL mới
-        float new_trail = hl_price
+        float new_trail = st.hl_price
         float min_profit_target = entry_price_val + (entry_price_val - sl_price_val) * 0.3
         if close > min_profit_target and not na(new_trail) and new_trail > sl_price_val
             sl_price_val := new_trail
@@ -874,7 +677,7 @@ if in_date_range and in_trade and use_trailing and trail_to_hl
 
     else if entry_direction == -1
         // Short: trail SL xuống LH mới
-        float new_trail = lh_price
+        float new_trail = st.lh_price
         float min_profit_target = entry_price_val - (sl_price_val - entry_price_val) * 0.3
         if close < min_profit_target and not na(new_trail) and new_trail < sl_price_val
             sl_price_val := new_trail

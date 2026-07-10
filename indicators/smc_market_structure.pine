@@ -2,11 +2,12 @@
 // ─── SMC Market Structure Indicator — Phân tích cấu trúc thị trường theo Smart Money Concepts ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-06-18
-// Phiên bản: 1.8
+// Phiên bản: 2.0
 // Mô tả: Phát hiện cấu trúc xu hướng (HH/HL, LL/LH), Break of Structure (BoS),
 //        Change of Character (CHoCH), Fair Value Gaps (FVG), Opening Gaps (OG),
 //        Volume Imbalance (VI), Order Blocks (OB), Dashboard thống kê đầy đủ.
 // Credits: Imbalance Detector logic adapted from LuxAlgo (CC BY-NC-SA 4.0)
+// Thay đổi v2.0: Import library smc_core, dùng UDT SwingState + pure state machine.
 indicator(
     title="SMC Market Structure Indicator",
     shorttitle="SMC_STRUCTURE",
@@ -15,6 +16,9 @@ indicator(
     max_labels_count=500,
     max_boxes_count=500
 )
+
+// ─── Import Library ───
+import mrdungx2603/smc_core/1 as smc
 
 // ╔══════════════════════════════════════════╗
 // ║              INPUTS                      ║
@@ -107,46 +111,10 @@ show_last_ob     = input.bool(true, "Hiển Thị OB Vừa Mitigated",     group
 
 
 // ╔══════════════════════════════════════════╗
-// ║        HÀM HELPER — CHUYỂN ĐỔI          ║
-// ╚══════════════════════════════════════════╝
-
-// ─── Chuyển đổi string → line style ───
-get_line_style(string style_name) =>
-    switch style_name
-        "Solid"  => line.style_solid
-        "Dashed" => line.style_dashed
-        "Dotted" => line.style_dotted
-        => line.style_solid
-
-// ─── Chuyển đổi string → vị trí bảng ───
-get_dashboard_pos(string pos_name) =>
-    switch pos_name
-        "Top Right"     => position.top_right
-        "Top Left"      => position.top_left
-        "Bottom Right"  => position.bottom_right
-        "Bottom Left"   => position.bottom_left
-        => position.top_right
-
-// ╔══════════════════════════════════════════╗
 // ║           BIẾN TRẠNG THÁI                ║
 // ╚══════════════════════════════════════════╝
 
-var int trend       = 0   // 1 = UPTREND, -1 = DOWNTREND, 0 = INIT
-var int hh_bar      = na
-var float hh_price  = na
-var int hl_bar      = na
-var float hl_price  = na
-var int ll_bar      = na
-var float ll_price  = na
-var int lh_bar      = na
-var float lh_price  = na
-
-// Hệ thống candidate (săn điểm cực trị)
-var int cand_bar    = na
-var float cand_high = na
-var float cand_low  = na
-var int cand_type   = 0   // 1 = săn HH, -1 = săn LL, 0 = không hoạt động
-var int trigger_bar = na  // Lưu bar index lúc xảy ra Breakout để quét range HL/LH
+var smc.SwingState st = smc.f_init_state()
 
 // ─── Biến alert cho CHoCH ───
 var bool choch_bull_triggered = false
@@ -156,8 +124,7 @@ var bool choch_bear_triggered = false
 var label temp_pivot_label = na
 
 // Quản lý phiên
-var bool seeded     = false
-is_new_session      = timeframe.isminutes and session.isfirstbar_regular
+is_new_session = timeframe.isminutes and session.isfirstbar_regular
 
 // ╔══════════════════════════════════════════╗
 // ║        ORDER BLOCK (OB) STATE            ║
@@ -190,78 +157,28 @@ if seedMode == "Session Seed" and not timeframe.isminutes
     runtime.error("Session Seed chỉ áp dụng cho khung thời gian phút (< 1 giờ)!")
 
 if seedMode == "Session Seed" and is_new_session
-    trend     := 0
-    seeded    := false
-    hh_bar    := na
-    hh_price  := na
-    hl_bar    := na
-    hl_price  := na
-    ll_bar    := na
-    ll_price  := na
-    lh_bar    := na
-    lh_price  := na
-    cand_type := 0
-    cand_bar  := na
+    st := smc.f_init_state()
 
 // ╔══════════════════════════════════════════╗
 // ║           SEEDING LOGIC                  ║
 // ╚══════════════════════════════════════════╝
 
-if not seeded
+if not st.seeded
     if seedMode == "Pivot Seed"
         ph = ta.pivothigh(pivotLength, pivotLength)
         pl = ta.pivotlow(pivotLength, pivotLength)
-
-        // Lưu trữ các pivot thực tế dựa trên offset
-        var int last_ph_bar = na
-        var float last_ph_val = na
-        var int last_pl_bar = na
-        var float last_pl_val = na
-
-        if not na(ph)
-            last_ph_bar := bar_index - pivotLength
-            last_ph_val := ph
-        if not na(pl)
-            last_pl_bar := bar_index - pivotLength
-            last_pl_val := pl
-
-        if not na(last_ph_bar) and not na(last_pl_bar)
-            if last_ph_bar > last_pl_bar
-                // High xuất hiện sau Low → Uptrend
-                trend    := 1
-                hh_bar   := last_ph_bar
-                hh_price := last_ph_val
-                hl_bar   := last_pl_bar
-                hl_price := last_pl_val
-                seeded   := true
-            else
-                // Low xuất hiện sau High → Downtrend
-                trend    := -1
-                ll_bar   := last_pl_bar
-                ll_price := last_pl_val
-                lh_bar   := last_ph_bar
-                lh_price := last_ph_val
-                seeded   := true
+        st := smc.f_seed_pivot(st, ph, pl, pivotLength)
 
     else if seedMode == "Session Seed"
-        // Lấy bar đầu tiên của session làm tham chiếu, trend = 0 chờ breakout
-        hh_bar   := bar_index
-        hh_price := high
-        hl_bar   := bar_index
-        hl_price := low
-        ll_bar   := bar_index
-        ll_price := low
-        lh_bar   := bar_index
-        lh_price := high
-        seeded   := true
+        st := smc.f_seed_session(st)
 
 // ╔══════════════════════════════════════════╗
 // ║        HÀM HELPER — VẼ ĐỒ HỌA           ║
 // ╚══════════════════════════════════════════╝
 
 // Resolve kiểu đường — không dùng var để phản ứng khi user đổi input
-line_style_bos   = get_line_style(bos_style)
-line_style_choch = get_line_style(choch_style)
+line_style_bos   = smc.f_get_line_style(bos_style)
+line_style_choch = smc.f_get_line_style(choch_style)
 
 // ─── Vẽ Break of Structure (BoS) ───
 plot_bos(int start_b, int end_b, float lvl, color col) =>
@@ -376,171 +293,46 @@ bear_filled(bool condition, float top) =>
                 count += 1
     count
 
-// ─── Tìm cực trị trong range, loại trừ 1 bar ───
-// find_high = true → tìm highest high, false → tìm lowest low
-find_extreme_in_range(int start_bar, int end_bar, int exclude_bar, bool find_high) =>
-    int   best_bar   = start_bar
-    float best_price = find_high ? high[bar_index - start_bar] : low[bar_index - start_bar]
-    for i = start_bar to end_bar
-        if i != exclude_bar
-            if find_high
-                if high[bar_index - i] > best_price
-                    best_price := high[bar_index - i]
-                    best_bar   := i
-            else
-                if low[bar_index - i] < best_price
-                    best_price := low[bar_index - i]
-                    best_bar   := i
-    [best_bar, best_price]
-
 // ╔══════════════════════════════════════════╗
 // ║     STATE MACHINE & CANDIDATE HUNTING    ║
 // ╚══════════════════════════════════════════╝
 
-if seeded
+if st.seeded
+    // Lưu state cũ để detect sự kiện
+    smc.SwingState old_st = st
 
-    // ─── CASE 0: KHỞI TẠO TỪ SESSION SEED (Chưa rõ Trend) ───
-    if trend == 0
-        if close > hh_price
-            cand_type   := 1
-            cand_bar    := bar_index
-            cand_high   := high
-            trigger_bar := bar_index
-            plot_bos(hh_bar, bar_index, hh_price, bos_bull_color)
-            trend       := 1
-        else if close < ll_price
-            cand_type   := -1
-            cand_bar    := bar_index
-            cand_low    := low
-            trigger_bar := bar_index
-            plot_bos(ll_bar, bar_index, ll_price, bos_bear_color)
-            trend       := -1
+    // Chạy state machine qua library
+    st := smc.f_process_bar(st)
 
-    // ─── CASE 1: UPTREND ───
-    else if trend == 1
+    // ─── Vẽ BoS/CHoCH dựa trên event ───
+    if st.event == 1
+        // BoS Bull
+        plot_bos(old_st.hh_bar, bar_index, old_st.hh_price, bos_bull_color)
 
-        if cand_type == 0
-            if close > hh_price
-                cand_type   := 1
-                cand_bar    := bar_index
-                cand_high   := high
-                trigger_bar := hh_bar
-                plot_bos(hh_bar, bar_index, hh_price, bos_bull_color)
-            else if close < hl_price
-                cand_type   := -1
-                cand_bar    := bar_index
-                cand_low    := low
-                trigger_bar := hl_bar
-                plot_choch(hl_bar, bar_index, hl_price, choch_color)
-                choch_bear_triggered := true
+    else if st.event == -1
+        // BoS Bear
+        plot_bos(old_st.ll_bar, bar_index, old_st.ll_price, bos_bear_color)
 
-        else if cand_type == 1
-            // Đang săn NEW_HH
-            if high > cand_high
-                cand_bar  := bar_index
-                cand_high := high
-            else if close < low[bar_index - cand_bar]
-                // XÁC NHẬN NEW HH
-                int new_hh_bar = cand_bar
-                float new_hh_price = cand_high
-                plot_label(new_hh_bar, "HH", bullColor, false)
+    else if st.event == 2
+        // CHoCH Bear (trong Uptrend, breakout dưới HL)
+        plot_choch(old_st.hl_bar, bar_index, old_st.hl_price, choch_color)
+        choch_bear_triggered := true
 
-                // Quét Range tìm New HL (Thấp nhất từ HH cũ → HH mới, loại trừ chính HH)
-                [lowest_b, lowest_l] = find_extreme_in_range(trigger_bar, new_hh_bar, new_hh_bar, false)
+    else if st.event == -2
+        // CHoCH Bull (trong Downtrend, breakout trên LH)
+        plot_choch(old_st.lh_bar, bar_index, old_st.lh_price, choch_color)
+        choch_bull_triggered := true
 
-                hl_bar   := lowest_b
-                hl_price := lowest_l
-                plot_label(hl_bar, "HL", bullColor, true)
-
-                hh_bar    := new_hh_bar
-                hh_price  := new_hh_price
-                cand_type := 0
-
-        else if cand_type == -1
-            // Đang săn Đảo chiều sang Downtrend (CHoCH)
-            if low < cand_low
-                cand_bar := bar_index
-                cand_low := low
-            else if close > high[bar_index - cand_bar]
-                // XÁC NHẬN NEW LL + CHUYỂN XU HƯỚNG
-                int new_ll_bar = cand_bar
-                float new_ll_price = cand_low
-                plot_label(new_ll_bar, "LL", bearColor, true)
-
-                // Quét Range tìm New LH (Cao nhất từ HL cũ → LL mới, loại trừ chính LL)
-                [highest_b, highest_h] = find_extreme_in_range(trigger_bar, new_ll_bar, new_ll_bar, true)
-
-                lh_bar    := highest_b
-                lh_price  := highest_h
-                plot_label(lh_bar, "LH", bearColor, false)
-
-                ll_bar    := new_ll_bar
-                ll_price  := new_ll_price
-                trend     := -1
-                cand_type := 0
-
-    // ─── CASE -1: DOWNTREND ───
-    else if trend == -1
-
-        if cand_type == 0
-            if close < ll_price
-                cand_type   := -1
-                cand_bar    := bar_index
-                cand_low    := low
-                trigger_bar := ll_bar
-                plot_bos(ll_bar, bar_index, ll_price, bos_bear_color)
-            else if close > lh_price
-                cand_type   := 1
-                cand_bar    := bar_index
-                cand_high   := high
-                trigger_bar := lh_bar
-                plot_choch(lh_bar, bar_index, lh_price, choch_color)
-                choch_bull_triggered := true
-
-        else if cand_type == -1
-            // Đang săn NEW_LL
-            if low < cand_low
-                cand_bar := bar_index
-                cand_low := low
-            else if close > high[bar_index - cand_bar]
-                // XÁC NHẬN NEW LL
-                int new_ll_bar = cand_bar
-                float new_ll_price = cand_low
-                plot_label(new_ll_bar, "LL", bearColor, true)
-
-                // Quét Range tìm New LH (Cao nhất từ LL cũ → LL mới, loại trừ chính LL)
-                [highest_b, highest_h] = find_extreme_in_range(trigger_bar, new_ll_bar, new_ll_bar, true)
-
-                lh_bar    := highest_b
-                lh_price  := highest_h
-                plot_label(lh_bar, "LH", bearColor, false)
-
-                ll_bar    := new_ll_bar
-                ll_price  := new_ll_price
-                cand_type := 0
-
-        else if cand_type == 1
-            // Đang săn Đảo chiều sang Uptrend (CHoCH)
-            if high > cand_high
-                cand_bar  := bar_index
-                cand_high := high
-            else if close < low[bar_index - cand_bar]
-                // XÁC NHẬN NEW HH + CHUYỂN XU HƯỚNG
-                int new_hh_bar = cand_bar
-                float new_hh_price = cand_high
-                plot_label(new_hh_bar, "HH", bullColor, false)
-
-                // Quét Range tìm New HL (Thấp nhất từ LH cũ → HH mới, loại trừ chính HH)
-                [lowest_b, lowest_l] = find_extreme_in_range(trigger_bar, new_hh_bar, new_hh_bar, false)
-
-                hl_bar    := lowest_b
-                hl_price  := lowest_l
-                plot_label(hl_bar, "HL", bullColor, true)
-
-                hh_bar    := new_hh_bar
-                hh_price  := new_hh_price
-                trend     := 1
-                cand_type := 0
+    // ─── Phát hiện swing vừa được xác nhận (cand_type non-0 → 0) ───
+    if old_st.cand_type != 0 and st.cand_type == 0
+        if old_st.cand_type == 1
+            // HH vừa được xác nhận — vẽ HH và HL
+            plot_label(st.hh_bar, "HH", bullColor, false)
+            plot_label(st.hl_bar, "HL", bullColor, true)
+        else if old_st.cand_type == -1
+            // LL vừa được xác nhận — vẽ LL và LH
+            plot_label(st.ll_bar, "LL", bearColor, true)
+            plot_label(st.lh_bar, "LH", bearColor, false)
 
 // ╔══════════════════════════════════════════╗
 // ║     TEMP PIVOT — HIỂN THỊ PIVOT TẠM THỜI ║
@@ -552,45 +344,28 @@ if not na(temp_pivot_label)
     temp_pivot_label := na
 
 // Vẽ temp pivot nếu đang trong quá trình săn (cand_type != 0)
-if show_temp_pivot and show_struct_labels and cand_type != 0 and seeded
+if show_temp_pivot and show_struct_labels and st.cand_type != 0 and st.seeded
     // cand_type == 1  → đang săn đỉnh (HH) → temp pivot = đáy thấp nhất (HL?)
     // cand_type == -1 → đang săn đáy (LL) → temp pivot = đỉnh cao nhất  (LH?)
-    bool is_hunting_high = (cand_type == 1)
+    bool is_hunting_high = (st.cand_type == 1)
 
-    int    scan_start = trigger_bar
-    int    scan_end   = cand_bar
-    bool   found      = false
-    float  best_price = na
-    int    best_bar   = na
+    int scan_start = st.trigger_bar
+    int scan_end   = st.cand_bar
 
     if not na(scan_start) and not na(scan_end) and scan_start <= scan_end
-        for i = scan_start to scan_end
-            // Loại trừ chính cand_bar (bar cực trị đang săn)
-            if i != scan_end
-                if not found
-                    best_price := is_hunting_high ? low[bar_index - i] : high[bar_index - i]
-                    best_bar   := i
-                    found      := true
-                else
-                    if is_hunting_high
-                        if low[bar_index - i] < best_price
-                            best_price := low[bar_index - i]
-                            best_bar   := i
-                    else
-                        if high[bar_index - i] > best_price
-                            best_price := high[bar_index - i]
-                            best_bar   := i
+        // Dùng library f_find_extreme — loại trừ scan_end (chính cand_bar)
+        // is_hunting_high=true → tìm lowest low (HL?), false → tìm highest high (LH?)
+        [best_bar, best_price] = smc.f_find_extreme(scan_start, scan_end, scan_end, not is_hunting_high)
 
-        if found
-            temp_pivot_label := label.new(
-                x=best_bar,
-                y=is_hunting_high ? low[bar_index - best_bar] : high[bar_index - best_bar],
-                text=is_hunting_high ? "HL?" : "LH?",
-                color=color.new(color.gray, 30),
-                textcolor=color.gray,
-                style=is_hunting_high ? label.style_label_up : label.style_label_down,
-                size=size.tiny
-            )
+        temp_pivot_label := label.new(
+            x=best_bar,
+            y=best_price,
+            text=is_hunting_high ? "HL?" : "LH?",
+            color=color.new(color.gray, 30),
+            textcolor=color.gray,
+            style=is_hunting_high ? label.style_label_up : label.style_label_down,
+            size=size.tiny
+        )
 
 // ╔══════════════════════════════════════════╗
 // ║   IMBALANCE DETECTION (FVG / OG / VI)   ║
@@ -880,7 +655,7 @@ if show_ob
 // ╚══════════════════════════════════════════╝
 
 var table smc_table = table.new(
-    get_dashboard_pos(dashboard_pos),
+    smc.f_get_dashboard_pos(dashboard_pos),
     columns=2,
     rows=4,
     bgcolor=#1e222d,
@@ -890,26 +665,26 @@ var table smc_table = table.new(
 
 if show_dashboard and barstate.islast
     // Xác định biên Swing hiện tại
-    float swing_high = (trend == 1) ? hh_price : lh_price
-    float swing_low  = (trend == 1) ? hl_price : ll_price
+    float swing_high = (st.trend == 1) ? st.hh_price : st.lh_price
+    float swing_low  = (st.trend == 1) ? st.hl_price : st.ll_price
 
     // Tính toán % vị trí giá hiện tại (Premium/Discount)
     // Bull: 100 - giá trị gốc → % cao = Discount (gần Swing Low), % thấp = Premium (gần Swing High)
     // Bear: giữ nguyên → % thấp = Discount (gần Swing Low), % cao = Premium (gần Swing High)
     float range_diff = swing_high - swing_low
     float pos_pct_raw = (range_diff != 0) ? ((close - swing_low) / range_diff) * 100 : 0
-    float pos_pct = (trend == 1) ? (100 - pos_pct_raw) : pos_pct_raw
+    float pos_pct = (st.trend == 1) ? (100 - pos_pct_raw) : pos_pct_raw
 
     // Nội dung hiển thị
-    string row1_col1 = (trend == 1) ? "HH Price" : "LH Price"
+    string row1_col1 = (st.trend == 1) ? "HH Price" : "LH Price"
     string row1_col2 = str.tostring(
-        (trend == 1) ? hh_price : lh_price,
+        (st.trend == 1) ? st.hh_price : st.lh_price,
         format.mintick
     )
 
-    string row2_col1 = (trend == 1) ? "HL Price" : "LL Price"
+    string row2_col1 = (st.trend == 1) ? "HL Price" : "LL Price"
     string row2_col2 = str.tostring(
-        (trend == 1) ? hl_price : ll_price,
+        (st.trend == 1) ? st.hl_price : st.ll_price,
         format.mintick
     )
 
@@ -919,9 +694,9 @@ if show_dashboard and barstate.islast
     // Fill bảng
     table.cell(smc_table, 0, 0, "THÔNG SỐ SMC",
         text_color=color.white, text_size=size.small, bgcolor=#3d4252)
-    table.cell(smc_table, 1, 0, (trend == 1 ? "BULLISH" : "BEARISH"),
+    table.cell(smc_table, 1, 0, (st.trend == 1 ? "BULLISH" : "BEARISH"),
         text_color=color.white, text_size=size.small,
-        bgcolor=(trend == 1 ? bullColor : bearColor))
+        bgcolor=(st.trend == 1 ? bullColor : bearColor))
 
     table.cell(smc_table, 0, 1, row1_col1,
         text_color=color.white, text_size=size.small)
@@ -935,8 +710,8 @@ if show_dashboard and barstate.islast
 
     // Màu sắc: Bull → % cao = Discount (xanh), % thấp = Premium (đỏ)
     //          Bear → % cao = Premium (đỏ), % thấp = Discount (xanh)
-    color pos_color = (trend == 1) ? (pos_pct > 50 ? color.green : color.red)
-                                  : (pos_pct > 50 ? color.red   : color.green)
+    color pos_color = (st.trend == 1) ? (pos_pct > 50 ? color.green : color.red)
+                                   : (pos_pct > 50 ? color.red   : color.green)
 
     table.cell(smc_table, 0, 3, row3_col1,
         text_color=color.white, text_size=size.small)
@@ -977,7 +752,7 @@ set_imb_cells(table tb, int column, int bull_filled_val, int bull_count_val, int
 
 // ─── Khởi tạo bảng imbalance ───
 var table imb_table = table.new(
-    get_dashboard_pos(imb_dashboard_pos),
+    smc.f_get_dashboard_pos(imb_dashboard_pos),
     columns=6,
     rows=7,
     bgcolor=#1e222d,
