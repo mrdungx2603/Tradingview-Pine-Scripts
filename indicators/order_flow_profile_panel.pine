@@ -494,13 +494,11 @@ if barstate.isconfirmed
         bucket_has_data   := true
     else
         bucket_delta_sum += nz(delta)
-        bucket_cvd_end   := cvd
-        bucket_last_bar  := bar_index
+        bucket_cvd_end := cvd
+        bucket_last_bar := bar_index
 
 // ============================================================================
-// 8. TÊN DÒNG — neo vào trục giá bên phải (display.price_scale), không hiện
-//    trong legend/data window/pane. Thay cho label.new() nổi giữa khu vực vẽ
-//    (dễ chồng lấp box, trôi lệch) dùng ở các bản trước.
+// 10. TÊN DÒNG — neo trục giá bên phải
 // ============================================================================
 plot(show_time  ? Y_TIME  : na, title="Time",      display=display.price_scale, color=color.gray)
 plot(show_delta ? Y_DELTA : na, title="Delta",     display=display.price_scale, color=color.gray)
