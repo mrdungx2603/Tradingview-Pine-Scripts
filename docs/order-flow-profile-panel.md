@@ -1,6 +1,6 @@
 # Order Flow & Market Profile Panel — Tài Liệu
 
-> **Script**: [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) (v1.1)
+> **Script**: [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) (v1.2)
 > **Loại**: Indicator (pane riêng, không overlay)
 > **Pine Script**: v6
 > **Ngày tạo**: 2026-11-14 / **Cập nhật**: 2026-11-14
@@ -68,3 +68,4 @@ Engine Day Type/Open Type/RF/TPO Count được **port từ `market_profile.pine
 
 - **v1.0** (2026-11-14): Phát hành lần đầu (Phase 1 — file độc lập). Đã qua 1 vòng review toàn branch trước khi test thật trên TradingView, fix 3 lỗi Critical (box.new nhận float cho left/right, band Day/Open Type lỗi runtime ở bar đầu lịch sử, `ib_bars_cnt` sai đơn vị cho M1) + 4 cải tiến Important (fallback lower-tf không raise lỗi, chặn NaN propagation vào CVD, giới hạn `calc_bars_count`, neo scale pane bằng 2 plot trong suốt).
 - **v1.1** (2026-11-14): Sau khi xem thử trên chart thật, đổi 5 dòng động từ "1 cột = 1 nến M1" sang "1 cột = `col_minutes` phút" (mặc định 5, input riêng) để xem được nhiều lịch sử hơn trong giới hạn 500 box — Delta cộng tổng theo khung, CVD/TPO/RF lấy mẫu tại cuối khung, RSI đổi sang tính thật theo khung `col_minutes` qua `request.security()` thay vì lấy mẫu RSI(M1). Nâng `n_bars_display` lên tối đa 95. Backup v1.0 tại `indicators/hist/order_flow_profile_panel_v1.0.pine`.
+- **v1.2** (2026-11-14): Chữ trong box quá nhỏ không đọc được — tăng cỡ chữ 5 dòng động (`tiny`→`small`) và Day/Open Type (`small`→`normal`). Thêm nhãn tên dòng (Delta/CVD/TPO Count/Day Type/Open Type/RF/RSI) bằng `label.new()` bám theo cột mới nhất (`bar_index + 2`, cập nhật mỗi bar) — không dùng `table.*` vì bảng neo góc màn hình sẽ không khớp đúng vị trí y 0..7 của các box dữ liệu. Backup v1.1 tại `indicators/hist/order_flow_profile_panel_v1.1.pine`.

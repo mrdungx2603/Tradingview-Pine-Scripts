@@ -2,7 +2,7 @@
 // ─── Order Flow & Market Profile Panel ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-11-14
-// Phiên bản: 1.1
+// Phiên bản: 1.2
 // Mô tả: Pane riêng (không overlay) hiển thị 7 dòng dữ liệu: Delta (footprint),
 //        CVD, TPO Count (trên/dưới POC), Day Type, Open Type, RF (Rotation
 //        Factor), RSI. Chart chính chạy M1 (để vào lệnh); 5 dòng động
@@ -17,6 +17,11 @@
 //        (mặc định 5) để xem được nhiều lịch sử hơn trong giới hạn 500 box
 //        của Pine; thêm RSI thật theo khung N phút qua request.security()
 //        thay vì lấy mẫu RSI(M1).
+// Changelog v1.2: Tăng cỡ chữ (5 dòng động: tiny→small; Day/Open Type:
+//        small→normal) vì chữ quá nhỏ không đọc được; thêm nhãn tên dòng
+//        (Delta/CVD/TPO Count/Day Type/Open Type/RF/RSI) bám theo cột mới
+//        nhất bằng label.new(), không dùng table.* vì neo góc màn hình sẽ
+//        không khớp đúng vị trí y 0..7 của các box dữ liệu.
 // Phase: 1/2 — file độc lập, không import/export, không sửa market_profile.pine.
 indicator(title="Order Flow & Market Profile Panel", shorttitle="OF Panel v6", overlay=false, max_boxes_count=500, max_labels_count=500, calc_bars_count=3000)
 
@@ -379,7 +384,7 @@ f_push_cell(array<box> col_boxes, float y_top, float y_bottom, string txt, color
     // theo nến/float sẽ lỗi biên dịch). Dùng xloc.bar_time với đúng biên thời
     // gian thật [đầu khung, cuối khung) của khung col_minutes phút vừa đóng.
     int full_ms = col_minutes * 60 * 1000
-    box b = box.new(bucket_end_time - full_ms, y_top, bucket_end_time, y_bottom, xloc=xloc.bar_time, border_color=bg, bgcolor=bg, text=txt, text_color=color.white, text_size=size.tiny)
+    box b = box.new(bucket_end_time - full_ms, y_top, bucket_end_time, y_bottom, xloc=xloc.bar_time, border_color=bg, bgcolor=bg, text=txt, text_color=color.white, text_size=size.small)
     array.push(col_boxes, b)
     if array.size(col_boxes) > max_cols
         box.delete(array.shift(col_boxes))
@@ -440,8 +445,8 @@ if not na(prof.start_bar) and (is_new_session or na(b_daytype))
     if not na(b_daytype)
         box.delete(b_daytype)
         box.delete(b_opentype)
-    b_daytype  := box.new(prof.start_bar, Y_DAYTYPE, bar_index, Y_DAYTYPE - 1, border_color=c_daytype_now, bgcolor=c_daytype_now, text=prof.day_type, text_color=color.white, text_size=size.small)
-    b_opentype := box.new(prof.start_bar, Y_OPENTYPE, bar_index, Y_OPENTYPE - 1, border_color=c_dt_normal, bgcolor=c_dt_normal, text=prof.open_type, text_color=color.white, text_size=size.small)
+    b_daytype  := box.new(prof.start_bar, Y_DAYTYPE, bar_index, Y_DAYTYPE - 1, border_color=c_daytype_now, bgcolor=c_daytype_now, text=prof.day_type, text_color=color.white, text_size=size.normal)
+    b_opentype := box.new(prof.start_bar, Y_OPENTYPE, bar_index, Y_OPENTYPE - 1, border_color=c_dt_normal, bgcolor=c_dt_normal, text=prof.open_type, text_color=color.white, text_size=size.normal)
 else if not na(b_daytype)
     box.set_right(b_daytype, bar_index)
     box.set_text(b_daytype, prof.day_type)
@@ -449,3 +454,36 @@ else if not na(b_daytype)
     box.set_border_color(b_daytype, c_daytype_now)
     box.set_right(b_opentype, bar_index)
     box.set_text(b_opentype, prof.open_type)
+
+// ============================================================================
+// 8. NHÃN TÊN DÒNG (ROW LABEL) — luôn bám theo nến hiện tại để không bị cuộn mất
+// ============================================================================
+// Không dùng table.* (neo góc màn hình, không khớp đúng vị trí y 0..7 của box).
+// Dùng label.new() đặt ngay bên phải cột mới nhất, cập nhật x mỗi bar — giống
+// cách label "pVAH"/"pVAL"/"pPOC" bám theo bar_index trong market_profile.pine.
+var label lb_delta    = na
+var label lb_cvd      = na
+var label lb_tpo      = na
+var label lb_daytype  = na
+var label lb_opentype = na
+var label lb_rf       = na
+var label lb_rsi      = na
+
+if barstate.islast
+    int lx = bar_index + 2
+    if na(lb_delta)
+        lb_delta    := label.new(lx, Y_DELTA    - 0.5, "Delta",      style=label.style_label_left, color=color.new(color.gray, 100), textcolor=color.gray, size=size.normal)
+        lb_cvd      := label.new(lx, Y_CVD      - 0.5, "CVD",        style=label.style_label_left, color=color.new(color.gray, 100), textcolor=color.gray, size=size.normal)
+        lb_tpo      := label.new(lx, Y_TPO      - 0.5, "TPO Count",  style=label.style_label_left, color=color.new(color.gray, 100), textcolor=color.gray, size=size.normal)
+        lb_daytype  := label.new(lx, Y_DAYTYPE  - 0.5, "Day Type",   style=label.style_label_left, color=color.new(color.gray, 100), textcolor=color.gray, size=size.normal)
+        lb_opentype := label.new(lx, Y_OPENTYPE - 0.5, "Open Type",  style=label.style_label_left, color=color.new(color.gray, 100), textcolor=color.gray, size=size.normal)
+        lb_rf       := label.new(lx, Y_RF       - 0.5, "RF",         style=label.style_label_left, color=color.new(color.gray, 100), textcolor=color.gray, size=size.normal)
+        lb_rsi      := label.new(lx, Y_RSI      - 0.5, "RSI",        style=label.style_label_left, color=color.new(color.gray, 100), textcolor=color.gray, size=size.normal)
+    else
+        label.set_x(lb_delta,    lx)
+        label.set_x(lb_cvd,      lx)
+        label.set_x(lb_tpo,      lx)
+        label.set_x(lb_daytype,  lx)
+        label.set_x(lb_opentype, lx)
+        label.set_x(lb_rf,       lx)
+        label.set_x(lb_rsi,      lx)
