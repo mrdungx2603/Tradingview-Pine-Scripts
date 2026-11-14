@@ -2,13 +2,21 @@
 // ─── Market Profile — Mind over Markets (Classic Light Edition) ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-11-14
-// Phiên bản: 1.1
+// Phiên bản: 1.2
 // Mô tả: Market Profile / TPO (Time Price Opportunity) theo phương pháp "Mind over Markets" —
 //        tính Initial Balance, Value Area (VAH/VAL/POC), Naked POC, Tails/Single Prints/Ledge/Spike,
 //        phân loại Day Type & Open Type, 80% VA Rule, Dashboard thống kê.
 // Changelog v1.1: Sửa lỗi array out-of-bounds (sell tail khi POC ở hàng trên cùng lưới) và
 //        sai logic buy tail khi POC ở hàng dưới cùng; bỏ matrix tpo_mat không dùng tới;
 //        chuyển vẽ đối tượng (IB/VA/tails/band...) từ xoá+tạo lại mỗi bar sang cập nhật tại chỗ.
+// Changelog v1.2: Thêm nhãn pVAH/pVAL/pPOC bên thanh giá (price scale) bên phải chart qua
+//        plot(display=display.price_scale), giúp thấy giá trị phiên trước không cần cuộn chart.
+//        Có toggle riêng "show_pva_scale" để ẩn/hiện độc lập với đường kẻ trên chart. Nhãn
+//        price scale đổi màu xám khi mức giá đã bị lấp (Filled), giữ màu gốc khi còn nguyên
+//        (Open); nhãn trên chart đổi text "(Open)" ↔ "(Filled)" tương ứng. Khung Value Area
+//        tách thành 2 vùng trên/dưới POC, bỏ border, màu khác nhau, trong suốt cao (mờ) để
+//        chart đỡ rối, dễ giao dịch hơn. Đường POC giảm độ dày (2→1) + thêm trong suốt; đường
+//        VAH/VAL đổi sang nét đứt + mờ hơn POC, giảm cảm giác "đậm" trên chart.
 indicator("Market Profile — Mind over Markets (Classic Light Edition)", shorttitle="MP Classic v6", overlay=true, max_lines_count=500, max_boxes_count=500, max_labels_count=500)
 
 // ============================================================================
@@ -19,6 +27,7 @@ show_ib      = input.bool(true, "Hiển thị IB Lines & Extensions (1.5x, 2.0x)
 show_va      = input.bool(true, "Hiển thị VAH / VAL / POC & Khung Value Area", group=grp_toggle)
 show_npoc    = input.bool(true, "Hiển thị & Kéo dài các đường Naked POC (Virgin POC)", group=grp_toggle)
 show_prev_va = input.bool(true, "Hiển thị VAH / VAL / POC của Phiên Trước (Untested)", group=grp_toggle)
+show_pva_scale = input.bool(true, "Hiển thị nhãn pVAH/pVAL/pPOC bên Thanh Giá (Price Scale)", group=grp_toggle)
 show_tails   = input.bool(true, "Hiển thị Single Prints, Tails, Ledge & Spike", group=grp_toggle)
 show_poor    = input.bool(true, "Hiển thị nhãn Poor High / Poor Low", group=grp_toggle)
 show_dash    = input.bool(true, "Hiển thị Bảng Thống kê (Dashboard Table)", group=grp_toggle)
@@ -41,8 +50,11 @@ en_al_rule80 = input.bool(true, "Cảnh báo Kích hoạt Quy tắc 80% Value Ar
 // ============================================================================
 // 2. BẢNG MÀU CLASSIC LIGHT-THEME (HIGH CONTRAST FOR WHITE BACKGROUND)
 // ============================================================================
-c_navy_poc     = color.rgb(26, 54, 93)       // Deep Navy (#1A365D) - POC & VA Border
-c_slate_va     = color.rgb(43, 108, 176, 88) // Slate Blue nhạt trong suốt - Nền Value Area
+c_navy_poc     = color.rgb(26, 54, 93)       // Deep Navy (#1A365D) - Dùng cho Text/Border/Frame chung
+c_poc_line     = color.new(c_navy_poc, 30)   // Navy mờ nhẹ - Đường kẻ POC (vẫn rõ nhất trong 3 đường)
+c_va_edge_line = color.new(c_navy_poc, 55)   // Navy mờ nhiều hơn - Đường kẻ VAH / VAL
+c_va_above     = color.rgb(43, 108, 176, 92) // Xanh Slate mờ, trong suốt cao - Vùng Value Area TRÊN POC
+c_va_below     = color.rgb(183, 121, 31, 92) // Vàng Amber mờ, trong suốt cao - Vùng Value Area DƯỚI POC
 c_ib_line      = color.rgb(45, 55, 72)       // Charcoal Slate - Đường biên IB
 c_ib_ext       = color.rgb(113, 128, 150)    // Muted Gray - Đường mở rộng IB 1.5x, 2.0x
 
@@ -146,7 +158,8 @@ type SessionDrawings
     line  l_vah          = na
     line  l_val          = na
     line  l_ledge        = na
-    box   b_va           = na
+    box   b_va_up        = na
+    box   b_va_dn        = na
     box   b_buy_tail     = na
     box   b_sell_tail    = na
     box   b_sp_mid       = na
@@ -229,9 +242,9 @@ if is_new_session
         l_prev_vah  := line.new(last_end, last_vah, bar_index, last_vah, color=c_prev_va_col, style=line.style_dotted, width=1)
         l_prev_val  := line.new(last_end, last_val, bar_index, last_val, color=c_prev_va_col, style=line.style_dotted, width=1)
         l_prev_poc  := line.new(last_end, last_poc, bar_index, last_poc, color=c_navy_poc,    style=line.style_dotted, width=1)
-        lb_prev_vah := label.new(bar_index, last_vah, "pVAH", style=label.style_none, textcolor=c_prev_va_col, size=size.tiny)
-        lb_prev_val := label.new(bar_index, last_val, "pVAL", style=label.style_none, textcolor=c_prev_va_col, size=size.tiny)
-        lb_prev_poc := label.new(bar_index, last_poc, "pPOC", style=label.style_none, textcolor=c_navy_poc,    size=size.tiny)
+        lb_prev_vah := label.new(bar_index, last_vah, "pVAH (Open)", style=label.style_none, textcolor=c_prev_va_col, size=size.tiny)
+        lb_prev_val := label.new(bar_index, last_val, "pVAL (Open)", style=label.style_none, textcolor=c_prev_va_col, size=size.tiny)
+        lb_prev_poc := label.new(bar_index, last_poc, "pPOC (Open)", style=label.style_none, textcolor=c_navy_poc,    size=size.tiny)
 
     prof := SessionProfile.new(
          start_bar    = bar_index,
@@ -318,7 +331,7 @@ if show_prev_va and not na(prof.prev_vah)
         label.set_x(lb_prev_vah, bar_index + 1)
         if high >= prof.prev_vah and low <= prof.prev_vah
             prof.p_vah_tested := true
-            label.set_text(lb_prev_vah, "pVAH (Tested)")
+            label.set_text(lb_prev_vah, "pVAH (Filled)")
             trig_pva_hit := true
             if en_al_npoc
                 alert("[" + syminfo.ticker + "] PREV VAH TESTED: Giá vừa chạm pVAH tại " + str.tostring(prof.prev_vah, format.mintick), alert.freq_once_per_bar)
@@ -328,7 +341,7 @@ if show_prev_va and not na(prof.prev_vah)
         label.set_x(lb_prev_val, bar_index + 1)
         if high >= prof.prev_val and low <= prof.prev_val
             prof.p_val_tested := true
-            label.set_text(lb_prev_val, "pVAL (Tested)")
+            label.set_text(lb_prev_val, "pVAL (Filled)")
             trig_pva_hit := true
             if en_al_npoc
                 alert("[" + syminfo.ticker + "] PREV VAL TESTED: Giá vừa chạm pVAL tại " + str.tostring(prof.prev_val, format.mintick), alert.freq_once_per_bar)
@@ -338,7 +351,7 @@ if show_prev_va and not na(prof.prev_vah)
         label.set_x(lb_prev_poc, bar_index + 1)
         if high >= prof.prev_poc and low <= prof.prev_poc
             prof.p_poc_tested := true
-            label.set_text(lb_prev_poc, "pPOC (Tested)")
+            label.set_text(lb_prev_poc, "pPOC (Filled)")
 
 // ============================================================================
 // 6. ĐỘNG CƠ TÍNH TOÁN TPO, VALUE AREA, POOR HIGH/LOW & 80% RULE
@@ -594,6 +607,20 @@ alertcondition(trig_pva_hit,   title="7. Chạm pVAH/pVAL Phiên Trước", mess
 alertcondition(trig_rule_80,   title="8. Quy tắc 80% Value Area Rule Kích Hoạt", message="[{{ticker}}] Market Profile: 80% VA Rule đã được kích hoạt xác nhận!")
 
 // ============================================================================
+// 7.1. NHÃN pVAH / pVAL / pPOC BÊN THANH GIÁ (PRICE SCALE — PHẢI BIỂU ĐỒ)
+// ============================================================================
+// Dùng plot() với display=display.price_scale để chỉ hiện nhãn + giá trị ngay
+// bên cạnh thanh giá (price scale), không vẽ thêm đường trên pane (đã có line.new riêng).
+// Lưu ý: cần bật "Indicator Last Value Label" trong Chart Settings > Scales (cài đặt chung
+// của TradingView, áp dụng cho mọi indicator) thì nhãn mới hiện ra trên thanh giá.
+// Màu chuyển sang xám nhạt (c_ib_ext) khi mức giá đã bị lấp (Filled); giữ màu gốc khi còn
+// nguyên (Open) — do title của plot() là chuỗi cố định, không thể đổi text "(Open)/(Filled)"
+// động ngay trong nhãn price scale như nhãn trên chart, nên dùng màu để thể hiện trạng thái.
+plot(show_pva_scale ? prof.prev_vah : na, title="pVAH", color=prof.p_vah_tested ? c_ib_ext : c_prev_va_col, display=display.price_scale)
+plot(show_pva_scale ? prof.prev_val : na, title="pVAL", color=prof.p_val_tested ? c_ib_ext : c_prev_va_col, display=display.price_scale)
+plot(show_pva_scale ? prof.prev_poc : na, title="pPOC", color=prof.p_poc_tested ? c_ib_ext : c_navy_poc,    display=display.price_scale)
+
+// ============================================================================
 // 8. VẼ ĐỐI TƯỢNG LÊN BIỂU ĐỒ (VISUALIZATION)
 // ============================================================================
 if not na(prof.start_bar)
@@ -633,17 +660,21 @@ if not na(prof.start_bar)
                 line.set_xy1(draw.l_ib_ext_d20, x1, ext_d20)
                 line.set_xy2(draw.l_ib_ext_d20, x2, ext_d20)
 
-    // 8.2. Value Area Box & POC/VAH/VAL — cập nhật tại chỗ, chỉ tạo mới khi vừa có POC lần đầu
+    // 8.2. Value Area Box (2 vùng trên/dưới POC, mờ, không border) & đường POC/VAH/VAL
     if show_va and not na(prof.poc)
         if na(draw.l_poc)
-            draw.b_va  := box.new(x1, prof.vah, x2, prof.val, border_color=c_navy_poc, border_width=1, border_style=line.style_solid, bgcolor=c_slate_va)
-            draw.l_poc := line.new(x1, prof.poc, x2, prof.poc, color=c_navy_poc, style=line.style_solid, width=2)
-            draw.l_vah := line.new(x1, prof.vah, x2, prof.vah, color=c_navy_poc, style=line.style_solid, width=1)
-            draw.l_val := line.new(x1, prof.val, x2, prof.val, color=c_navy_poc, style=line.style_solid, width=1)
+            draw.b_va_up := box.new(x1, prof.vah, x2, prof.poc, border_width=0, bgcolor=c_va_above)
+            draw.b_va_dn := box.new(x1, prof.poc, x2, prof.val, border_width=0, bgcolor=c_va_below)
+            draw.l_poc   := line.new(x1, prof.poc, x2, prof.poc, color=c_poc_line,     style=line.style_solid,  width=1)
+            draw.l_vah   := line.new(x1, prof.vah, x2, prof.vah, color=c_va_edge_line, style=line.style_dashed, width=1)
+            draw.l_val   := line.new(x1, prof.val, x2, prof.val, color=c_va_edge_line, style=line.style_dashed, width=1)
         else
-            box.set_top(draw.b_va, prof.vah)
-            box.set_bottom(draw.b_va, prof.val)
-            box.set_right(draw.b_va, x2)
+            box.set_top(draw.b_va_up, prof.vah)
+            box.set_bottom(draw.b_va_up, prof.poc)
+            box.set_right(draw.b_va_up, x2)
+            box.set_top(draw.b_va_dn, prof.poc)
+            box.set_bottom(draw.b_va_dn, prof.val)
+            box.set_right(draw.b_va_dn, x2)
             line.set_xy1(draw.l_poc, x1, prof.poc)
             line.set_xy2(draw.l_poc, x2, prof.poc)
             line.set_xy1(draw.l_vah, x1, prof.vah)

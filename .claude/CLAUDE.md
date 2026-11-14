@@ -174,8 +174,9 @@ export f_ema(src, len) =>
 ## Quản Lý Phiên Bản (Version)
 
 - **Tăng version** trong header file (`// Phiên bản: X.Y`) mỗi khi có thay đổi code.
-- **Backup ver cũ**: Trước khi tăng version, lưu bản hiện tại vào `indicators/hist/<tên_file>_vX.Y.pine`.
-- Dùng `git show <commit>:indicators/<file>.pine > indicators/hist/<file>_vX.Y.pine` để trích xuất.
+- **Backup ver cũ**: Trước khi tăng version, lưu bản hiện tại (trước khi sửa) vào `indicators/hist/<tên_file>_vX.Y.pine`.
+- Dùng `git show <commit>:indicators/<file>.pine > indicators/hist/<file>_vX.Y.pine` để trích xuất nếu file đã có trong git history. Nếu file chưa từng commit (untracked, chưa có version cũ trong git), lưu trực tiếp nội dung trước khi sửa ra `indicators/hist/<tên_file>_vX.Y.pine` (ví dụ v1.0 cho lần sửa đổi đầu tiên).
+- **⚠️ BẮT BUỘC trước khi `git push`**: Nếu có sửa đổi code trong file `.pine` (bug fix, cải tiến, refactor...) ở lần làm việc đó, phải backup bản trước khi sửa vào `indicators/hist/` VÀ tăng version trong header **trước khi commit/push**. Không push code đã sửa mà chưa backup bản cũ — đây là bước không được bỏ qua dù user không nhắc lại.
 
 Ví dụ khi nâng từ v1.9 lên v2.0:
 ```bash
