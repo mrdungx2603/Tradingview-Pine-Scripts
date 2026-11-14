@@ -1,0 +1,47 @@
+//@version=6
+// ─── Order Flow & Market Profile Panel ───
+// Tác giả: TV Pine
+// Ngày tạo: 2026-11-14
+// Phiên bản: 1.0
+// Mô tả: Pane riêng (không overlay) hiển thị 7 dòng dữ liệu, mỗi cột = 1 nến,
+//        trôi đồng bộ theo chart chính: Delta (footprint), CVD, TPO Count
+//        (trên/dưới POC), Day Type, Open Type, RF (Rotation Factor), RSI.
+//        Day Type & Open Type mỗi dòng merge thành 1 box duy nhất kéo dài
+//        suốt phiên (full D1). Delta/CVD dùng fallback 3 tầng khi
+//        request.footprint() không có dữ liệu cho mã đang chạy (vd VN30F1!).
+// Phase: 1/2 — file độc lập, không import/export, không sửa market_profile.pine.
+indicator(title="Order Flow & Market Profile Panel", shorttitle="OF Panel v6", overlay=false, max_boxes_count=500, max_labels_count=500)
+
+// ============================================================================
+// 1. INPUTS
+// ============================================================================
+grp_footprint = "Footprint"
+ticks_per_row     = input.int(10, "Ticks mỗi dòng (ticks_per_row)", minval=1, group=grp_footprint)
+va_pct            = input.float(70.0, "Value Area (%)", minval=50.0, maxval=90.0, step=1.0, group=grp_footprint)
+imb_pct           = input.float(300.0, "Ngưỡng Imbalance (%)", minval=100.0, step=10.0, group=grp_footprint)
+lower_tf_fallback = input.string("1S", "Khung Thời Gian Dự Phòng (Lower TF)", group=grp_footprint)
+
+grp_display = "Hiển Thị"
+n_bars_display = input.int(60, "Số Cột Hiển Thị (Rolling Window)", minval=20, maxval=90, group=grp_display)
+
+grp_mp = "Market Profile"
+grid_rows   = input.int(60, "Độ Phân Giải Lưới Giá TPO (grid_rows)", minval=20, maxval=120, group=grp_mp)
+ib_bars_cnt = input.int(2, "Số Thanh Nến Tính Initial Balance", minval=1, maxval=12, group=grp_mp)
+
+grp_rsi = "RSI"
+rsi_len = input.int(14, "Chu Kỳ RSI", minval=1, group=grp_rsi)
+rsi_src = input.source(close, "Nguồn RSI", group=grp_rsi)
+
+// ============================================================================
+// 2. RSI & HẰNG SỐ VỊ TRÍ DÒNG TRONG PANE
+// ============================================================================
+float rsi_val = ta.rsi(rsi_src, rsi_len)
+
+// Mỗi dòng cao 1 đơn vị trục y; dòng trên cùng = Delta, dòng dưới cùng = RSI.
+var int Y_DELTA    = 7
+var int Y_CVD      = 6
+var int Y_TPO      = 5
+var int Y_DAYTYPE  = 4
+var int Y_OPENTYPE = 3
+var int Y_RF       = 2
+var int Y_RSI      = 1
