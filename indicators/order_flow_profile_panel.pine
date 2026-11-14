@@ -392,41 +392,45 @@ var array<box> col_tpo   = array.new<box>()
 var array<box> col_rf    = array.new<box>()
 var array<box> col_rsi   = array.new<box>()
 
-// Gộp cột: Delta = tổng delta các nến M1 trong khung col_tf vừa đóng; CVD/VAH/
-// POC/VAL/TPO Count/RF lấy mẫu giá trị tích lũy-theo-phiên tại cuối khung (không
-// cộng dồn lại — bản chất các chỉ số này đã là "developing" theo toàn phiên);
-// RSI lấy từ rsi_5m (request.security() đã tính thật theo khung col_tf).
+// Gộp cột: Delta = tổng delta các nến M1 trong khung col_tf vừa đóng; CVD/
+// TPO/RF lấy mẫu giá trị tích lũy-theo-phiên tại cuối khung; RSI lấy từ
+// rsi_5m (request.security() đã tính thật theo khung col_tf).
+// FIX: Flush ngay khi khung kết thúc (time >= bucket_start_time + col_tf_ms),
+// không chờ bar mới kích hoạt is_new_col — tránh lệch 1 nến.
 bool is_new_col = timeframe.change(col_tf)
 
-// Phát hiện col_tf có phải số phút thuần không (vd "3","5","15") để biết có nên
-// chạy cơ chế lấp "gap" (khung hoàn toàn không có nến M1) — không áp dụng cho
-// "1D"/"1W" (str.tonumber trả na với các chuỗi này).
-float col_tf_num    = str.tonumber(col_tf)
-bool  col_tf_is_min = not na(col_tf_num)
-int   col_tf_ms     = col_tf_is_min ? int(col_tf_num * 60000) : na
+float col_tf_num = str.tonumber(col_tf)
+bool col_tf_is_min = not na(col_tf_num)
+int col_tf_ms = col_tf_is_min ? int(col_tf_num * 60000) : na
 
-var float bucket_delta_sum  = 0.0
-var float bucket_cvd_end    = 0.0
-var bool  bucket_has_data   = false
-var int   bucket_start_time = na // chỉ dùng để hiện text dòng Time (HH:mm)
-var int   bucket_start_bar  = na // dùng để định vị box theo bar_index
-var int   bucket_last_bar   = na
+var float bucket_delta_sum = 0.0
+var float bucket_cvd_end = 0.0
+var bool bucket_has_data = false
+var int bucket_start_time = na
+var int bucket_start_bar = na
+var int bucket_last_bar = na
+
+// Phát hiện khung col_tf vừa kết thúc (thay vì chờ is_new_col)
+bool bucket_ended = false
+if col_tf_is_min and not na(bucket_start_time) and barstate.isconfirmed
+    int bucket_end_expected = bucket_start_time + col_tf_ms
+    bucket_ended := time >= bucket_end_expected
 
 if barstate.isconfirmed
-    if is_new_col
-        // Màu dương=forest green, âm=burgundy, trung tính=gray (đồng bộ bảng màu market_profile.pine).
-        color  c_delta    = bucket_delta_sum > 0 ? color.rgb(27, 77, 62) : bucket_delta_sum < 0 ? color.rgb(139, 0, 0) : color.gray
-        color  c_cvd      = bucket_cvd_end > 0 ? color.rgb(27, 77, 62) : bucket_cvd_end < 0 ? color.rgb(139, 0, 0) : color.gray
-        color  c_rf       = prof.rf_score > 0 ? color.rgb(27, 77, 62) : prof.rf_score < 0 ? color.rgb(139, 0, 0) : color.gray
-        color  c_tpo      = prof.tpo_below_poc > prof.tpo_above_poc ? color.rgb(27, 77, 62) : prof.tpo_above_poc > prof.tpo_below_poc ? color.rgb(139, 0, 0) : color.gray
-        color  c_rsi      = na(rsi_5m) ? color.gray : rsi_5m > 70 ? color.rgb(139, 0, 0) : rsi_5m < 30 ? color.rgb(27, 77, 62) : color.rgb(26, 54, 93)
-        string delta_tag  = delta_source == "Footprint" ? "F" : delta_source == "LowerTF" ? "L" : "A"
-        string delta_txt  = f_format_delta(bucket_delta_sum) + (show_delta_tag ? " " + delta_tag : "")
-        string rsi_txt    = na(rsi_5m) ? "—" : str.tostring(rsi_5m, "#.#")
-        string time_txt   = na(bucket_start_time) ? "—" : str.format_time(bucket_start_time, "HH:mm", syminfo.timezone)
-        string cvd_txt    = f_format_delta(bucket_cvd_end)
-        string tpo_txt    = str.tostring(prof.tpo_above_poc) + "/" + str.tostring(prof.tpo_below_poc)
-        string rf_txt     = str.tostring(prof.rf_score)
+    if is_new_col or bucket_ended
+        // Flush khung vừa kết thúc
+        color c_delta = bucket_delta_sum > 0 ? color.rgb(27, 77, 62) : bucket_delta_sum < 0 ? color.rgb(139, 0, 0) : color.gray
+        color c_cvd = bucket_cvd_end > 0 ? color.rgb(27, 77, 62) : bucket_cvd_end < 0 ? color.rgb(139, 0, 0) : color.gray
+        color c_rf = prof.rf_score > 0 ? color.rgb(27, 77, 62) : prof.rf_score < 0 ? color.rgb(139, 0, 0) : color.gray
+        color c_tpo = prof.tpo_below_poc > prof.tpo_above_poc ? color.rgb(27, 77, 62) : prof.tpo_above_poc > prof.tpo_below_poc ? color.rgb(139, 0, 0) : color.gray
+        color c_rsi = na(rsi_5m) ? color.gray : rsi_5m > 70 ? color.rgb(139, 0, 0) : rsi_5m < 30 ? color.rgb(27, 77, 62) : color.rgb(26, 54, 93)
+        string delta_tag = delta_source == "Footprint" ? "F" : delta_source == "LowerTF" ? "L" : "A"
+        string delta_txt = f_format_delta(bucket_delta_sum) + (show_delta_tag ? " " + delta_tag : "")
+        string rsi_txt = na(rsi_5m) ? "—" : str.tostring(rsi_5m, "#.#")
+        string time_txt = na(bucket_start_time) ? "—" : str.format_time(bucket_start_time, "HH:mm", syminfo.timezone)
+        string cvd_txt = f_format_delta(bucket_cvd_end)
+        string tpo_txt = str.tostring(prof.tpo_above_poc) + "/" + str.tostring(prof.tpo_below_poc)
+        string rf_txt = str.tostring(prof.rf_score)
 
         if bucket_has_data
             if show_time
@@ -441,6 +445,19 @@ if barstate.isconfirmed
                 f_push_cell(col_rf, Y_RF, Y_RF - 1, rf_txt, c_rf, n_bars_display, bucket_start_bar, bucket_last_bar)
             if show_rsi
                 f_push_cell(col_rsi, Y_RSI, Y_RSI - 1, rsi_txt, c_rsi, n_bars_display, bucket_start_bar, bucket_last_bar)
+
+        // Reset bucket cho khung mới
+        bucket_delta_sum := nz(delta)
+        bucket_cvd_end := cvd
+        bucket_start_time := time
+        bucket_start_bar := bar_index
+        bucket_last_bar := bar_index
+        bucket_has_data := true
+    else
+        // Cộng dồn delta vào bucket hiện tại
+        bucket_delta_sum += nz(delta)
+        bucket_cvd_end := cvd
+        bucket_last_bar := bar_index
 
         // LẤP GAP — DISABLED: Gap fill tạo quá nhiều placeholder, khiến dòng Time
         // hiển thị các khung không có dữ liệu thật. Tạm tắt cho đến khi thiết kế lại.
