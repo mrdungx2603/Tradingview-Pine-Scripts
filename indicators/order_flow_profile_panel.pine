@@ -2,19 +2,18 @@
 // ─── Order Flow & Market Profile Panel ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-11-14
-// Phiên bản: 1.11
+// Phiên bản: 1.12
 // Mô tả: Pane riêng (không overlay) hiển thị dữ liệu dạng grid, thứ tự trên
-//        xuống: Time (giờ:phút), Delta (footprint), CVD, VAH, POC, VAL,
-//        TPO Count (trên/dưới POC), RF (Rotation Factor), RSI. Chart chính
-//        chạy M1 (để vào lệnh); mỗi dòng gộp cột thành 1 khung thời gian
-//        (`col_tf`, input timeframe, mặc định 5 phút) độc lập với khung
-//        chart — Delta là tổng delta các nến M1 trong khung, CVD/VAH/POC/
-//        VAL/TPO/RF lấy mẫu giá trị tích lũy-theo-phiên tại cuối khung, RSI
-//        tính thật theo khung đó qua request.security(). Delta/CVD dùng
-//        fallback 3 tầng khi request.footprint() không có dữ liệu cho mã
-//        đang chạy. Mỗi dòng có toggle ẩn/hiện riêng — ẩn sẽ bỏ qua luôn
-//        phần tính toán nặng tương ứng (không chỉ ẩn hiển thị) để tăng
-//        tốc, và grid tự co lại (không chừa dòng trống) khi 1 dòng bị ẩn.
+//        xuống: Time (giờ:phút), Delta (footprint), CVD, TPO Count (trên/dưới
+//        POC), RF (Rotation Factor), RSI. Chart chính chạy M1 (để vào lệnh);
+//        mỗi dòng gộp cột thành 1 khung thời gian (`col_tf`, input timeframe,
+//        mặc định 5 phút) độc lập với khung chart — Delta là tổng delta các
+//        nến M1 trong khung, CVD/TPO/RF lấy mẫu giá trị tích lũy-theo-phiên
+//        tại cuối khung, RSI tính thật theo khung đó qua request.security().
+//        Delta/CVD dùng fallback 3 tầng khi request.footprint() không có dữ
+//        liệu cho mã đang chạy. Mỗi dòng có toggle ẩn/hiện riêng — ẩn sẽ
+//        bỏ qua luôn phần tính toán nặng tương ứng (không chỉ ẩn hiển thị) để
+//        tăng tốc, và grid tự co lại (không chừa dòng trống) khi 1 dòng bị ẩn.
 // Changelog v1.1: Đổi 5 dòng động từ "1 cột = 1 nến M1" sang "1 cột = N phút"
 //        (mặc định 5) để xem được nhiều lịch sử hơn trong giới hạn 500 box
 //        của Pine; thêm RSI thật theo khung N phút qua request.security()
@@ -95,6 +94,14 @@
 //        Đổi sang math.ceil() để bắt chính xác tất cả khung bị miss. Điều kiện
 //        gap_ms >= col_tf_ms → gap_ms > col_tf_ms để chỉ lấp khi gap vượt 1
 //        khung (không lấp gap bằng đúng 1 khung, vì đó không phải gap).
+// Changelog v1.12: Xoá hẳn 3 dòng VAH/POC/VAL (không chỉ ẩn — xoá toàn bộ
+//        code liên quan: input toggle, Y_* position, tính toán TPO grid,
+//        f_push_cell, plot) vì không dùng tới trên OF Panel. Panel còn lại
+//        6 dòng: Time, Delta, CVD, TPO Count, RF, RSI. Giảm maxval/default
+//        n_bars_display 55/55 → 50/50 (6 dòng × 50 = 300 < 500, nhưng thôi
+//        để 55 vì giới hạn không phải bottleneck). need_tpo_grid cờ sử dụng
+//        chỉ cho show_tpo (TPO Count), không còn gate VAH/POC/VAL. Backup
+//        v1.11 tại indicators/hist/order_flow_profile_panel_v1.11.pine.
 // Phase: 1/2 — file độc lập, không import/export, không sửa market_profile.pine.
 indicator(title="Order Flow & Market Profile Panel", shorttitle="OF Panel v6", overlay=false, max_boxes_count=500, max_labels_count=500, calc_bars_count=3000)
 
@@ -116,9 +123,6 @@ grp_rows  = "Hiện/Ẩn Dòng"
 show_time  = input.bool(true, "Time (giờ:phút, dòng trên cùng)", group=grp_rows)
 show_delta = input.bool(true, "Delta", group=grp_rows)
 show_cvd   = input.bool(true, "CVD", group=grp_rows)
-show_vah   = input.bool(true, "VAH", group=grp_rows)
-show_poc   = input.bool(true, "POC", group=grp_rows)
-show_val   = input.bool(true, "VAL", group=grp_rows)
 show_tpo   = input.bool(true, "TPO Count", group=grp_rows)
 show_rf    = input.bool(true, "RF (Rotation Factor)", group=grp_rows)
 show_rsi   = input.bool(true, "RSI", group=grp_rows)
@@ -154,7 +158,7 @@ float rsi_5m = na
 if show_rsi
     rsi_5m := request.security(syminfo.tickerid, col_tf, ta.rsi(rsi_src, rsi_len))
 
-// Vị trí Y của từng dòng tính ĐỘNG theo thứ tự cố định (Delta trên cùng, RSI dưới
+// Vị trí Y của từng dòng tính ĐỘNG theo thứ tự cố định (Time trên cùng, RSI dưới
 // cùng), chỉ đếm các dòng ĐANG hiện — dòng bị ẩn không được cấp số thứ tự, nên các
 // dòng còn lại tự dồn lên khít nhau, không chừa khoảng trống trên grid. Đếm từ
 // dưới (RSI) lên để dòng trên cùng luôn có Y lớn nhất.
@@ -165,12 +169,6 @@ y_cursor := show_rf    ? y_cursor + 1 : y_cursor
 int Y_RF = y_cursor
 y_cursor := show_tpo   ? y_cursor + 1 : y_cursor
 int Y_TPO = y_cursor
-y_cursor := show_val   ? y_cursor + 1 : y_cursor
-int Y_VAL = y_cursor
-y_cursor := show_poc   ? y_cursor + 1 : y_cursor
-int Y_POC = y_cursor
-y_cursor := show_vah   ? y_cursor + 1 : y_cursor
-int Y_VAH = y_cursor
 y_cursor := show_cvd   ? y_cursor + 1 : y_cursor
 int Y_CVD = y_cursor
 y_cursor := show_delta ? y_cursor + 1 : y_cursor
@@ -191,15 +189,10 @@ plot(total_rows_visible, title="Neo Scale Trên", display=display.pane, color=co
 // ============================================================================
 // 3. MÀU & UDT OFProfile
 // ============================================================================
-c_price_level = color.rgb(26, 54, 93) // Màu navy trung tính cho VAH/POC/VAL (mức giá, không phải delta nên không phân loại theo dấu)
-
 type OFProfile
     int    start_bar     = na
     float  sess_high     = na
     float  sess_low      = na
-    float  poc           = na
-    float  vah           = na
-    float  val           = na
     int    rf_score      = 0
     int    tpo_above_poc = 0
     int    tpo_below_poc = 0
@@ -210,7 +203,7 @@ var array<float>    arr_lows  = array.new<float>()
 
 // Cờ điều kiện "simple" (chỉ phụ thuộc input.bool, cố định suốt vòng chạy script)
 // để bỏ qua các khối tính toán nặng khi mọi dòng tiêu thụ chúng đều bị ẩn.
-bool need_tpo_grid = show_vah or show_poc or show_val or show_tpo
+bool need_tpo_grid = show_tpo
 bool need_rf       = show_rf
 bool need_delta    = show_delta or show_cvd
 
@@ -255,11 +248,10 @@ else
             prof.rf_score += bar_rf
 
 // ============================================================================
-// 5. ĐỘNG CƠ TPO, POC, VALUE AREA, TPO COUNT (port dòng 348-415 market_profile.pine)
-//    Chỉ chạy khi need_tpo_grid=true (bỏ qua hoàn toàn nếu VAH/POC/VAL/TPO Count
-//    đều bị ẩn) — đây là phần tính toán nặng nhất của cả script (O(số nến trong
-//    phiên × grid_rows) mỗi bar). Phần tails/single-prints/Day Type/Open Type của
-//    bản gốc đã bỏ hẳn ở v1.5 vì không còn dòng nào dùng tới.
+// 5. ĐỘNG CƠ TPO COUNT (port dòng 348-415 market_profile.pine, chỉ giữ TPO Count)
+//    Chỉ chạy khi need_tpo_grid=true (bỏ qua hoàn toàn nếu show_tpo bị ẩn) —
+//    đây là phần tính toán nặng nhất của cả script (O(số nến trong phiên ×
+//    grid_rows) mỗi bar). Đã xoá POC & Value Area ở v1.12.
 // ============================================================================
 if need_tpo_grid and not na(prof.start_bar) and array.size(arr_highs) > 0
     int num_bars = array.size(arr_highs)
@@ -267,7 +259,6 @@ if need_tpo_grid and not na(prof.start_bar) and array.size(arr_highs) > 0
     float step = math.max(syminfo.mintick, s_range / grid_rows)
 
     array<int> tpo_counts = array.new<int>(grid_rows, 0)
-    int total_tpo_accum = 0
 
     for b = 0 to num_bars - 1
         float b_h = array.get(arr_highs, b)
@@ -277,11 +268,10 @@ if need_tpo_grid and not na(prof.start_bar) and array.size(arr_highs) > 0
             float row_high = row_low + step
             if b_h >= row_low and b_l <= row_high
                 array.set(tpo_counts, r, array.get(tpo_counts, r) + 1)
-                total_tpo_accum += 1
 
-    // 5.1. Point of Control (POC)
-    int max_tpo = -1
+    // 5.1. TPO Count Above/Below POC (chỉ tính trên/dưới, không cần POC chính xác)
     int poc_row = 0
+    int max_tpo = -1
     float mid_row = (grid_rows - 1) / 2.0
 
     for r = 0 to grid_rows - 1
@@ -293,30 +283,6 @@ if need_tpo_grid and not na(prof.start_bar) and array.size(arr_highs) > 0
             if math.abs(r - mid_row) < math.abs(poc_row - mid_row)
                 poc_row := r
 
-    prof.poc := prof.sess_low + (poc_row + 0.5) * step
-
-    // 5.2. Value Area (VAH & VAL) — va_pct là % thô (0-100, dùng chung với
-    // request.footprint()) nên phải chia 100 tại đây để ra tỷ lệ.
-    int target_va_tpo = math.round(total_tpo_accum * (va_pct / 100.0))
-    int current_va_tpo = array.get(tpo_counts, poc_row)
-    int up_idx = poc_row
-    int dn_idx = poc_row
-
-    while current_va_tpo < target_va_tpo and (up_idx < grid_rows - 1 or dn_idx > 0)
-        int up_tpo = up_idx < grid_rows - 1 ? array.get(tpo_counts, up_idx + 1) : -1
-        int dn_tpo = dn_idx > 0 ? array.get(tpo_counts, dn_idx - 1) : -1
-
-        if up_tpo >= dn_tpo and up_idx < grid_rows - 1
-            up_idx += 1
-            current_va_tpo += up_tpo
-        else if dn_idx > 0
-            dn_idx -= 1
-            current_va_tpo += dn_tpo
-
-    prof.vah := prof.sess_low + (up_idx + 1.0) * step
-    prof.val := prof.sess_low + dn_idx * step
-
-    // 5.3. TPO Count Above/Below POC
     int above_cnt = 0
     int below_cnt = 0
     for r = 0 to grid_rows - 1
@@ -422,9 +388,6 @@ f_push_cell_time(array<box> col_boxes, float y_top, float y_bottom, string txt, 
 var array<box> col_time  = array.new<box>()
 var array<box> col_delta = array.new<box>()
 var array<box> col_cvd   = array.new<box>()
-var array<box> col_vah   = array.new<box>()
-var array<box> col_poc   = array.new<box>()
-var array<box> col_val   = array.new<box>()
 var array<box> col_tpo   = array.new<box>()
 var array<box> col_rf    = array.new<box>()
 var array<box> col_rsi   = array.new<box>()
@@ -462,25 +425,16 @@ if barstate.isconfirmed
         string rsi_txt    = na(rsi_5m) ? "—" : str.tostring(rsi_5m, "#.#")
         string time_txt   = na(bucket_start_time) ? "—" : str.format_time(bucket_start_time, "HH:mm", syminfo.timezone)
         string cvd_txt    = f_format_delta(bucket_cvd_end)
-        string vah_txt    = str.tostring(prof.vah, format.mintick)
-        string poc_txt    = str.tostring(prof.poc, format.mintick)
-        string val_txt    = str.tostring(prof.val, format.mintick)
         string tpo_txt    = str.tostring(prof.tpo_above_poc) + "/" + str.tostring(prof.tpo_below_poc)
         string rf_txt     = str.tostring(prof.rf_score)
 
         if bucket_has_data
             if show_time
-                f_push_cell(col_time, Y_TIME, Y_TIME - 1, time_txt, c_price_level, n_bars_display, bucket_start_bar, bucket_last_bar)
+                f_push_cell(col_time, Y_TIME, Y_TIME - 1, time_txt, color.gray, n_bars_display, bucket_start_bar, bucket_last_bar)
             if show_delta
                 f_push_cell(col_delta, Y_DELTA, Y_DELTA - 1, delta_txt, c_delta, n_bars_display, bucket_start_bar, bucket_last_bar)
             if show_cvd
                 f_push_cell(col_cvd, Y_CVD, Y_CVD - 1, cvd_txt, c_cvd, n_bars_display, bucket_start_bar, bucket_last_bar)
-            if show_vah
-                f_push_cell(col_vah, Y_VAH, Y_VAH - 1, vah_txt, c_price_level, n_bars_display, bucket_start_bar, bucket_last_bar)
-            if show_poc
-                f_push_cell(col_poc, Y_POC, Y_POC - 1, poc_txt, c_price_level, n_bars_display, bucket_start_bar, bucket_last_bar)
-            if show_val
-                f_push_cell(col_val, Y_VAL, Y_VAL - 1, val_txt, c_price_level, n_bars_display, bucket_start_bar, bucket_last_bar)
             if show_tpo
                 f_push_cell(col_tpo, Y_TPO, Y_TPO - 1, tpo_txt, c_tpo, n_bars_display, bucket_start_bar, bucket_last_bar)
             if show_rf
@@ -515,12 +469,6 @@ if barstate.isconfirmed
                         f_push_cell_time(col_delta, Y_DELTA, Y_DELTA - 1, "0", c_gap, n_bars_display, ph_start, ph_end)
                     if show_cvd
                         f_push_cell_time(col_cvd, Y_CVD, Y_CVD - 1, cvd_txt, c_gap, n_bars_display, ph_start, ph_end)
-                    if show_vah
-                        f_push_cell_time(col_vah, Y_VAH, Y_VAH - 1, vah_txt, c_gap, n_bars_display, ph_start, ph_end)
-                    if show_poc
-                        f_push_cell_time(col_poc, Y_POC, Y_POC - 1, poc_txt, c_gap, n_bars_display, ph_start, ph_end)
-                    if show_val
-                        f_push_cell_time(col_val, Y_VAL, Y_VAL - 1, val_txt, c_gap, n_bars_display, ph_start, ph_end)
                     if show_tpo
                         f_push_cell_time(col_tpo, Y_TPO, Y_TPO - 1, tpo_txt, c_gap, n_bars_display, ph_start, ph_end)
                     if show_rf
@@ -547,9 +495,6 @@ if barstate.isconfirmed
 plot(show_time  ? Y_TIME  : na, title="Time",      display=display.price_scale, color=color.gray)
 plot(show_delta ? Y_DELTA : na, title="Delta",     display=display.price_scale, color=color.gray)
 plot(show_cvd   ? Y_CVD   : na, title="CVD",       display=display.price_scale, color=color.gray)
-plot(show_vah   ? Y_VAH   : na, title="VAH",       display=display.price_scale, color=color.gray)
-plot(show_poc   ? Y_POC   : na, title="POC",       display=display.price_scale, color=color.gray)
-plot(show_val   ? Y_VAL   : na, title="VAL",       display=display.price_scale, color=color.gray)
 plot(show_tpo   ? Y_TPO   : na, title="TPO Count", display=display.price_scale, color=color.gray)
 plot(show_rf    ? Y_RF    : na, title="RF",        display=display.price_scale, color=color.gray)
 plot(show_rsi   ? Y_RSI   : na, title="RSI",       display=display.price_scale, color=color.gray)

@@ -1,17 +1,17 @@
 # Order Flow & Market Profile Panel — Tài Liệu
 
-> **Script**: [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) (v1.11)
+> **Script**: [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) (v1.12)
 > **Loại**: Indicator (pane riêng, không overlay)
 > **Pine Script**: v6
 > **Ngày tạo**: 2026-11-14 / **Cập nhật**: 2026-11-14
 
 ## Tổng Quan
 
-Pane riêng (giống pane Delta footprint gốc của TradingView) hiển thị dữ liệu dạng grid, trôi đồng bộ theo chart chính (dùng `box.new(xloc=xloc.bar_index)` — neo theo **thứ tự nến**, không phải thời gian thật, để luôn khớp đúng vị trí render ngay cả khi chart ở chế độ hiển thị không tuyến tính theo thời gian như "Volume Candles"; không dùng `table.*` vì `table.*` neo cố định góc màn hình, không đồng bộ với trục ngang của chart). Thiết kế cho trader scalping nến M1 cần theo dõi order flow trong phiên và cấu trúc giá theo phương pháp Market Profile ("Mind over Markets").
+Pane riêng (giống pane Delta footprint gốc của TradingView) hiển thị dữ liệu dạng grid, trôi đồng bộ theo chart chính (dùng `box.new(xloc=xloc.bar_index)` — neo theo **thứ tự nến**, không phải thời gian thật, để luôn khớp đúng vị trí render ngay cả khi chart ở chế độ hiển thị không tuyến tính theo thời gian như "Volume Candles"; không dùng `table.*` vì `table.*` neo cố định góc màn hình, không đồng bộ với trục ngang của chart). Thiết kế cho trader scalping nến M1 cần theo dõi order flow trong phiên.
 
 Chart chính chạy **M1** (để vào lệnh chính xác). Mỗi dòng **gộp cột thành 1 khung thời gian `col_tf`** (chọn qua dropdown timeframe chuẩn Pine, mặc định 5 phút) độc lập với khung chart.
 
-Thứ tự dòng (trên xuống): **Delta** → **CVD** → **VAH** → **POC** → **VAL** → **TPO Count** (trên/dưới POC) → **RF** (Rotation Factor) → **RSI**. Mỗi dòng có toggle ẩn/hiện riêng (nhóm input "Hiện/Ẩn Dòng"):
+Thứ tự dòng (trên xuống): **Time** → **Delta** → **CVD** → **TPO Count** (trên/dưới POC) → **RF** (Rotation Factor) → **RSI**. Mỗi dòng có toggle ẩn/hiện riêng (nhóm input "Hiện/Ẩn Dòng"):
 
 - **Ẩn thì bỏ qua cả phần tính toán nặng tương ứng**, không chỉ ẩn vẽ (xem Logic Chính §5).
 - **Ẩn thì grid tự co lại** — dòng ẩn không chiếm vị trí y, các dòng còn lại tự dồn lên khít nhau (không chừa khoảng trống).
@@ -33,7 +33,7 @@ Chia theo 5 nhóm chức năng (khớp đúng tên group hiện trong Settings):
 | Hiện hậu tố nguồn Delta | `bool` | `true` | Footprint & Delta | Hiện/ẩn hậu tố `F`/`L`/`A` ở ô Delta |
 | Khung Gộp Cột | `timeframe` | `"5"` | Market Profile & Khung Gộp Cột | `col_tf` — dropdown timeframe chuẩn Pine (1, 5, 15, 30, 60, 120, 240, 1D, 1W...), ảnh hưởng mọi dòng gộp cột (không riêng hiển thị nên gộp cùng nhóm Market Profile) |
 | Độ Phân Giải Lưới Giá TPO | `int` | `60` (20–120) | Market Profile & Khung Gộp Cột | `grid_rows` — số hàng chia phiên để đếm TPO |
-| Time / Delta / CVD / VAH / POC / VAL / TPO Count / RF / RSI | `bool` ×9 | `true` | Hiện/Ẩn Dòng | Mỗi dòng 1 toggle riêng — ẩn thì bỏ qua cả tính toán liên quan và không chiếm chỗ trên grid |
+| Time / Delta / CVD / TPO Count / RF / RSI | `bool` ×6 | `true` | Hiện/Ẩn Dòng | Mỗi dòng 1 toggle riêng — ẩn thì bỏ qua cả tính toán liên quan và không chiếm chỗ trên grid |
 | Số Cột Hiển Thị | `int` | `55` (10–55) | Hiển Thị (Giao Diện) | Rolling window cho tất cả dòng (giới hạn `max_boxes_count=500`: tối đa 9 dòng × 55 = 495 < 500) |
 | Cỡ Chữ Hiển Thị | `string` | `"Small"` | Hiển Thị (Giao Diện) | `Tiny`/`Small`/`Normal`/`Large` — áp dụng cho mọi box/plot tên dòng trong panel |
 | Chu Kỳ RSI | `int` | `14` | RSI | Dùng cho RSI thật theo khung `col_tf` (`request.security()`), không phải RSI(M1) |
@@ -65,9 +65,8 @@ Chia theo 5 nhóm chức năng (khớp đúng tên group hiện trong Settings):
 
 ## Output / Tín Hiệu Trên Chart
 
-- Pane riêng, thứ tự Time/Delta/CVD/VAH/POC/VAL/TPO Count/RF/RSI (dòng ẩn không chiếm chỗ):
+- Pane riêng, thứ tự Time/Delta/CVD/TPO Count/RF/RSI (dòng ẩn không chiếm chỗ):
   - Delta/CVD/RF: xanh forest (dương) / đỏ burgundy (âm) / xám (trung tính). Ô Delta có hậu tố `F`/`L`/`A` (tắt được qua input) cho biết đang chạy tầng fallback nào.
-  - VAH/POC/VAL: giá trị session, màu navy trung tính (mức giá, không phải delta nên không phân loại theo dấu).
   - TPO Count: hiển thị `trên/dưới`, màu theo bên nào nhiều TPO hơn.
   - RSI: đỏ nhạt khi >70, xanh khi <30, navy khi giữa.
 - Tên dòng hiện dưới dạng tag nhỏ trên trục giá bên phải (không hiện trong khu vực vẽ, không chồng lấp box dữ liệu). Cỡ chữ của box theo input "Cỡ Chữ Hiển Thị".
@@ -98,3 +97,4 @@ Chia theo 5 nhóm chức năng (khớp đúng tên group hiện trong Settings):
 - **v1.9** (2026-11-14): (1) Chia lại input group theo đúng chức năng: "Footprint & Delta", "Market Profile & Khung Gộp Cột" (gồm cả `col_tf`), "Hiện/Ẩn Dòng", "Hiển Thị (Giao Diện)" (chỉ còn số cột + cỡ chữ), "RSI". (2) Bỏ hệ thống nhãn `label.new()` nổi giữa pane (dễ chồng lấp, trôi lệch) — đổi sang `plot(Y_row, display=display.price_scale)` neo tên dòng đúng vào trục giá bên phải; 2 plot neo scale cũng đổi `display=display.pane` để không hiện tên trong legend. (3) **Xác nhận và sửa nguyên nhân cột lệch khi chart ở chế độ "Volume Candles"**: box trước đó neo theo `xloc.bar_time` (thời gian thật) — sai khi trục ngang không còn tuyến tính theo thời gian (độ rộng nến tỷ lệ volume). Đổi toàn bộ box sang `xloc.bar_index` (mặc định), luôn khớp đúng vị trí nến vì TradingView áp dụng cùng phép biến dạng trục ngang cho mọi đối tượng vẽ theo `bar_index`. Thêm `bucket_start_bar`/`bucket_last_bar` để định vị; `bucket_start_time` chỉ còn dùng hiện chữ dòng Time. Backup v1.8 tại `indicators/hist/order_flow_profile_panel_v1.8.pine`.
 - **v1.10** (2026-11-14): **Xác nhận & sửa lỗi "mất cột" khi `col_tf` nhỏ (vd 3 phút)** — nguyên nhân: một số khung `col_tf` hoàn toàn không có nến M1 nào (sàn không phát sinh nến do thanh khoản quá mỏng trong vài phút liên tiếp, không phải lỗi script); vì cơ chế gộp cột chỉ đánh dấu khung mới khi có 1 nến M1 thật rơi vào đó, khung trống hoàn toàn không bao giờ được tạo cột, khiến dòng Time nhảy cóc (ví dụ `14:15→14:21`, mất khung `14:18`). Thêm cơ chế lấp "gap": phát hiện khoảng cách giữa cột vừa chốt và cột mới dài hơn 1 khung `col_tf`, chèn cột placeholder (nền xám, Delta="0", các dòng tích lũy/giá giữ nguyên giá trị cũ) cho mỗi khung bị bỏ trống — dùng `f_push_cell_time()` neo theo `xloc.bar_time` (không có `bar_index` nào tồn tại cho khung không có nến). Chỉ áp dụng khi `col_tf` là số phút thuần và chỉ trong cùng 1 phiên (`not is_new_session`, tránh lấp gap qua đêm/cuối tuần). Backup v1.9 tại `indicators/hist/order_flow_profile_panel_v1.9.pine`.
 - **v1.11** (2026-11-14): **Sửa lỗi logic tính `gap_periods` trong cơ chế lấp gap** — dùng `int()` bị làm tròn xuống, dễ miss khung khi gap không chia hết cho `col_tf_ms` (ví dụ `gap_ms=370000ms`, `col_tf_ms=180000ms` (3 phút) → `int(370000/180000)=2` nhưng thực tế cần 3 khung placeholder). Đổi sang `math.ceil()` để bắt chính xác tất cả khung bị miss. Điều kiện `gap_ms >= col_tf_ms` → `gap_ms > col_tf_ms` để chỉ lấp khi gap vượt quá 1 khung (gap bằng đúng 1 khung không phải là gap, là khung bình thường). Backup v1.10 tại `indicators/hist/order_flow_profile_panel_v1.10.pine`.
+- **v1.12** (2026-11-14): **Xoá hẳn 3 dòng VAH/POC/VAL** (không chỉ ẩn — xoá toàn bộ source code liên quan: input toggle, Y_* position variables, tính toán TPO grid VAH/POC/VAL, f_push_cell, plot) vì không dùng tới trên OF Panel. Panel còn lại 6 dòng: Time, Delta, CVD, TPO Count, RF, RSI. `need_tpo_grid` cờ dùng chỉ cho `show_tpo` (TPO Count), không còn gate VAH/POC/VAL. Bỏ hệ số `c_price_level` (màu navy cho VAH/POC/VAL). Backup v1.11 tại `indicators/hist/order_flow_profile_panel_v1.11.pine`.
