@@ -2,7 +2,7 @@
 // ─── Order Flow & Market Profile Panel ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-11-14
-// Phiên bản: 1.2
+// Phiên bản: 1.3
 // Mô tả: Pane riêng (không overlay) hiển thị 7 dòng dữ liệu: Delta (footprint),
 //        CVD, TPO Count (trên/dưới POC), Day Type, Open Type, RF (Rotation
 //        Factor), RSI. Chart chính chạy M1 (để vào lệnh); 5 dòng động
@@ -22,6 +22,13 @@
 //        (Delta/CVD/TPO Count/Day Type/Open Type/RF/RSI) bám theo cột mới
 //        nhất bằng label.new(), không dùng table.* vì neo góc màn hình sẽ
 //        không khớp đúng vị trí y 0..7 của các box dữ liệu.
+// Changelog v1.3: Sửa lỗi khung col_minutes phút cuối phiên sáng (vd 11:25-
+//        11:30 trên VN30F1!) không hiện cột — box cũ suy ra left từ
+//        `time hiện tại - col_minutes*60000`, nhưng nến xác nhận flush là
+//        nến đầu phiên chiều (13:00, sau gap nghỉ trưa) nên left bị tính
+//        sai hoàn toàn (12:55 thay vì 11:25). Đổi sang lưu đúng time của
+//        nến M1 đầu/cuối mỗi khung (bucket_start_time/bucket_last_time),
+//        không suy luận từ thời điểm flush.
 // Phase: 1/2 — file độc lập, không import/export, không sửa market_profile.pine.
 indicator(title="Order Flow & Market Profile Panel", shorttitle="OF Panel v6", overlay=false, max_boxes_count=500, max_labels_count=500, calc_bars_count=3000)
 
@@ -379,12 +386,15 @@ if barstate.isconfirmed
 // ============================================================================
 // 7. RENDERER BOX-GRID — GỘP CỘT col_minutes PHÚT, ROLLING WINDOW & BAND PHIÊN
 // ============================================================================
-f_push_cell(array<box> col_boxes, float y_top, float y_bottom, string txt, color bg, int max_cols, int bucket_end_time) =>
+f_push_cell(array<box> col_boxes, float y_top, float y_bottom, string txt, color bg, int max_cols, int left_time, int right_time) =>
     // box.new() cần left/right kiểu series int khi dùng xloc.bar_index (toạ độ
     // theo nến/float sẽ lỗi biên dịch). Dùng xloc.bar_time với đúng biên thời
-    // gian thật [đầu khung, cuối khung) của khung col_minutes phút vừa đóng.
-    int full_ms = col_minutes * 60 * 1000
-    box b = box.new(bucket_end_time - full_ms, y_top, bucket_end_time, y_bottom, xloc=xloc.bar_time, border_color=bg, bgcolor=bg, text=txt, text_color=color.white, text_size=size.small)
+    // gian THẬT của khung vừa đóng — left/right lấy từ time của nến M1 đầu/cuối
+    // khung (không suy ra bằng right - col_minutes*60000, vì qua các mốc có gap
+    // dữ liệu — nghỉ trưa 11:30-13:00, qua đêm — nến tiếp theo sau gap có `time`
+    // cách xa hơn col_minutes phút, suy ra left sẽ sai hoàn toàn vị trí khung).
+    int right_edge = right_time + timeframe.in_seconds() * 1000
+    box b = box.new(left_time, y_top, right_edge, y_bottom, xloc=xloc.bar_time, border_color=bg, bgcolor=bg, text=txt, text_color=color.white, text_size=size.small)
     array.push(col_boxes, b)
     if array.size(col_boxes) > max_cols
         box.delete(array.shift(col_boxes))
@@ -401,8 +411,10 @@ var array<box> col_rsi   = array.new<box>()
 // RSI lấy từ rsi_5m (request.security() đã tính thật theo khung col_minutes).
 bool is_new_col = timeframe.change(col_tf_str)
 
-var float bucket_delta_sum = 0.0
-var bool  bucket_has_data  = false
+var float bucket_delta_sum  = 0.0
+var bool  bucket_has_data   = false
+var int   bucket_start_time = na
+var int   bucket_last_time  = na
 
 if barstate.isconfirmed
     if is_new_col
@@ -417,16 +429,19 @@ if barstate.isconfirmed
         string rsi_txt    = na(rsi_5m) ? "—" : str.tostring(rsi_5m, "#.#")
 
         if bucket_has_data
-            f_push_cell(col_delta, Y_DELTA, Y_DELTA - 1, delta_txt, c_delta, n_bars_display, time)
-            f_push_cell(col_cvd,   Y_CVD,   Y_CVD - 1,   str.tostring(cvd, format.volume), c_cvd, n_bars_display, time)
-            f_push_cell(col_tpo,   Y_TPO,   Y_TPO - 1,   str.tostring(prof.tpo_above_poc) + "/" + str.tostring(prof.tpo_below_poc), c_tpo, n_bars_display, time)
-            f_push_cell(col_rf,    Y_RF,    Y_RF - 1,    str.tostring(prof.rf_score), c_rf, n_bars_display, time)
-            f_push_cell(col_rsi,   Y_RSI,   Y_RSI - 1,   rsi_txt, c_rsi, n_bars_display, time)
+            f_push_cell(col_delta, Y_DELTA, Y_DELTA - 1, delta_txt, c_delta, n_bars_display, bucket_start_time, bucket_last_time)
+            f_push_cell(col_cvd,   Y_CVD,   Y_CVD - 1,   str.tostring(cvd, format.volume), c_cvd, n_bars_display, bucket_start_time, bucket_last_time)
+            f_push_cell(col_tpo,   Y_TPO,   Y_TPO - 1,   str.tostring(prof.tpo_above_poc) + "/" + str.tostring(prof.tpo_below_poc), c_tpo, n_bars_display, bucket_start_time, bucket_last_time)
+            f_push_cell(col_rf,    Y_RF,    Y_RF - 1,    str.tostring(prof.rf_score), c_rf, n_bars_display, bucket_start_time, bucket_last_time)
+            f_push_cell(col_rsi,   Y_RSI,   Y_RSI - 1,   rsi_txt, c_rsi, n_bars_display, bucket_start_time, bucket_last_time)
 
-        bucket_delta_sum := delta
-        bucket_has_data  := true
+        bucket_delta_sum  := delta
+        bucket_start_time := time
+        bucket_last_time  := time
+        bucket_has_data   := true
     else
         bucket_delta_sum += delta
+        bucket_last_time := time
 
 // Band Day Type / Open Type — 1 box/dòng/phiên, trải từ đầu phiên tới nến
 // hiện tại (merge full D1), cập nhật tại chỗ, không tạo mới mỗi bar.
