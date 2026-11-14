@@ -1,8 +1,9 @@
 # SMC Market Structure Indicator — Tài Liệu Hướng Dẫn
 
-> **Script**: [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) (v1.4)
-> **Script MTF**: [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) (v1.4)
-> **Ngày tạo**: 2026-06-18 / **Cập nhật**: 2026-06-21
+> **Script**: [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) (v2.0)
+> **Script MTF**: [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) (v2.0)
+> **Library dùng chung**: [libraries/smc_core.pine](smc-core.md) (v1.0)
+> **Ngày tạo**: 2026-06-18 / **Cập nhật**: 2026-07-10
 > **Pine Script**: v6
 > **Loại**: Indicator (overlay)
 
@@ -645,30 +646,44 @@ Indicator cung cấp 10 alert conditions có thể dùng để tạo cảnh báo
 
 Bản **SMC Market Structure + MTF** (`smc_market_structure_mtf.pine`) bổ sung bảng hiển thị xu hướng của 3 khung thời gian khác nhau.
 
-### Cách Hoạt Động
+### Cách Hoạt Động (v2.0 — State Machine Thật Trên Từng TF)
 
-Bảng MTF hiển thị trend (BULL/BEAR/WAIT) kèm Swing High/Low cho từng khung thời gian. Logic dùng **trend score** từ chuỗi 3 pivot:
+> ⚠️ **Thay đổi quan trọng ở v2.0**: bản trước dùng "trend score" xấp xỉ từ 3 pivot (logic sai, dễ cho kết quả không khớp cấu trúc thật). Từ v2.0, MTF chạy **đúng state machine SMC** (`smc.f_process_bar` từ library [smc_core](smc-core.md)) bên trong `request.security()` cho từng khung thời gian, dùng wrapper pattern để tạo execution context độc lập trên TF đích.
 
+```pinescript
+f_run_smc(pivot_len, seed_mode) =>
+    var smc.SwingState s = smc.f_init_state()
+    if not s.seeded
+        s := seed_mode == "Pivot Seed" ? smc.f_seed_pivot(...) : smc.f_seed_session(s)
+    if s.seeded
+        s := smc.f_process_bar(s)
+    s
+
+mtf_s1 := request.security(syminfo.tickerid, mtf_tf1, f_run_smc(pivotLength, seedMode), lookahead=barmerge.lookahead_off)
 ```
-Với mỗi pivot: HH → +1, LH → -1, HL → +1, LL → -1
-Tổng score:
-  >= +2  →  BULL
-  <= -2  →  BEAR
-  -1..+1 →  Giữ trend cũ
-```
+
+Bảng MTF hiển thị trend (BULL/BEAR/WAIT) thật từ `SwingState.trend` kèm HH/HL hoặc LL/LH hiện tại của từng khung thời gian (tối đa 3 TF, `mtf_tf1/2/3`, có thể đặt `"None"` để tắt).
 
 ### So Sánh 2 Phiên Bản
 
-| | Base (v1.4) | MTF (v1.4) |
+| | Base (v2.0) | MTF (v2.0) |
 |---|---|---|
 | **File** | `indicators/smc_market_structure.pine` | `indicators/smc_market_structure_mtf.pine` |
+| **State machine** | Dùng trực tiếp `smc_core` trên chart TF | Dùng `smc_core` qua `request.security()` wrapper cho mỗi TF phụ |
 | **Input groups** | 11 | 12 (+ Multi-Timeframe) |
-| **request.security()** | 0 | 0–3 |
+| **request.security()** | 0 | 0–3 (tuỳ số TF bật, `"None"` để tắt từng slot) |
 | **Phù hợp** | Máy yếu, chart đơn giản | Phân tích đa khung thời gian |
 
 ---
 
 ## Kế Hoạch Phát Triển
+
+### v2.0 (Đã Hoàn Thành — 2026-07-10)
+
+- [x] Tách UDT `SwingState` + state machine (`f_process_bar`, `f_seed_pivot`, `f_seed_session`, `f_find_extreme`...) ra thư viện dùng chung [`smc_core`](smc-core.md), dùng lại ở cả `smc_strategy.pine` và bản MTF.
+- [x] Base indicator: import `smc_core`, thay 13 biến `var` rời rạc bằng 1 UDT `SwingState` — giảm ~226 dòng (1080→854).
+- [x] MTF: viết lại hoàn toàn — chạy **state machine SMC thật** qua `request.security()` wrapper cho từng timeframe, thay cho "trend score" xấp xỉ từ 3 pivot (logic sai ở bản cũ) — giảm ~254 dòng (751→497).
+- [x] Backup các bản trước khi refactor vào `indicators/hist/` và `strategies/hist/`.
 
 ### v1.4 (Đã Hoàn Thành — 2026-06-21)
 

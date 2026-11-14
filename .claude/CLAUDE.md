@@ -193,6 +193,16 @@ cp indicators/smc_market_structure.pine indicators/hist/smc_market_structure_v1.
 - Với strategy: chạy Strategy Tester, kiểm tra Overview/Performance Summary/List of Trades
 - Kiểm tra repaint bằng cách refresh chart hoặc thay đổi timeframe
 
+## Quản Lý Tài Liệu (Documentation)
+
+Dự án có 1 tài liệu tổng (`docs/README.md`) liệt kê toàn bộ indicator/strategy/library, và 1 tài liệu con riêng cho mỗi script trong `docs/` (ví dụ `docs/market-profile.md`), theo template: Tổng Quan, Tham Số Đầu Vào, Logic Chính, Output/Tín Hiệu, Giới Hạn & Lưu Ý, Changelog.
+
+- **⚠️ BẮT BUỘC**: Mỗi khi **tạo mới**, **sửa**, hoặc **xoá** một indicator/strategy/library (file `.pine` trong `indicators/`, `strategies/`, `libraries/`), phải cập nhật trong cùng lần làm việc đó:
+  1. Tài liệu con tương ứng trong `docs/<ten-script>.md` (tạo mới nếu chưa có, sửa nếu đã có, xoá nếu script bị xoá).
+  2. Bảng trong `docs/README.md` (thêm/sửa/xoá dòng tương ứng, giữ đúng version hiện hành).
+- Không cần tài liệu hóa: file trong `indicators/hist/` hoặc `strategies/hist/` (bản backup version cũ), file tham khảo bên thứ 3 không phải sản phẩm của dự án (ví dụ nằm trong `indicators/temp/`).
+- Độ chi tiết tài liệu con: ngắn gọn, đủ dùng (Tổng quan + bảng input + logic chính dạng bullet/pseudocode ngắn + output + giới hạn + changelog) — không cần sơ đồ ASCII phức tạp hay kịch bản giao dịch dài, trừ khi được yêu cầu cụ thể.
+
 ## Skills Có Sẵn
 
 | Skill | Mô Tả |
