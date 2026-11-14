@@ -2,7 +2,7 @@
 // ─── Order Flow & Market Profile Panel ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-11-14
-// Phiên bản: 1.10
+// Phiên bản: 1.11
 // Mô tả: Pane riêng (không overlay) hiển thị dữ liệu dạng grid, thứ tự trên
 //        xuống: Time (giờ:phút), Delta (footprint), CVD, VAH, POC, VAL,
 //        TPO Count (trên/dưới POC), RF (Rotation Factor), RSI. Chart chính
@@ -89,6 +89,12 @@
 //        phút thuần (vd "3","5"), không áp dụng cho "1D"/"1W". Chỉ lấp gap
 //        trong CÙNG 1 phiên (`not is_new_session`) — không áp dụng qua đêm/
 //        cuối tuần, tránh tạo hàng nghìn box vô ích cho khoảng nghỉ đó.
+// Changelog v1.11: Sửa lỗi logic tính gap_periods dùng int() bị làm tròn
+//        xuống, dễ miss khung khi gap không chia hết cho col_tf_ms (vd
+//        370ms gap, 180ms col_tf → int(370/180)=2 nhưng thực tế cần 3 khung).
+//        Đổi sang math.ceil() để bắt chính xác tất cả khung bị miss. Điều kiện
+//        gap_ms >= col_tf_ms → gap_ms > col_tf_ms để chỉ lấp khi gap vượt 1
+//        khung (không lấp gap bằng đúng 1 khung, vì đó không phải gap).
 // Phase: 1/2 — file độc lập, không import/export, không sửa market_profile.pine.
 indicator(title="Order Flow & Market Profile Panel", shorttitle="OF Panel v6", overlay=false, max_boxes_count=500, max_labels_count=500, calc_bars_count=3000)
 
@@ -494,7 +500,7 @@ if barstate.isconfirmed
         if col_tf_is_min and bucket_has_data and not na(bucket_start_time) and not is_new_session
             int   bucket_end_expected = bucket_start_time + col_tf_ms
             int   gap_ms              = time - bucket_end_expected
-            int   gap_periods         = gap_ms >= col_tf_ms ? int(gap_ms / col_tf_ms) : 0
+            int   gap_periods         = gap_ms > col_tf_ms ? int(math.ceil(gap_ms / float(col_tf_ms))) : 0
             color c_gap               = color.gray
 
             if gap_periods > 0
