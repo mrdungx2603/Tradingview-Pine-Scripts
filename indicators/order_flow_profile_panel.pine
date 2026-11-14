@@ -410,11 +410,8 @@ var int bucket_start_time = na
 var int bucket_start_bar = na
 var int bucket_last_bar = na
 
-// Phát hiện khung col_tf vừa kết thúc (thay vì chờ is_new_col)
-bool bucket_ended = false
-if col_tf_is_min and not na(bucket_start_time) and barstate.isconfirmed
-    int bucket_end_expected = bucket_start_time + col_tf_ms
-    bucket_ended := time >= bucket_end_expected
+int bucket_end_expected = bucket_start_time + col_tf_ms
+bool bucket_ended = barstate.isconfirmed and time >= bucket_end_expected
 
 if barstate.isconfirmed
     if is_new_col or bucket_ended
@@ -455,44 +452,6 @@ if barstate.isconfirmed
         bucket_has_data := true
     else
         // Cộng dồn delta vào bucket hiện tại
-        bucket_delta_sum += nz(delta)
-        bucket_cvd_end := cvd
-        bucket_last_bar := bar_index
-
-        // LẤP GAP — DISABLED: Gap fill tạo quá nhiều placeholder, khiến dòng Time
-        // hiển thị các khung không có dữ liệu thật. Tạm tắt cho đến khi thiết kế lại.
-        // Để lỗi miss cột như cũ (sẽ fix sau với logic khác).
-        if false  // Tắt gap fill tạm thời
-            int   bucket_end_expected = bucket_start_time + col_tf_ms
-            int   gap_ms              = time - bucket_end_expected
-            int   gap_periods         = gap_ms > col_tf_ms ? int(math.ceil(gap_ms / float(col_tf_ms))) : 0
-            color c_gap               = color.gray
-
-            if gap_periods > 0
-                for g = 0 to gap_periods - 1
-                    int    ph_start    = bucket_end_expected + g * col_tf_ms
-                    int    ph_end      = ph_start + col_tf_ms
-                    string ph_time_txt = str.format_time(ph_start, "HH:mm", syminfo.timezone)
-
-                    if show_time
-                        f_push_cell_time(col_time, Y_TIME, Y_TIME - 1, ph_time_txt, c_gap, n_bars_display, ph_start, ph_end)
-                    if show_delta
-                        f_push_cell_time(col_delta, Y_DELTA, Y_DELTA - 1, "0", c_gap, n_bars_display, ph_start, ph_end)
-                    if show_cvd
-                        f_push_cell_time(col_cvd, Y_CVD, Y_CVD - 1, cvd_txt, c_gap, n_bars_display, ph_start, ph_end)
-                    if show_tpo
-                        f_push_cell_time(col_tpo, Y_TPO, Y_TPO - 1, tpo_txt, c_gap, n_bars_display, ph_start, ph_end)
-                    if show_rf
-                        f_push_cell_time(col_rf, Y_RF, Y_RF - 1, rf_txt, c_gap, n_bars_display, ph_start, ph_end)
-                    if show_rsi
-                        f_push_cell_time(col_rsi, Y_RSI, Y_RSI - 1, rsi_txt, c_gap, n_bars_display, ph_start, ph_end)
-        bucket_delta_sum  := nz(delta)
-        bucket_cvd_end    := cvd
-        bucket_start_time := time
-        bucket_start_bar  := bar_index
-        bucket_last_bar   := bar_index
-        bucket_has_data   := true
-    else
         bucket_delta_sum += nz(delta)
         bucket_cvd_end := cvd
         bucket_last_bar := bar_index
