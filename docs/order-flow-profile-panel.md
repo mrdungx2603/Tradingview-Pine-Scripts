@@ -25,7 +25,7 @@ Engine Day Type/Open Type/RF/TPO Count được **port từ `market_profile.pine
 | Khung Thời Gian Dự Phòng | `string` | `"1S"` | Footprint | Lower TF dùng ở Tầng 2 khi `request.footprint()` không có dữ liệu |
 | Số Cột Hiển Thị | `int` | `60` (20–90) | Hiển Thị | Rolling window cho 5 dòng động (giới hạn bởi `max_boxes_count=500`) |
 | Độ Phân Giải Lưới Giá TPO | `int` | `60` (20–120) | Market Profile | Số hàng chia phiên để đếm TPO |
-| Số Nến Tính Initial Balance | `int` | `2` (1–12) | Market Profile | Chuẩn 30 phút = 2 nến M1 |
+| Số Nến Tính Initial Balance | `int` | `60` (1–120) | Market Profile | Mặc định 60 nến M1 = 1 giờ (chuẩn IB cổ điển), không còn copy nguyên giá trị "2 nến" của bản 30 phút trong `market_profile.pine` |
 | Chu Kỳ RSI | `int` | `14` | RSI | |
 | Nguồn RSI | `source` | `close` | RSI | |
 
@@ -53,10 +53,11 @@ Engine Day Type/Open Type/RF/TPO Count được **port từ `market_profile.pine
 
 - `request.footprint()` yêu cầu TradingView Premium/Ultimate và sàn hỗ trợ dữ liệu tick-level — **chưa xác nhận `HNX:VN30F1!` có hỗ trợ hay không**, cần test trực tiếp trong Pine Editor; nếu không, panel tự chuyển Tầng 2/3.
 - 5 dòng động (Delta/CVD/TPO/RF/RSI) chỉ giữ tối đa `n_bars_display` (20–90) cột gần nhất do giới hạn `max_boxes_count=500` của Pine — khi zoom xem cả phiên dài (vd ~315 nến M1/phiên `VN30F1!`), các cột cũ hơn ngưỡng này sẽ trống, trong khi 2 băng Day Type/Open Type vẫn trải đúng full phiên (chỉ 1 box/phiên, không bị giới hạn này). Đây là tradeoff đã chốt, phù hợp mục tiêu theo dõi order flow *gần nhất* khi scalping.
-- Động cơ TPO quét lại toàn bộ bar trong phiên mỗi bar mới (giống `market_profile.pine`, chưa tối ưu incremental) — có thể nặng trên phiên dài + `grid_rows` cao.
-- Chỉ 1 lệnh `request.footprint()` duy nhất trong toàn script (giới hạn của Pine).
+- Động cơ TPO quét lại toàn bộ bar trong phiên mỗi bar mới (giống `market_profile.pine`, chưa tối ưu incremental) — nặng hơn bản 30 phút gốc ~2 bậc độ lớn do chạy trên M1; đã giới hạn `calc_bars_count=3000` trong `indicator()` để không tính toán trên toàn bộ lịch sử nạp vào chart (vẫn đủ phủ nhiều phiên liên tiếp cho band Day/Open Type).
+- Chỉ 1 lệnh `request.footprint()` duy nhất trong toàn script (giới hạn của Pine). Nếu `lower_tf_fallback` không hợp lệ cho symbol/chart (vd cao hơn khung chart), `request.security_lower_tf()` dùng `ignore_invalid_timeframe=true` để tụt xuống Tầng 3 thay vì làm lỗi cả script.
 - Giới hạn vẽ: `max_boxes_count=500`, `max_labels_count=500`.
+- 5 dòng box dùng `xloc.bar_time` (canh theo `time` ± nửa độ dài 1 bar) vì `box.new()` yêu cầu toạ độ `series int` khi dùng `xloc.bar_index`, trong khi cột cần canh giữa đúng dưới nến (lệch 0.5 bar) — không dùng được tọa độ `bar_index` (float) trực tiếp.
 
 ## Changelog
 
-- **v1.0** (2026-11-14): Phát hành lần đầu (Phase 1 — file độc lập).
+- **v1.0** (2026-11-14): Phát hành lần đầu (Phase 1 — file độc lập). Đã qua 1 vòng review toàn branch trước khi test thật trên TradingView, fix 3 lỗi Critical (box.new nhận float cho left/right, band Day/Open Type lỗi runtime ở bar đầu lịch sử, `ib_bars_cnt` sai đơn vị cho M1) + 4 cải tiến Important (fallback lower-tf không raise lỗi, chặn NaN propagation vào CVD, giới hạn `calc_bars_count`, neo scale pane bằng 2 plot trong suốt).
