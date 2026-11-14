@@ -1,0 +1,1035 @@
+//@version=6
+// ─── Market Profile — Mind over Markets (Classic Light Edition) ───
+// Tác giả: TV Pine
+// Ngày tạo: 2026-11-14
+// Phiên bản: 2.0
+// Mô tả: Market Profile / TPO (Time Price Opportunity) theo phương pháp "Mind over Markets" —
+//        tính Initial Balance, Value Area (VAH/VAL/POC), Naked POC, Tails/Single Prints/Ledge/Spike,
+//        phân loại Day Type & Open Type, 80% VA Rule, Dashboard thống kê.
+// Changelog v1.1: Sửa lỗi array out-of-bounds (sell tail khi POC ở hàng trên cùng lưới) và
+//        sai logic buy tail khi POC ở hàng dưới cùng; bỏ matrix tpo_mat không dùng tới;
+//        chuyển vẽ đối tượng (IB/VA/tails/band...) từ xoá+tạo lại mỗi bar sang cập nhật tại chỗ.
+// Changelog v1.2: Thêm nhãn pVAH/pVAL/pPOC bên thanh giá (price scale) bên phải chart qua
+//        plot(display=display.price_scale), giúp thấy giá trị phiên trước không cần cuộn chart.
+//        Có toggle riêng "show_pva_scale" để ẩn/hiện độc lập với đường kẻ trên chart. Nhãn
+//        price scale đổi màu xám khi mức giá đã bị lấp (Filled), giữ màu gốc khi còn nguyên
+//        (Open); nhãn trên chart đổi text "(Open)" ↔ "(Filled)" tương ứng. Khung Value Area
+//        tách thành 2 vùng trên/dưới POC, bỏ border, màu khác nhau, trong suốt cao (mờ) để
+//        chart đỡ rối, dễ giao dịch hơn. Đường POC giảm độ dày (2→1) + thêm trong suốt; đường
+//        VAH/VAL đổi sang nét đứt + mờ hơn POC, giảm cảm giác "đậm" trên chart.
+// Changelog v2.0: Viết lại động cơ TPO để sửa lỗi hiệu năng nghiêm trọng trên timeframe nhỏ
+//        (1m/3m/5m) — bản cũ quét lại TOÀN BỘ nến đã qua trong phiên mỗi khi có nến mới
+//        (O(N²) theo số nến/phiên), gây load rất chậm trên timeframe nhỏ (nhiều nến/phiên).
+//        Thay lưới "chia sess_range thành N hàng cố định" (input grid_rows, đổi theo mỗi bar)
+//        bằng lưới "bước giá cố định" (input mới price_step, mặc định 0.1, không đổi trong
+//        phiên) + mảng tpo_counts động (array.unshift/push khi giá vượt biên). Nhờ ranh giới
+//        hàng không đổi, mỗi nến mới chỉ cần CỘNG DỒN vào các hàng nó chạm tới (hàm
+//        f_add_bar_tpo), không cần quét lại lịch sử phiên — giảm độ phức tạp từ O(N²) xuống
+//        gần O(1) mỗi bar. Bỏ 2 mảng arr_highs/arr_lows (không còn cần giữ toàn bộ lịch sử
+//        phiên); late-spike check dùng high[1]/low[1] thay cho array.get(...). LƯU Ý: do lưới
+//        neo theo bước giá cố định thay vì chia đều theo sess_range, giá trị POC/VAH/VAL/Tail/
+//        Ledge có thể lệch nhẹ (tối đa ±1 price_step, mặc định 0.1) so với bản v1.2 — chấp
+//        nhận được theo yêu cầu người dùng (chỉ cần chính xác tới 0.1). Sửa thêm lỗi tie-break
+//        POC: do mảng tpo_counts phình không đối xứng (unshift/push), "giữa mảng theo index"
+//        không còn trùng "giữa giá thực của phiên" như lưới cố định cũ → khi hoà số TPO cao
+//        nhất giữa nhiều hàng, có thể chọn sai hàng (pPOC lệch khác nhau giữa các timeframe).
+//        Tính lại mid_row từ giá giữa phiên thực ((sess_high+sess_low)/2) quy đổi ngược về
+//        chỉ số hàng, thay vì dùng (n_rows-1)/2.
+// Changelog v2.0 (tiếp): SỬA LỖI GỐC RỄ khiến POC/pPOC không nhất quán giữa các timeframe —
+//        chuyển đơn vị "1 TPO" từ "1 nến chart" sang "1 TPO Period thực" (khung giờ cố định,
+//        input mới tpo_period_min=30 phút, chuẩn CBOT), tính period_id = floor((time-start_time)
+//        /period_ms) theo GIỜ THỰC, không theo số nến. Thêm mảng tpo_last_period (song song
+//        tpo_counts) để 1 Period dù có bao nhiêu nến chart đi qua cũng chỉ cộng TPO đúng 1 lần
+//        cho mỗi hàng giá nó chạm tới. Đổi ib_bars_cnt→ib_periods_cnt, bars_in_sess→
+//        periods_in_sess; IB/Rotation Factor (hàm mới f_process_bar_period, chỉ cộng RF khi 1
+//        Period đã đóng)/Late Spike (dùng cur_period_high/low & prev_period_high/low thay
+//        high[1]/low[1])/Day Type/Open Type đều đổi sang đếm theo TPO Period — nhất quán giữa
+//        mọi timeframe chia hết cho tpo_period_min (1m/2m/3m/5m/6m/10m/15m/30m). 80% VA Rule
+//        CHƯA đổi (còn đếm theo nến chart) — xem docs/market-profile.md mục "Giới Hạn & Lưu Ý".
+//        Xem chi tiết thiết kế & nguyên nhân gốc tại docs/market-profile.md mục "Thiết Kế: TPO
+//        Period Thực (Không Phải Nến Chart)".
+// Changelog v2.0 (tiếp 2): Thêm LƯỚI KÉP cho TPO Count/Tail/Poor High-Low/Single Prints/Ledge —
+//        trên mã có mintick mịn nhưng biên độ phiên rộng (ví dụ VN30F1M: mintick=0.1, biên độ
+//        15-25 điểm/phiên), lưới mịn (price_step=0.1) tạo ra hàng trăm hàng khiến các chỉ số này
+//        bị vỡ vụn (TPO Count lên tới vài trăm, Tail dài bất thường). Thêm input shape_step (mặc
+//        định 1.0) + mảng tpo_counts_c/tpo_last_period_c/base_row_c riêng — TPO Count, Tail,
+//        Poor High/Low, Single Prints, Ledge đều chuyển qua tính trên lưới thô này (kèm POC nội
+//        bộ riêng poc_row_c chỉ dùng làm điểm neo quét, KHÔNG phải đường POC hiển thị). POC/VAH/
+//        VAL vẫn giữ lưới mịn price_step để chính xác. Hàm f_add_bar_tpo tham số hoá row_step để
+//        dùng chung cho 2 lưới; thêm cờ track_total để tránh prof.total_tpo (dùng tính VA%) bị
+//        cộng trùng khi gọi hàm 2 lần/bar. Thêm chẩn đoán vào dashboard (POC:X/YP, Z hàng) để tự
+//        kiểm tra dedup theo Period đúng (X không bao giờ > Y).
+indicator("Market Profile — Mind over Markets (Classic Light Edition)", shorttitle="MP Classic v6", overlay=true, max_lines_count=500, max_boxes_count=500, max_labels_count=500)
+
+// ============================================================================
+// 1. BẢNG CÀI ĐẶT TẮT/BẬT & THÔNG SỐ (INPUTS TOGGLE PANEL)
+// ============================================================================
+grp_toggle = "1. Bảng Điều Khiển Hiển Thị (Feature Toggles)"
+show_ib      = input.bool(true, "Hiển thị IB Lines & Extensions (1.5x, 2.0x)", group=grp_toggle)
+show_va      = input.bool(true, "Hiển thị VAH / VAL / POC & Khung Value Area", group=grp_toggle)
+show_npoc    = input.bool(true, "Hiển thị & Kéo dài các đường Naked POC (Virgin POC)", group=grp_toggle)
+show_prev_va = input.bool(true, "Hiển thị VAH / VAL / POC của Phiên Trước (Untested)", group=grp_toggle)
+show_pva_scale = input.bool(true, "Hiển thị nhãn pVAH/pVAL/pPOC bên Thanh Giá (Price Scale)", group=grp_toggle)
+show_tails   = input.bool(true, "Hiển thị Single Prints, Tails, Ledge & Spike", group=grp_toggle)
+show_poor    = input.bool(true, "Hiển thị nhãn Poor High / Poor Low", group=grp_toggle)
+show_dash    = input.bool(true, "Hiển thị Bảng Thống kê (Dashboard Table)", group=grp_toggle)
+show_band    = input.bool(true, "Hiển thị Dải màu Day Type & Open Type ở Đáy Biểu đồ", group=grp_toggle)
+
+grp_param = "2. Thông Số Thuật Toán Market Profile"
+va_pct        = input.float(70.0, "Tỷ lệ Value Area (%)", minval=50.0, maxval=90.0, step=1.0, group=grp_param) / 100.0
+price_step    = input.float(0.1, "Bước giá lưới POC/VAH/VAL (Price Step)", minval=0.0001, step=0.01, group=grp_param)
+shape_step    = input.float(1.0, "Bước giá lưới Hình Dạng Profile (TPO Count/Tail/Poor/SP/Ledge)", minval=0.0001, step=0.1, group=grp_param)
+tpo_period_min= input.int(30, "Độ dài 1 TPO Period (phút) — chuẩn CBOT = 30", minval=1, maxval=240, group=grp_param)
+ib_periods_cnt= input.int(2, "Số khung TPO Period tính Initial Balance (Chuẩn 2×30p = 60 phút)", minval=1, maxval=12, group=grp_param)
+min_tail_tpo  = input.int(2, "Độ dài tối thiểu của Tail / Single Print (Số ô lưới Hình Dạng, tức shape_step)", minval=2, maxval=10, group=grp_param)
+max_npoc_cnt = input.int(15, "Số lượng đường Naked POC tối đa lưu trữ", minval=1, maxval=50, group=grp_param)
+
+grp_alert = "3. Cài Đặt Hệ Thống Cảnh Báo (Alerts Engine)"
+en_al_ib     = input.bool(true, "Cảnh báo Phá vỡ Initial Balance (IB Breakout)", group=grp_alert)
+en_al_tail   = input.bool(true, "Cảnh báo Xuất hiện Buying / Selling Tail", group=grp_alert)
+en_al_dd     = input.bool(true, "Cảnh báo Hình thành Double-Distribution Day", group=grp_alert)
+en_al_npoc   = input.bool(true, "Cảnh báo Chạm/Lấp đường Naked POC & Prev VAH/VAL", group=grp_alert)
+en_al_rule80 = input.bool(true, "Cảnh báo Kích hoạt Quy tắc 80% Value Area Rule", group=grp_alert)
+
+// ============================================================================
+// 2. BẢNG MÀU CLASSIC LIGHT-THEME (HIGH CONTRAST FOR WHITE BACKGROUND)
+// ============================================================================
+c_navy_poc     = color.rgb(26, 54, 93)       // Deep Navy (#1A365D) - Dùng cho Text/Border/Frame chung
+c_poc_line     = color.new(c_navy_poc, 30)   // Navy mờ nhẹ - Đường kẻ POC (vẫn rõ nhất trong 3 đường)
+c_va_edge_line = color.new(c_navy_poc, 55)   // Navy mờ nhiều hơn - Đường kẻ VAH / VAL
+c_va_above     = color.rgb(43, 108, 176, 92) // Xanh Slate mờ, trong suốt cao - Vùng Value Area TRÊN POC
+c_va_below     = color.rgb(183, 121, 31, 92) // Vàng Amber mờ, trong suốt cao - Vùng Value Area DƯỚI POC
+c_ib_line      = color.rgb(45, 55, 72)       // Charcoal Slate - Đường biên IB
+c_ib_ext       = color.rgb(113, 128, 150)    // Muted Gray - Đường mở rộng IB 1.5x, 2.0x
+
+c_npoc_color   = color.rgb(155, 44, 44)      // Crimson Rust (#9B2C2C) - Naked POC
+c_prev_va_col  = color.rgb(43, 108, 176)     // Classic Slate Blue (#2B6CB0) - Prev VAH/VAL
+c_poor_col     = color.rgb(183, 121, 31)     // Muted Amber (#B7791F) - Poor High/Low
+
+c_forest_buy   = color.rgb(27, 77, 62)       // Forest Green (#1B4D3E) - Buying Tail / Support
+c_forest_fill  = color.rgb(47, 133, 90, 82)  // Forest Green Fill
+c_burgundy_sel = color.rgb(139, 0, 0)        // Burgundy (#8B0000) - Selling Tail / Resistance
+c_burgundy_fil = color.rgb(155, 44, 44, 82)  // Burgundy Fill
+c_sp_fill      = color.rgb(183, 121, 31, 80) // Muted Amber Fill - Single Prints
+
+c_dt_trend     = color.rgb(27, 77, 62)       // Trend Day: Dark Green
+c_dt_dd        = color.rgb(74, 21, 75)       // Double Distribution: Dark Purple
+c_dt_neutral   = color.rgb(183, 121, 31)     // Neutral Day: Muted Amber
+c_dt_nontrend  = color.rgb(45, 55, 72)       // Nontrend Day: Charcoal Gray
+c_dt_normal    = color.rgb(26, 54, 93)       // Normal / Normal Variation: Deep Navy
+
+c_tbl_bg       = color.rgb(248, 250, 252)    // Trắng đục / Xám giấy cổ điển
+c_tbl_header   = color.rgb(226, 232, 240)    // Xám nhạt thanh tiêu đề
+c_tbl_border   = color.rgb(160, 174, 192)    // Viền mảnh
+c_tbl_text     = color.rgb(15, 23, 42)       // Chữ đen mực in đậm
+
+// ============================================================================
+// 3. ĐỊNH NGHĨA KIỂU DỮ LIỆU NGƯỜI DÙNG (PINE SCRIPT V6 UDT)
+// ============================================================================
+type NakedPOC
+    float price     = na
+    int   start_bar = na
+    line  ln        = na
+    label lb        = na
+
+type SessionProfile
+    int   start_bar      = na
+    float start_time     = na    // Thời điểm mở phiên (ms) — mốc để tính TPO Period theo giờ thực
+    float open_price     = na
+    float close_price    = na
+    float sess_high      = na
+    float sess_low       = na
+
+    // Khối Dữ liệu Phiên trước & Testing Status
+    float prev_vah       = na
+    float prev_val       = na
+    float prev_poc       = na
+    int   prev_end_bar   = na
+    bool  p_vah_tested   = false
+    bool  p_val_tested   = false
+    bool  p_poc_tested   = false
+
+    // Khối Initial Balance (IB)
+    float ib_high        = na
+    float ib_low         = na
+    bool  ib_locked      = false
+    int   periods_in_sess= 0     // Số TPO Period (30p) đã trôi qua trong phiên — KHÔNG phải số nến chart
+    bool  ext_up_first   = false
+    bool  ext_dn_first   = false
+
+    // Khối theo dõi TPO Period hiện tại/trước đó (dùng cho Rotation Factor & Late Spike —
+    // tính theo khung 30 phút thực, không theo nến chart, để nhất quán giữa mọi timeframe)
+    int   last_period_id   = na
+    float cur_period_high  = na
+    float cur_period_low   = na
+    float prev_period_high = na
+    float prev_period_low  = na
+
+    // Khối Value Area & Point of Control (POC/VA)
+    float poc            = na
+    float vah            = na
+    float val            = na
+    float tick_step      = na
+
+    // Khối Rotation Factor & TPO Count
+    int   rf_score       = 0
+    int   tpo_above_poc  = 0
+    int   tpo_below_poc  = 0
+    int   total_tpo      = 0
+    int   poc_tpo_cnt    = 0     // Số TPO tại hàng POC (lưới mịn) — chẩn đoán: PHẢI <= periods_in_sess
+    int   poc_tpo_cnt_c  = 0     // Số TPO tại hàng POC-thô (lưới shape_step) — PHẢI <= periods_in_sess
+    
+    // Khối Phân loại & Mô hình đặc biệt
+    string day_type      = "Đang hình thành..."
+    string open_type     = "Đang xác định..."
+    float buying_tail_h  = na
+    float selling_tail_l = na
+    bool  has_poor_high  = false
+    bool  has_poor_low   = false
+    string rule_80_status= "Đang quan sát..."
+    bool  has_sp_mid     = false
+    float sp_mid_top     = na
+    float sp_mid_bot     = na
+    float ledge_price    = na
+    bool  has_late_spike = false
+    float spike_base     = na
+
+    // Khối Cờ quản lý Cảnh báo chống lặp (One-shot Alert Flags per Session)
+    bool  alerted_ib_up     = false
+    bool  alerted_ib_dn     = false
+    bool  alerted_buy_tail  = false
+    bool  alerted_sell_tail = false
+    bool  alerted_dd_day    = false
+    bool  alerted_rule_80   = false
+
+type SessionDrawings
+    line  l_ib_h         = na
+    line  l_ib_l         = na
+    line  l_ib_ext_u15   = na
+    line  l_ib_ext_u20   = na
+    line  l_ib_ext_d15   = na
+    line  l_ib_ext_d20   = na
+    line  l_poc          = na
+    line  l_vah          = na
+    line  l_val          = na
+    line  l_ledge        = na
+    box   b_va_up        = na
+    box   b_va_dn        = na
+    box   b_buy_tail     = na
+    box   b_sell_tail    = na
+    box   b_sp_mid       = na
+    box   b_status_band  = na
+    label lb_spike       = na
+    label lb_poor_h      = na
+    label lb_poor_l      = na
+
+// ============================================================================
+// 4. HÀM TIỆN ÍCH PHÂN LOẠI MÀU & XÁC ĐỊNH NGÀY
+// ============================================================================
+f_get_daytype_color(string dt) =>
+    color res = c_dt_normal
+    if str.contains(dt, "Double-Distribution")
+        res := c_dt_dd
+    else if str.contains(dt, "Trend Day") and not str.contains(dt, "Nontrend")
+        res := c_dt_trend
+    else if str.contains(dt, "Neutral")
+        res := c_dt_neutral
+    else if str.contains(dt, "Nontrend")
+        res := c_dt_nontrend
+    res
+
+// ============================================================================
+// 5. KHỞI TẠO BIẾN TOÀN CỤC & MẢNG QUẢN LÝ
+// ============================================================================
+var SessionProfile  prof             = SessionProfile.new()
+var SessionDrawings draw             = SessionDrawings.new()
+var array<int>      tpo_counts       = array.new<int>()   // Lưới POC/VAH/VAL (mịn, price_step)
+var array<int>      tpo_last_period  = array.new<int>()   // Period cuối đã tính TPO cho từng hàng (lưới mịn)
+var int             base_row         = na                 // Chỉ số hàng tuyệt đối ứng với tpo_counts[0]
+var array<int>      tpo_counts_c     = array.new<int>()   // Lưới "Hình Dạng Profile" (thô, shape_step) —
+var array<int>      tpo_last_period_c= array.new<int>()   //   dùng riêng cho TPO Count/Tail/Poor/SP/Ledge
+var int             base_row_c       = na                 // Chỉ số hàng tuyệt đối ứng với tpo_counts_c[0]
+var array<NakedPOC> active_npocs     = array.new<NakedPOC>()
+
+// Hai lưới TPO độc lập — xem docs/market-profile.md mục "Thiết Kế: Lưới Kép (POC vs Hình Dạng)":
+//  - step   (price_step, mặc định 0.1): lưới MỊN, chỉ dùng tính POC/VAH/VAL (đường giá chính xác).
+//  - step_c (shape_step, mặc định 1.0): lưới THÔ, dùng tính TPO Count/Tail/Poor High-Low/Single
+//    Prints/Ledge — các chỉ số này vốn liên quan chặt với nhau (đều dựa trên poc_row/buy_tail_rows/
+//    sell_tail_rows của CÙNG 1 lưới), nên phải dùng chung step_c để tránh lệch pha giữa chúng.
+//    Trên mã có mintick mịn nhưng biên độ phiên rộng (ví dụ VN30F1M, mintick=0.1, biên độ 15-25
+//    điểm/phiên), lưới mịn tạo ra hàng trăm hàng → TPO Count/Tail bị vỡ vụn, cần lưới thô riêng.
+float step   = math.max(syminfo.mintick, price_step)
+float step_c = math.max(syminfo.mintick, shape_step)
+
+// Độ dài 1 TPO Period theo mili-giây (mặc định 30 phút, chuẩn CBOT) — ĐƠN VỊ TPO THỰC SỰ theo
+// lý thuyết Market Profile là 1 khung giờ cố định, KHÔNG PHẢI 1 nến chart. Dùng "time" (mốc giờ
+// thực của nến) để xác định nến đang thuộc Period nào, nên kết quả giống nhau dù xem ở bất kỳ
+// timeframe nào (1m/3m/5m/30m...) — xem thêm docs/market-profile.md mục "Thiết Kế: TPO Period".
+float period_ms = tpo_period_min * 60000.0
+
+// Thêm TPO của 1 nến (high/low) vào lưới counts theo bước giá row_step, CHỈ cộng dồn nếu hàng đó
+// CHƯA được tính cho period_id hiện tại (last_period) — tránh 1 period bị đếm nhiều lần khi có
+// nhiều nến chart (1m/3m/5m...) rơi vào cùng 1 khung TPO Period 30 phút. Hàm dùng chung cho cả 2
+// lưới (mịn/thô) qua tham số row_step; track_total chỉ true cho lưới mịn (p.total_tpo phục vụ VA%
+// nên không được cộng 2 lần nếu gọi hàm này cho cả 2 lưới).
+// Lưu ý: Pine Script không cho hàm tự định nghĩa gán lại (:=) biến kiểu giá trị (int/float/...)
+// khai báo ở scope ngoài — nên base_row phải trả về qua return value, nơi gọi tự gán lại.
+// Riêng counts/last_period (array) và p (UDT) là kiểu tham chiếu, được phép mutate khi truyền làm tham số.
+f_add_bar_tpo(array<int> counts, array<int> last_period, SessionProfile p, int cur_base_row, int period_id, float b_high, float b_low, float row_step, bool track_total) =>
+    int row_lo = int(math.floor(b_low / row_step))
+    int row_hi = int(math.floor(b_high / row_step))
+    int new_base_row = cur_base_row
+
+    if array.size(counts) == 0
+        new_base_row := row_lo
+        for k = 1 to (row_hi - row_lo + 1)
+            array.push(counts, 0)
+            array.push(last_period, -1)
+    else
+        int add_lo = new_base_row - row_lo
+        if add_lo >= 1
+            for k = 1 to add_lo
+                array.unshift(counts, 0)
+                array.unshift(last_period, -1)
+            new_base_row := row_lo
+        int top_row = new_base_row + array.size(counts) - 1
+        int add_hi = row_hi - top_row
+        if add_hi >= 1
+            for k = 1 to add_hi
+                array.push(counts, 0)
+                array.push(last_period, -1)
+
+    for idx = row_lo to row_hi
+        int pos = idx - new_base_row
+        if array.get(last_period, pos) != period_id
+            array.set(counts, pos, array.get(counts, pos) + 1)
+            array.set(last_period, pos, period_id)
+            if track_total
+                p.total_tpo += 1
+
+    new_base_row
+
+// Xử lý chuyển sang TPO Period mới hoặc tiếp tục Period đang mở cho 1 nến chart — cập nhật
+// periods_in_sess và Rotation Factor (chỉ cộng dồn 1 lần khi 1 Period ĐÃ ĐÓNG, không phải mỗi
+// nến chart), đồng thời theo dõi high/low gộp của Period hiện tại/trước đó (dùng cho Late Spike).
+f_process_bar_period(SessionProfile p, int this_period_id, float b_high, float b_low) =>
+    bool is_new_period = na(p.last_period_id) or this_period_id != p.last_period_id
+
+    if is_new_period
+        if not na(p.last_period_id)
+            int period_rf = 0
+            if not na(p.prev_period_high)
+                period_rf += p.cur_period_high > p.prev_period_high ? 1 : p.cur_period_high < p.prev_period_high ? -1 : 0
+                period_rf += p.cur_period_low  > p.prev_period_low  ? 1 : p.cur_period_low  < p.prev_period_low  ? -1 : 0
+            p.rf_score += period_rf
+            p.prev_period_high := p.cur_period_high
+            p.prev_period_low  := p.cur_period_low
+
+        p.cur_period_high  := b_high
+        p.cur_period_low   := b_low
+        p.periods_in_sess  += 1
+        p.last_period_id   := this_period_id
+    else
+        p.cur_period_high := math.max(p.cur_period_high, b_high)
+        p.cur_period_low  := math.min(p.cur_period_low, b_low)
+
+    is_new_period
+
+var line  l_prev_vah  = na
+var line  l_prev_val  = na
+var line  l_prev_poc  = na
+var label lb_prev_vah = na
+var label lb_prev_val = na
+var label lb_prev_poc = na
+
+bool trig_ib_up     = false
+bool trig_ib_dn     = false
+bool trig_buy_tail  = false
+bool trig_sell_tail = false
+bool trig_dd_day    = false
+bool trig_npoc_hit  = false
+bool trig_pva_hit   = false
+bool trig_rule_80   = false
+
+// Biến theo dõi Quy tắc 80% VA Rule xuyên suốt phiên
+var int bars_inside_prev_va = 0
+
+bool is_new_session = timeframe.change("D")
+
+if is_new_session
+    float last_vah = prof.vah
+    float last_val = prof.val
+    float last_poc = prof.poc
+    int   last_end = bar_index - 1
+    
+    bars_inside_prev_va := 0
+    
+    if show_npoc and not na(last_poc) and not na(prof.start_bar)
+        line  new_ln = line.new(prof.start_bar, last_poc, bar_index, last_poc, color=c_npoc_color, style=line.style_dashed, width=1)
+        label new_lb = label.new(bar_index, last_poc, "nPOC " + str.tostring(last_poc, format.mintick), style=label.style_none, textcolor=c_npoc_color, size=size.tiny)
+        array.push(active_npocs, NakedPOC.new(last_poc, prof.start_bar, new_ln, new_lb))
+        
+        if array.size(active_npocs) > max_npoc_cnt
+            NakedPOC oldest = array.shift(active_npocs)
+            line.delete(oldest.ln)
+            label.delete(oldest.lb)
+
+    line.delete(l_prev_vah)
+    line.delete(l_prev_val)
+    line.delete(l_prev_poc)
+    label.delete(lb_prev_vah)
+    label.delete(lb_prev_val)
+    label.delete(lb_prev_poc)
+    
+    if show_prev_va and not na(last_vah) and not na(last_val)
+        l_prev_vah  := line.new(last_end, last_vah, bar_index, last_vah, color=c_prev_va_col, style=line.style_dotted, width=1)
+        l_prev_val  := line.new(last_end, last_val, bar_index, last_val, color=c_prev_va_col, style=line.style_dotted, width=1)
+        l_prev_poc  := line.new(last_end, last_poc, bar_index, last_poc, color=c_navy_poc,    style=line.style_dotted, width=1)
+        lb_prev_vah := label.new(bar_index, last_vah, "pVAH (Open)", style=label.style_none, textcolor=c_prev_va_col, size=size.tiny)
+        lb_prev_val := label.new(bar_index, last_val, "pVAL (Open)", style=label.style_none, textcolor=c_prev_va_col, size=size.tiny)
+        lb_prev_poc := label.new(bar_index, last_poc, "pPOC (Open)", style=label.style_none, textcolor=c_navy_poc,    size=size.tiny)
+
+    prof := SessionProfile.new(
+         start_bar    = bar_index,
+         start_time   = time,
+         open_price   = open,
+         close_price  = close,
+         sess_high    = high,
+         sess_low     = low,
+         prev_vah     = last_vah,
+         prev_val     = last_val,
+         prev_poc     = last_poc,
+         prev_end_bar = last_end,
+         p_vah_tested = false,
+         p_val_tested = false,
+         p_poc_tested = false,
+         ib_high      = high,
+         ib_low       = low,
+         ib_locked    = false,
+         rf_score     = 0
+     )
+    draw := SessionDrawings.new()
+    array.clear(tpo_counts)
+    array.clear(tpo_last_period)
+    array.clear(tpo_counts_c)
+    array.clear(tpo_last_period_c)
+    int this_period_id0 = int(math.floor((time - prof.start_time) / period_ms))
+    f_process_bar_period(prof, this_period_id0, high, low)
+    base_row   := f_add_bar_tpo(tpo_counts,   tpo_last_period,   prof, 0, this_period_id0, high, low, step,   true)
+    base_row_c := f_add_bar_tpo(tpo_counts_c, tpo_last_period_c, prof, 0, this_period_id0, high, low, step_c, false)
+else
+    if not na(prof.start_bar)
+        prof.close_price  := close
+        prof.sess_high    := math.max(prof.sess_high, high)
+        prof.sess_low     := math.min(prof.sess_low, low)
+
+        int this_period_id = int(math.floor((time - prof.start_time) / period_ms))
+        f_process_bar_period(prof, this_period_id, high, low)
+        base_row   := f_add_bar_tpo(tpo_counts,   tpo_last_period,   prof, base_row,   this_period_id, high, low, step,   true)
+        base_row_c := f_add_bar_tpo(tpo_counts_c, tpo_last_period_c, prof, base_row_c, this_period_id, high, low, step_c, false)
+
+        if prof.periods_in_sess <= ib_periods_cnt
+            prof.ib_high := math.max(prof.ib_high, high)
+            prof.ib_low  := math.min(prof.ib_low, low)
+            if prof.periods_in_sess == ib_periods_cnt
+                prof.ib_locked := true
+        else
+            prof.ib_locked := true
+            if not prof.ext_up_first and not prof.ext_dn_first
+                if high > prof.ib_high
+                    prof.ext_up_first := true
+                else if low < prof.ib_low
+                    prof.ext_dn_first := true
+
+// ============================================================================
+// 5. QUẢN LÝ NAKED POC & PREVIOUS VA MITIGATION
+// ============================================================================
+if array.size(active_npocs) > 0
+    for i = array.size(active_npocs) - 1 to 0
+        NakedPOC np = array.get(active_npocs, i)
+        if not show_npoc
+            line.delete(np.ln)
+            label.delete(np.lb)
+            array.remove(active_npocs, i)
+        else
+            line.set_x2(np.ln, bar_index)
+            label.set_x(np.lb, bar_index + 1)
+            if high >= np.price and low <= np.price
+                line.set_style(np.ln, line.style_dotted)
+                label.delete(np.lb)
+                array.remove(active_npocs, i)
+                trig_npoc_hit := true
+                if en_al_npoc
+                    alert("[" + syminfo.ticker + "] NAKED POC TESTED: Giá vừa chạm và lấp đường Virgin POC tại " + str.tostring(np.price, format.mintick), alert.freq_once_per_bar)
+
+if show_prev_va and not na(prof.prev_vah)
+    if not prof.p_vah_tested
+        line.set_x2(l_prev_vah, bar_index)
+        label.set_x(lb_prev_vah, bar_index + 1)
+        if high >= prof.prev_vah and low <= prof.prev_vah
+            prof.p_vah_tested := true
+            label.set_text(lb_prev_vah, "pVAH (Filled)")
+            trig_pva_hit := true
+            if en_al_npoc
+                alert("[" + syminfo.ticker + "] PREV VAH TESTED: Giá vừa chạm pVAH tại " + str.tostring(prof.prev_vah, format.mintick), alert.freq_once_per_bar)
+                
+    if not prof.p_val_tested
+        line.set_x2(l_prev_val, bar_index)
+        label.set_x(lb_prev_val, bar_index + 1)
+        if high >= prof.prev_val and low <= prof.prev_val
+            prof.p_val_tested := true
+            label.set_text(lb_prev_val, "pVAL (Filled)")
+            trig_pva_hit := true
+            if en_al_npoc
+                alert("[" + syminfo.ticker + "] PREV VAL TESTED: Giá vừa chạm pVAL tại " + str.tostring(prof.prev_val, format.mintick), alert.freq_once_per_bar)
+
+    if not prof.p_poc_tested
+        line.set_x2(l_prev_poc, bar_index)
+        label.set_x(lb_prev_poc, bar_index + 1)
+        if high >= prof.prev_poc and low <= prof.prev_poc
+            prof.p_poc_tested := true
+            label.set_text(lb_prev_poc, "pPOC (Filled)")
+
+// ============================================================================
+// 6. ĐỘNG CƠ TÍNH TOÁN TPO, VALUE AREA, POOR HIGH/LOW & 80% RULE
+// ============================================================================
+if not na(prof.start_bar) and array.size(tpo_counts) > 0
+    int   num_periods = prof.periods_in_sess
+    float s_range   = prof.sess_high - prof.sess_low
+    int   n_rows    = array.size(tpo_counts)
+    float grid_low  = base_row * step
+    prof.tick_step := step
+    // tpo_counts đã được cộng dồn incremental qua f_add_bar_tpo() ở mục 4/5 mỗi bar —
+    // không quét lại lịch sử phiên ở đây nữa (khác bản v1.2, đây là tối ưu hiệu năng chính).
+
+    // 6.1. Point of Control (POC)
+    int max_tpo = -1
+    int poc_row = 0
+    // Tie-break: ưu tiên hàng gần GIÁ GIỮA PHIÊN THỰC (không phải giữa mảng theo index — mảng
+    // tpo_counts phình không đối xứng do unshift/push, nên "giữa mảng" lệch khỏi "giữa giá thực").
+    float mid_price = (prof.sess_high + prof.sess_low) / 2.0
+    float mid_row = (mid_price - grid_low) / step - 0.5
+
+    for r = 0 to n_rows - 1
+        int cnt = array.get(tpo_counts, r)
+        if cnt > max_tpo
+            max_tpo := cnt
+            poc_row := r
+        else if cnt == max_tpo
+            if math.abs(r - mid_row) < math.abs(poc_row - mid_row)
+                poc_row := r
+
+    prof.poc := grid_low + (poc_row + 0.5) * step
+    prof.poc_tpo_cnt := max_tpo   // Chẩn đoán: giá trị này không bao giờ được > periods_in_sess
+
+    // 6.2. Value Area (VAH & VAL)
+    int target_va_tpo = math.round(prof.total_tpo * va_pct)
+    int current_va_tpo = array.get(tpo_counts, poc_row)
+    int up_idx = poc_row
+    int dn_idx = poc_row
+
+    while current_va_tpo < target_va_tpo and (up_idx < n_rows - 1 or dn_idx > 0)
+        int up_tpo = up_idx < n_rows - 1 ? array.get(tpo_counts, up_idx + 1) : -1
+        int dn_tpo = dn_idx > 0 ? array.get(tpo_counts, dn_idx - 1) : -1
+
+        if up_tpo >= dn_tpo and up_idx < n_rows - 1
+            up_idx += 1
+            current_va_tpo += up_tpo
+        else if dn_idx > 0
+            dn_idx -= 1
+            current_va_tpo += dn_tpo
+
+    prof.vah := grid_low + (up_idx + 1.0) * step
+    prof.val := grid_low + dn_idx * step
+
+    // ------------------------------------------------------------------------
+    // 6.3+6.4: TPO Count / Tails / Single Prints / Ledge / Poor High-Low —
+    // CHẠY TRÊN LƯỚI THÔ (tpo_counts_c, step_c) để tránh bị vỡ vụn trên mã có
+    // mintick mịn nhưng biên độ phiên rộng (VN30F1M...). POC/VAH/VAL ở trên vẫn
+    // dùng lưới mịn (step) nên không ảnh hưởng độ chính xác giá hiển thị.
+    // ------------------------------------------------------------------------
+    int n_rows_c   = array.size(tpo_counts_c)
+    float grid_low_c = base_row_c * step_c
+
+    // POC riêng cho lưới thô — chỉ dùng làm điểm neo nội bộ cho các phép quét
+    // Tail/SP/Ledge bên dưới, KHÔNG dùng để vẽ đường POC chính (vẫn là prof.poc ở lưới mịn).
+    int max_tpo_c = -1
+    int poc_row_c = 0
+    float mid_row_c = (mid_price - grid_low_c) / step_c - 0.5
+    for r = 0 to n_rows_c - 1
+        int cnt_c = array.get(tpo_counts_c, r)
+        if cnt_c > max_tpo_c
+            max_tpo_c := cnt_c
+            poc_row_c := r
+        else if cnt_c == max_tpo_c
+            if math.abs(r - mid_row_c) < math.abs(poc_row_c - mid_row_c)
+                poc_row_c := r
+    prof.poc_tpo_cnt_c := max_tpo_c   // Chẩn đoán: không bao giờ được > periods_in_sess
+
+    // 6.3. TPO Count Above/Below POC (lưới thô)
+    int above_cnt = 0
+    int below_cnt = 0
+    for r = 0 to n_rows_c - 1
+        if r > poc_row_c
+            above_cnt += array.get(tpo_counts_c, r)
+        else if r < poc_row_c
+            below_cnt += array.get(tpo_counts_c, r)
+
+    prof.tpo_above_poc := above_cnt
+    prof.tpo_below_poc := below_cnt
+
+    // 6.4. Tails, Single Prints, Ledge, Spike & Poor High/Low (lưới thô)
+    int buy_tail_rows = 0
+    if poc_row_c > 0
+        for r = 0 to poc_row_c - 1
+            if array.get(tpo_counts_c, r) == 1
+                buy_tail_rows += 1
+            else
+                break
+    prof.buying_tail_h := buy_tail_rows >= min_tail_tpo ? (grid_low_c + buy_tail_rows * step_c) : na
+
+    int sell_tail_rows = 0
+    if poc_row_c < n_rows_c - 1
+        for r = n_rows_c - 1 to poc_row_c + 1
+            if array.get(tpo_counts_c, r) == 1
+                sell_tail_rows += 1
+            else
+                break
+    prof.selling_tail_l := sell_tail_rows >= min_tail_tpo ? (grid_low_c + (n_rows_c - sell_tail_rows) * step_c) : na
+
+    // Phát hiện Poor High / Poor Low (Đỉnh/đáy có từ 2 TPO trở lên nhưng không có đuôi đơn từ chối)
+    int bottom_tpo_cnt = array.get(tpo_counts_c, 0)
+    int top_tpo_cnt    = array.get(tpo_counts_c, n_rows_c - 1)
+
+    prof.has_poor_low  := bottom_tpo_cnt >= 2 and na(prof.buying_tail_h)
+    prof.has_poor_high := top_tpo_cnt >= 2 and na(prof.selling_tail_l)
+
+    int sp_start_row = -1
+    int sp_end_row   = -1
+    int low_bound    = math.max(buy_tail_rows + 2, int(n_rows_c * 0.2))
+    int high_bound   = math.min(n_rows_c - 1 - sell_tail_rows - 2, int(n_rows_c * 0.8))
+
+    if high_bound > low_bound
+        for r = low_bound to high_bound
+            if array.get(tpo_counts_c, r) == 1
+                if sp_start_row == -1
+                    sp_start_row := r
+                sp_end_row := r
+            else if sp_start_row != -1
+                if (sp_end_row - sp_start_row + 1) >= min_tail_tpo
+                    break
+                else
+                    sp_start_row := -1
+                    sp_end_row   := -1
+
+    if sp_start_row != -1 and (sp_end_row - sp_start_row + 1) >= min_tail_tpo
+        prof.has_sp_mid := true
+        prof.sp_mid_bot := grid_low_c + sp_start_row * step_c
+        prof.sp_mid_top := grid_low_c + (sp_end_row + 1) * step_c
+    else
+        prof.has_sp_mid := false
+        prof.sp_mid_bot := na
+        prof.sp_mid_top := na
+
+    float found_ledge = na
+    if n_rows_c >= 5
+        for r = 2 to n_rows_c - 3
+            int c1 = array.get(tpo_counts_c, r)
+            int c2 = array.get(tpo_counts_c, r + 1)
+            int c_next = array.get(tpo_counts_c, r + 2)
+            int c_prev = array.get(tpo_counts_c, r - 1)
+            if c1 >= 3 and c1 == c2 and (c_next <= 1 or c_prev <= 1)
+                found_ledge := grid_low_c + (r + 1) * step_c
+                break
+    prof.ledge_price := found_ledge
+
+    prof.has_late_spike := false
+    prof.spike_base     := na
+    if num_periods >= ib_periods_cnt + 3 and not na(prof.prev_period_high)
+        float last_2_h = math.max(prof.cur_period_high, prof.prev_period_high)
+        float last_2_l = math.min(prof.cur_period_low, prof.prev_period_low)
+        if last_2_h >= prof.sess_high and prof.sess_high > prof.vah + step * 2
+            prof.has_late_spike := true
+            prof.spike_base     := prof.vah
+        else if last_2_l <= prof.sess_low and prof.sess_low < prof.val - step * 2
+            prof.has_late_spike := true
+            prof.spike_base     := prof.val
+
+    // 6.5. Tính toán Quy tắc 80% Value Area Rule (80% VA Rule Engine)
+    // Điều kiện: Mở cửa ngoài VAH hoặc VAL của phiên trước, sau đó có thanh nến giao dịch chấp nhận bên trong VAH/VAL phiên trước.
+    bool opened_above_va = not na(prof.prev_vah) and prof.open_price > prof.prev_vah
+    bool opened_below_va = not na(prof.prev_val) and prof.open_price < prof.prev_val
+    bool is_inside_prev_va = not na(prof.prev_vah) and high >= prof.prev_val and low <= prof.prev_vah
+
+    if opened_above_va or opened_below_va
+        if is_inside_prev_va
+            bars_inside_prev_va += 1
+            
+        if opened_above_va and bars_inside_prev_va >= 2
+            prof.rule_80_status := "80% Rule Active (Mục tiêu pVAL)"
+            trig_rule_80 := true
+        else if opened_below_va and bars_inside_prev_va >= 2
+            prof.rule_80_status := "80% Rule Active (Mục tiêu pVAH)"
+            trig_rule_80 := true
+        else if opened_above_va or opened_below_va
+            if bars_inside_prev_va == 1
+                prof.rule_80_status := "Chờ xác nhận (Bar 1/2 bên trong VA)"
+            else
+                prof.rule_80_status := "Mở cửa ngoài VA (Chưa chấp nhận)"
+    else
+        prof.rule_80_status := "Không đủ điều kiện (Mở trong VA)"
+
+    // Kích hoạt Alert khi 80% Rule chính thức đạt điều kiện Bar thứ 2 chấp nhận giá
+    if trig_rule_80 and not prof.alerted_rule_80 and en_al_rule80
+        prof.alerted_rule_80 := true
+        alert("[" + syminfo.ticker + "] 80% VALUE AREA RULE KÍCH HOẠT: Giá mở ngoài VA trước và đã chấp nhận bên trong qua 2 thanh nến liên tiếp!", alert.freq_once_per_bar)
+
+    // 6.6. Phân loại Day Type & Open Type
+    float ib_rng = math.max(syminfo.mintick, prof.ib_high - prof.ib_low)
+    float ext_up = math.max(0.0, prof.sess_high - prof.ib_high)
+    float ext_dn = math.max(0.0, prof.ib_low - prof.sess_low)
+    float total_ratio = s_range / ib_rng
+    
+    bool is_ext_up = ext_up > ib_rng * 0.10
+    bool is_ext_dn = ext_dn > ib_rng * 0.10
+    
+    if is_ext_up and is_ext_dn
+        bool close_near_mid = math.abs(prof.close_price - (prof.sess_high + prof.sess_low) / 2.0) <= s_range * 0.25
+        prof.day_type := close_near_mid ? "Neutral Day (Center)" : "Neutral Day (Extreme)"
+    else if prof.has_sp_mid and total_ratio >= 1.5
+        prof.day_type := "Double-Distribution Trend Day"
+    else if total_ratio >= 2.0 and math.abs(prof.rf_score) >= 3
+        prof.day_type := "Trend Day"
+    else if total_ratio < 1.15 and num_periods > ib_periods_cnt and math.abs(prof.rf_score) <= 2
+        prof.day_type := "Nontrend Day"
+    else if total_ratio >= 1.25 and (is_ext_up or is_ext_dn)
+        prof.day_type := "Normal Variation Day"
+    else
+        prof.day_type := "Normal Day"
+        
+    float open_pos_in_ib = (prof.open_price - prof.ib_low) / ib_rng
+    bool open_out_of_va  = not na(prof.prev_vah) and (prof.open_price > prof.prev_vah or prof.open_price < prof.prev_val)
+    
+    if open_pos_in_ib <= 0.12 or open_pos_in_ib >= 0.88
+        prof.open_type := "Open-Drive (OD)"
+    else if (open_pos_in_ib <= 0.30 and is_ext_up and not is_ext_dn) or (open_pos_in_ib >= 0.70 and is_ext_dn and not is_ext_up)
+        prof.open_type := "Open-Test-Drive (OTD)"
+    else if (prof.ext_up_first and prof.close_price < (prof.ib_high + prof.ib_low) / 2.0) or (prof.ext_dn_first and prof.close_price > (prof.ib_high + prof.ib_low) / 2.0)
+        prof.open_type := "Open-Rejection-Reverse (ORR)"
+    else if open_out_of_va
+        prof.open_type := "Open-Auction Out of Range (OAOR)"
+    else
+        prof.open_type := "Open-Auction In Range (OAIR)"
+
+    // 6.7. Cảnh báo thông thường trong phiên
+    if prof.periods_in_sess > ib_periods_cnt
+        if en_al_ib and not prof.alerted_ib_up and high > prof.ib_high
+            trig_ib_up         := true
+            prof.alerted_ib_up := true
+            alert("[" + syminfo.ticker + "] IB BREAKOUT UP: Phá vỡ IB High tại " + str.tostring(prof.ib_high, format.mintick), alert.freq_once_per_bar)
+
+        if en_al_ib and not prof.alerted_ib_dn and low < prof.ib_low
+            trig_ib_dn         := true
+            prof.alerted_ib_dn := true
+            alert("[" + syminfo.ticker + "] IB BREAKDOWN: Xuyên thủng IB Low tại " + str.tostring(prof.ib_low, format.mintick), alert.freq_once_per_bar)
+
+        if en_al_tail and not prof.alerted_buy_tail and not na(prof.buying_tail_h)
+            trig_buy_tail         := true
+            prof.alerted_buy_tail := true
+            alert("[" + syminfo.ticker + "] BUYING TAIL: Xuất hiện đuôi cầu mạnh từ đáy", alert.freq_once_per_bar)
+
+        if en_al_tail and not prof.alerted_sell_tail and not na(prof.selling_tail_l)
+            trig_sell_tail         := true
+            prof.alerted_sell_tail := true
+            alert("[" + syminfo.ticker + "] SELLING TAIL: Xuất hiện đuôi cung mạnh từ đỉnh", alert.freq_once_per_bar)
+
+        if en_al_dd and not prof.alerted_dd_day and prof.day_type == "Double-Distribution Trend Day"
+            trig_dd_day         := true
+            prof.alerted_dd_day := true
+            alert("[" + syminfo.ticker + "] DOUBLE-DISTRIBUTION DAY: Hình thành dải Single Prints!", alert.freq_once_per_bar)
+
+// ============================================================================
+// 7. ĐĂNG KÝ CÁC ĐIỀU KIỆN CẢNH BÁO CHUẨN TRADINGVIEW (ALERTCONDITIONS)
+// ============================================================================
+alertcondition(trig_ib_up,     title="1. Phá vỡ IB High (Bullish Extension)", message="[{{ticker}}] Market Profile: Phá vỡ IB High!")
+alertcondition(trig_ib_dn,     title="2. Phá vỡ IB Low (Bearish Extension)",  message="[{{ticker}}] Market Profile: Xuyên thủng IB Low!")
+alertcondition(trig_buy_tail,  title="3. Xuất hiện Buying Tail", message="[{{ticker}}] Market Profile: Hình thành Buying Tail!")
+alertcondition(trig_sell_tail, title="4. Xuất hiện Selling Tail", message="[{{ticker}}] Market Profile: Hình thành Selling Tail!")
+alertcondition(trig_dd_day,    title="5. Double-Distribution Day", message="[{{ticker}}] Market Profile: Double-Distribution Day hình thành!")
+alertcondition(trig_npoc_hit,  title="6. Chạm/Lấp Naked POC", message="[{{ticker}}] Market Profile: Giá đã chạm và lấp đường Naked POC!")
+alertcondition(trig_pva_hit,   title="7. Chạm pVAH/pVAL Phiên Trước", message="[{{ticker}}] Market Profile: Giá đã kiểm định VAH/VAL phiên trước!")
+alertcondition(trig_rule_80,   title="8. Quy tắc 80% Value Area Rule Kích Hoạt", message="[{{ticker}}] Market Profile: 80% VA Rule đã được kích hoạt xác nhận!")
+
+// ============================================================================
+// 7.1. NHÃN pVAH / pVAL / pPOC BÊN THANH GIÁ (PRICE SCALE — PHẢI BIỂU ĐỒ)
+// ============================================================================
+// Dùng plot() với display=display.price_scale để chỉ hiện nhãn + giá trị ngay
+// bên cạnh thanh giá (price scale), không vẽ thêm đường trên pane (đã có line.new riêng).
+// Lưu ý: cần bật "Indicator Last Value Label" trong Chart Settings > Scales (cài đặt chung
+// của TradingView, áp dụng cho mọi indicator) thì nhãn mới hiện ra trên thanh giá.
+// Màu chuyển sang xám nhạt (c_ib_ext) khi mức giá đã bị lấp (Filled); giữ màu gốc khi còn
+// nguyên (Open) — do title của plot() là chuỗi cố định, không thể đổi text "(Open)/(Filled)"
+// động ngay trong nhãn price scale như nhãn trên chart, nên dùng màu để thể hiện trạng thái.
+plot(show_pva_scale ? prof.prev_vah : na, title="pVAH", color=prof.p_vah_tested ? c_ib_ext : c_prev_va_col, display=display.price_scale)
+plot(show_pva_scale ? prof.prev_val : na, title="pVAL", color=prof.p_val_tested ? c_ib_ext : c_prev_va_col, display=display.price_scale)
+plot(show_pva_scale ? prof.prev_poc : na, title="pPOC", color=prof.p_poc_tested ? c_ib_ext : c_navy_poc,    display=display.price_scale)
+
+// ============================================================================
+// 8. VẼ ĐỐI TƯỢNG LÊN BIỂU ĐỒ (VISUALIZATION)
+// ============================================================================
+if not na(prof.start_bar)
+    int x1 = prof.start_bar
+    int x2 = bar_index
+    float ib_rng = prof.ib_high - prof.ib_low
+
+    // 8.1. IB Lines & Extensions — chỉ tạo mới 1 lần/phiên, các bar sau chỉ kéo dài/cập nhật
+    if show_ib
+        if na(draw.l_ib_h)
+            draw.l_ib_h := line.new(x1, prof.ib_high, x2, prof.ib_high, color=c_ib_line, style=line.style_dashed, width=1)
+            draw.l_ib_l := line.new(x1, prof.ib_low,  x2, prof.ib_low,  color=c_ib_line, style=line.style_dashed, width=1)
+        else
+            line.set_xy1(draw.l_ib_h, x1, prof.ib_high)
+            line.set_xy2(draw.l_ib_h, x2, prof.ib_high)
+            line.set_xy1(draw.l_ib_l, x1, prof.ib_low)
+            line.set_xy2(draw.l_ib_l, x2, prof.ib_low)
+
+        if ib_rng > 0
+            float ext_u15 = prof.ib_low  + ib_rng * 1.5
+            float ext_u20 = prof.ib_low  + ib_rng * 2.0
+            float ext_d15 = prof.ib_high - ib_rng * 1.5
+            float ext_d20 = prof.ib_high - ib_rng * 2.0
+
+            if na(draw.l_ib_ext_u15)
+                draw.l_ib_ext_u15 := line.new(x1, ext_u15, x2, ext_u15, color=c_ib_ext, style=line.style_dotted, width=1)
+                draw.l_ib_ext_u20 := line.new(x1, ext_u20, x2, ext_u20, color=c_ib_ext, style=line.style_dotted, width=1)
+                draw.l_ib_ext_d15 := line.new(x1, ext_d15, x2, ext_d15, color=c_ib_ext, style=line.style_dotted, width=1)
+                draw.l_ib_ext_d20 := line.new(x1, ext_d20, x2, ext_d20, color=c_ib_ext, style=line.style_dotted, width=1)
+            else
+                line.set_xy1(draw.l_ib_ext_u15, x1, ext_u15)
+                line.set_xy2(draw.l_ib_ext_u15, x2, ext_u15)
+                line.set_xy1(draw.l_ib_ext_u20, x1, ext_u20)
+                line.set_xy2(draw.l_ib_ext_u20, x2, ext_u20)
+                line.set_xy1(draw.l_ib_ext_d15, x1, ext_d15)
+                line.set_xy2(draw.l_ib_ext_d15, x2, ext_d15)
+                line.set_xy1(draw.l_ib_ext_d20, x1, ext_d20)
+                line.set_xy2(draw.l_ib_ext_d20, x2, ext_d20)
+
+    // 8.2. Value Area Box (2 vùng trên/dưới POC, mờ, không border) & đường POC/VAH/VAL
+    if show_va and not na(prof.poc)
+        if na(draw.l_poc)
+            draw.b_va_up := box.new(x1, prof.vah, x2, prof.poc, border_width=0, bgcolor=c_va_above)
+            draw.b_va_dn := box.new(x1, prof.poc, x2, prof.val, border_width=0, bgcolor=c_va_below)
+            draw.l_poc   := line.new(x1, prof.poc, x2, prof.poc, color=c_poc_line,     style=line.style_solid,  width=1)
+            draw.l_vah   := line.new(x1, prof.vah, x2, prof.vah, color=c_va_edge_line, style=line.style_dashed, width=1)
+            draw.l_val   := line.new(x1, prof.val, x2, prof.val, color=c_va_edge_line, style=line.style_dashed, width=1)
+        else
+            box.set_top(draw.b_va_up, prof.vah)
+            box.set_bottom(draw.b_va_up, prof.poc)
+            box.set_right(draw.b_va_up, x2)
+            box.set_top(draw.b_va_dn, prof.poc)
+            box.set_bottom(draw.b_va_dn, prof.val)
+            box.set_right(draw.b_va_dn, x2)
+            line.set_xy1(draw.l_poc, x1, prof.poc)
+            line.set_xy2(draw.l_poc, x2, prof.poc)
+            line.set_xy1(draw.l_vah, x1, prof.vah)
+            line.set_xy2(draw.l_vah, x2, prof.vah)
+            line.set_xy1(draw.l_val, x1, prof.val)
+            line.set_xy2(draw.l_val, x2, prof.val)
+
+    // 8.3. Tails, Single Prints, Ledge, Late Spike — có thể xuất hiện/biến mất trong phiên
+    if show_tails
+        if not na(prof.buying_tail_h)
+            if na(draw.b_buy_tail)
+                draw.b_buy_tail := box.new(x1, prof.buying_tail_h, x2, prof.sess_low, border_color=c_forest_buy, border_width=1, border_style=line.style_dashed, bgcolor=c_forest_fill, text="Buying Tail", text_size=size.tiny, text_color=c_forest_buy, text_halign=text.align_right)
+            else
+                box.set_top(draw.b_buy_tail, prof.buying_tail_h)
+                box.set_bottom(draw.b_buy_tail, prof.sess_low)
+                box.set_right(draw.b_buy_tail, x2)
+        else if not na(draw.b_buy_tail)
+            box.delete(draw.b_buy_tail)
+            draw.b_buy_tail := na
+
+        if not na(prof.selling_tail_l)
+            if na(draw.b_sell_tail)
+                draw.b_sell_tail := box.new(x1, prof.sess_high, x2, prof.selling_tail_l, border_color=c_burgundy_sel, border_width=1, border_style=line.style_dashed, bgcolor=c_burgundy_fil, text="Selling Tail", text_size=size.tiny, text_color=c_burgundy_sel, text_halign=text.align_right)
+            else
+                box.set_top(draw.b_sell_tail, prof.sess_high)
+                box.set_bottom(draw.b_sell_tail, prof.selling_tail_l)
+                box.set_right(draw.b_sell_tail, x2)
+        else if not na(draw.b_sell_tail)
+            box.delete(draw.b_sell_tail)
+            draw.b_sell_tail := na
+
+        if prof.has_sp_mid and not na(prof.sp_mid_top)
+            if na(draw.b_sp_mid)
+                draw.b_sp_mid := box.new(x1, prof.sp_mid_top, x2, prof.sp_mid_bot, border_color=c_dt_neutral, border_width=1, border_style=line.style_dotted, bgcolor=c_sp_fill, text="Single Prints", text_size=size.tiny, text_color=c_tbl_text, text_halign=text.align_right)
+            else
+                box.set_top(draw.b_sp_mid, prof.sp_mid_top)
+                box.set_bottom(draw.b_sp_mid, prof.sp_mid_bot)
+                box.set_right(draw.b_sp_mid, x2)
+        else if not na(draw.b_sp_mid)
+            box.delete(draw.b_sp_mid)
+            draw.b_sp_mid := na
+
+        if not na(prof.ledge_price)
+            if na(draw.l_ledge)
+                draw.l_ledge := line.new(x1, prof.ledge_price, x2, prof.ledge_price, color=c_dt_dd, style=line.style_dashed, width=1)
+            else
+                line.set_xy1(draw.l_ledge, x1, prof.ledge_price)
+                line.set_xy2(draw.l_ledge, x2, prof.ledge_price)
+        else if not na(draw.l_ledge)
+            line.delete(draw.l_ledge)
+            draw.l_ledge := na
+
+        if prof.has_late_spike
+            if na(draw.lb_spike)
+                draw.lb_spike := label.new(x2, prof.sess_high, "Late Spike", style=label.style_label_down, color=c_dt_dd, textcolor=color.white, size=size.tiny)
+            else
+                label.set_xy(draw.lb_spike, x2, prof.sess_high)
+        else if not na(draw.lb_spike)
+            label.delete(draw.lb_spike)
+            draw.lb_spike := na
+
+    // 8.4. Nhãn Poor High / Poor Low — có thể xuất hiện/biến mất trong phiên
+    if show_poor
+        if prof.has_poor_high
+            if na(draw.lb_poor_h)
+                draw.lb_poor_h := label.new(x2, prof.sess_high, "Poor High", style=label.style_label_down, color=c_poor_col, textcolor=color.white, size=size.tiny)
+            else
+                label.set_xy(draw.lb_poor_h, x2, prof.sess_high)
+        else if not na(draw.lb_poor_h)
+            label.delete(draw.lb_poor_h)
+            draw.lb_poor_h := na
+
+        if prof.has_poor_low
+            if na(draw.lb_poor_l)
+                draw.lb_poor_l := label.new(x2, prof.sess_low, "Poor Low", style=label.style_label_up, color=c_poor_col, textcolor=color.white, size=size.tiny)
+            else
+                label.set_xy(draw.lb_poor_l, x2, prof.sess_low)
+        else if not na(draw.lb_poor_l)
+            label.delete(draw.lb_poor_l)
+            draw.lb_poor_l := na
+
+    // 8.5. Dải màu Day Type / Open Type — cập nhật vị trí, màu & nội dung text tại chỗ
+    if show_band and not na(prof.tick_step)
+        float band_height = math.max(prof.tick_step * 2.5, (prof.sess_high - prof.sess_low) * 0.06)
+        float band_top    = prof.sess_low - prof.tick_step * 2.0
+        float band_bot    = band_top - band_height
+        color band_col    = f_get_daytype_color(prof.day_type)
+        string band_txt   = prof.day_type + "  |  " + prof.open_type
+
+        if na(draw.b_status_band)
+            draw.b_status_band := box.new(
+                 left         = x1,
+                 top          = band_top,
+                 right        = x2,
+                 bottom       = band_bot,
+                 border_color = band_col,
+                 border_width = 1,
+                 bgcolor      = band_col,
+                 text         = band_txt,
+                 text_color   = color.white,
+                 text_size    = size.small,
+                 text_halign  = text.align_center
+             )
+        else
+            box.set_top(draw.b_status_band, band_top)
+            box.set_bottom(draw.b_status_band, band_bot)
+            box.set_right(draw.b_status_band, x2)
+            box.set_border_color(draw.b_status_band, band_col)
+            box.set_bgcolor(draw.b_status_band, band_col)
+            box.set_text(draw.b_status_band, band_txt)
+    else if not na(draw.b_status_band)
+        box.delete(draw.b_status_band)
+        draw.b_status_band := na
+
+// ============================================================================
+// 9. BẢNG THỐNG KÊ DASHBOARD CLASSIC (TOP RIGHT TABLE - 13 ROWS)
+// ============================================================================
+var table dash = table.new(position.top_right, 2, 13, bgcolor=c_tbl_bg, border_color=c_tbl_border, border_width=1, frame_color=c_navy_poc, frame_width=1)
+
+if barstate.islast and show_dash
+    table.cell(dash, 0, 0, "MIND OVER MARKETS — PROFILE", bgcolor=c_navy_poc, text_color=color.white, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 0, "CLASSIC v6", bgcolor=c_navy_poc, text_color=color.white, text_size=size.small, text_halign=text.align_right)
+    
+    color dt_col = f_get_daytype_color(prof.day_type)
+    table.cell(dash, 0, 1, "Day Type (Dạng Ngày)", bgcolor=c_tbl_header, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 1, prof.day_type, bgcolor=dt_col, text_color=color.white, text_size=size.small, text_halign=text.align_right)
+    
+    table.cell(dash, 0, 2, "Open Type (Mở Cửa)", bgcolor=c_tbl_bg, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 2, prof.open_type, bgcolor=c_tbl_bg, text_color=c_navy_poc, text_size=size.small, text_halign=text.align_right)
+    
+    float ib_w = prof.ib_high - prof.ib_low
+    string ib_state = prof.ib_locked ? "Đã khóa (" + str.tostring(ib_w, format.mintick) + ")" : "Đang hình thành..."
+    if prof.ib_locked
+        if prof.sess_high > prof.ib_high and prof.sess_low < prof.ib_low
+            ib_state := "Phá vỡ 2 đầu (Neutral Ext)"
+        else if prof.sess_high > prof.ib_high
+            ib_state := "Mở rộng Lên (Bullish Ext)"
+        else if prof.sess_low < prof.ib_low
+            ib_state := "Mở rộng Xuống (Bearish Ext)"
+            
+    table.cell(dash, 0, 3, "Trạng thái IB", bgcolor=c_tbl_header, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 3, ib_state, bgcolor=c_tbl_header, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_right)
+    
+    string rf_str = (prof.rf_score > 0 ? "+" : "") + str.tostring(prof.rf_score) + " (" + str.tostring(prof.periods_in_sess) + " Period)"
+    color  rf_col = prof.rf_score > 0 ? c_forest_buy : prof.rf_score < 0 ? c_burgundy_sel : c_tbl_text
+    table.cell(dash, 0, 4, "Rotation Factor (RF)", bgcolor=c_tbl_bg, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 4, rf_str, bgcolor=c_tbl_bg, text_color=rf_col, text_size=size.small, text_halign=text.align_right)
+
+    // Chẩn đoán dedup theo Period: "POC:X/Y" = X TPO tại hàng POC / Y Period đã trôi qua.
+    // X PHẢI <= Y — nếu X > Y nghĩa là dedup theo period_id đang bị lỗi (cần báo lại ngay).
+    string tpo_imb = str.tostring(prof.tpo_above_poc) + " Trên / " + str.tostring(prof.tpo_below_poc) + " Dưới" +
+         " (POC:" + str.tostring(prof.poc_tpo_cnt_c) + "/" + str.tostring(prof.periods_in_sess) + "P, " + str.tostring(array.size(tpo_counts_c)) + " hàng thô)"
+    color  tpo_col = prof.tpo_below_poc > prof.tpo_above_poc ? c_forest_buy : prof.tpo_above_poc > prof.tpo_below_poc ? c_burgundy_sel : c_tbl_text
+    table.cell(dash, 0, 5, "TPO Count (Trên/Dưới POC)", bgcolor=c_tbl_header, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 5, tpo_imb, bgcolor=c_tbl_header, text_color=tpo_col, text_size=size.small, text_halign=text.align_right)
+    
+    string va_str = str.tostring(prof.vah, format.mintick) + " | " + str.tostring(prof.poc, format.mintick) + " | " + str.tostring(prof.val, format.mintick)
+    table.cell(dash, 0, 6, "VAH | POC | VAL (Hiện tại)", bgcolor=c_tbl_bg, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 6, va_str, bgcolor=c_tbl_bg, text_color=c_navy_poc, text_size=size.small, text_halign=text.align_right)
+    
+    string pva_str = na(prof.prev_vah) ? "Chưa có dữ liệu" : 
+         "pVAH: " + str.tostring(prof.prev_vah, format.mintick) + (prof.p_vah_tested ? " (Đã lấp)" : " (Còn nguyên)") + " | " +
+         "pVAL: " + str.tostring(prof.prev_val, format.mintick) + (prof.p_val_tested ? " (Đã lấp)" : " (Còn nguyên)")
+    table.cell(dash, 0, 7, "VAH / VAL Phiên Trước", bgcolor=c_tbl_header, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 7, pva_str, bgcolor=c_tbl_header, text_color=c_prev_va_col, text_size=size.small, text_halign=text.align_right)
+
+    int npoc_cnt = array.size(active_npocs)
+    float nearest_npoc = na
+    float min_dist     = 1e10
+    if npoc_cnt > 0
+        for i = 0 to npoc_cnt - 1
+            NakedPOC np = array.get(active_npocs, i)
+            float d = math.abs(close - np.price)
+            if d < min_dist
+                min_dist     := d
+                nearest_npoc := np.price
+    string npoc_str = npoc_cnt > 0 ? str.tostring(npoc_cnt) + " đường | Gần nhất: " + str.tostring(nearest_npoc, format.mintick) : "0 (Đã lấp hết)"
+    table.cell(dash, 0, 8, "Naked POC (Virgin POC)", bgcolor=c_tbl_bg, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 8, npoc_str, bgcolor=c_tbl_bg, text_color=c_npoc_color, text_size=size.small, text_halign=text.align_right)
+
+    // Hàng 9: Poor High / Poor Low Status (Mới)
+    string poor_str = (prof.has_poor_high ? "Poor High " : "") + (prof.has_poor_low ? "Poor Low" : "")
+    if poor_str == ""
+        poor_str := "Không có (Đỉnh/đáy chuẩn)"
+    table.cell(dash, 0, 9, "Poor High / Poor Low", bgcolor=c_tbl_header, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 9, poor_str, bgcolor=c_tbl_header, text_color=c_poor_col, text_size=size.small, text_halign=text.align_right)
+
+    // Hàng 10: 80% Value Area Rule (Mới)
+    table.cell(dash, 0, 10, "Quy tắc 80% VA Rule", bgcolor=c_tbl_bg, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 10, prof.rule_80_status, bgcolor=c_tbl_bg, text_color=c_navy_poc, text_size=size.small, text_halign=text.align_right)
+
+    string tail_info = (not na(prof.buying_tail_h) ? "Buying Tail " : "") + (not na(prof.selling_tail_l) ? "Selling Tail " : "") + (prof.has_sp_mid ? "| Single Prints" : "")
+    if tail_info == ""
+        tail_info := "Không có Tail rõ rệt"
+    table.cell(dash, 0, 11, "Cấu trúc Cực trị (Tails)", bgcolor=c_tbl_header, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 11, tail_info, bgcolor=c_tbl_header, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_right)
+
+    string spec_info = (not na(prof.ledge_price) ? "Ledge @ " + str.tostring(prof.ledge_price, format.mintick) + " " : "") + (prof.has_late_spike ? "| Late Spike" : "")
+    if spec_info == ""
+        spec_info := "Bình thường"
+    table.cell(dash, 0, 12, "Mô hình Đặc biệt", bgcolor=c_tbl_bg, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 12, spec_info, bgcolor=c_tbl_bg, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_right)
+else if barstate.islast and not show_dash
+    table.clear(dash, 0, 0, 1, 12)
