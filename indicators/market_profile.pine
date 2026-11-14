@@ -2,7 +2,7 @@
 // ─── Market Profile — Mind over Markets (Classic Light Edition) ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-11-14
-// Phiên bản: 2.1
+// Phiên bản: 2.2
 // Mô tả: Market Profile / TPO (Time Price Opportunity) theo phương pháp "Mind over Markets" —
 //        tính Initial Balance, Value Area (VAH/VAL/POC), Naked POC, Tails/Single Prints/Ledge/Spike,
 //        phân loại Day Type & Open Type, 80% VA Rule, Dashboard thống kê.
@@ -16,6 +16,9 @@
 //       nhưng biên độ phiên rộng (VN30F1M...).
 // v2.1: Gọn code (giảm comment dài dòng) + gọn dashboard (ẩn chẩn đoán theo toggle, text ngắn
 //       hơn) + thêm input vị trí dashboard (4 góc).
+// v2.2: VAH/POC/VAL chuyển thành Developing (plot stepline + fill, giữ đúng giá trị lịch sử
+//       từng bar) thay cho box/line tĩnh bị "viết lại" cả đoạn mỗi khi giá trị mới nhất đổi —
+//       áp dụng cho mọi phiên (cả phiên đã đóng), xem docs mục "Thiết Kế: Developing VA".
 indicator("Market Profile — Mind over Markets (Classic Light Edition)", shorttitle="MP Classic v6", overlay=true, max_lines_count=500, max_boxes_count=500, max_labels_count=500)
 
 // ============================================================================
@@ -23,7 +26,7 @@ indicator("Market Profile — Mind over Markets (Classic Light Edition)", shortt
 // ============================================================================
 grp_toggle = "1. Bảng Điều Khiển Hiển Thị (Feature Toggles)"
 show_ib      = input.bool(true, "Hiển thị IB Lines & Extensions (1.5x, 2.0x)", group=grp_toggle)
-show_va      = input.bool(true, "Hiển thị VAH / VAL / POC & Khung Value Area", group=grp_toggle)
+show_va      = input.bool(true, "Hiển thị Developing VAH / POC / VAL (bậc thang) & Khung Value Area", group=grp_toggle)
 show_npoc    = input.bool(true, "Hiển thị & Kéo dài các đường Naked POC (Virgin POC)", group=grp_toggle)
 show_prev_va = input.bool(true, "Hiển thị VAH / VAL / POC của Phiên Trước (Untested)", group=grp_toggle)
 show_pva_scale = input.bool(true, "Hiển thị nhãn pVAH/pVAL/pPOC bên Thanh Giá (Price Scale)", group=grp_toggle)
@@ -166,12 +169,7 @@ type SessionDrawings
     line  l_ib_ext_u20   = na
     line  l_ib_ext_d15   = na
     line  l_ib_ext_d20   = na
-    line  l_poc          = na
-    line  l_vah          = na
-    line  l_val          = na
     line  l_ledge        = na
-    box   b_va_up        = na
-    box   b_va_dn        = na
     box   b_buy_tail     = na
     box   b_sell_tail    = na
     box   b_sp_mid       = na
@@ -714,6 +712,25 @@ plot(show_pva_scale ? prof.prev_val : na, title="pVAL", color=prof.p_val_tested 
 plot(show_pva_scale ? prof.prev_poc : na, title="pPOC", color=prof.p_poc_tested ? c_ib_ext : c_navy_poc,    display=display.price_scale)
 
 // ============================================================================
+// 7.2. DEVELOPING VAH / POC / VAL (đường bậc thang theo thời gian thực)
+// ============================================================================
+// plot() giữ nguyên giá trị LỊCH SỬ của từng bar (không như box/line.set_xy bị "viết lại" cả
+// đoạn đã qua mỗi khi giá trị mới nhất đổi) — nên dùng plot(style=stepline) là cách đúng để vẽ
+// Developing VA: thấy được VAH/POC/VAL đã dịch chuyển thế nào qua từng bar trong phiên, áp dụng
+// cho mọi phiên kể cả đã đóng (ngày Trend sẽ thấy POC trôi dần, ngày Nontrend POC ổn định sớm).
+// is_new_session ép về na để ngắt đường nối giữa phiên trước và phiên mới (tránh vẽ xuyên qua
+// giờ nghỉ/qua đêm).
+float dev_vah = is_new_session or not show_va ? na : prof.vah
+float dev_poc = is_new_session or not show_va ? na : prof.poc
+float dev_val = is_new_session or not show_va ? na : prof.val
+
+p_dev_vah = plot(dev_vah, title="VAH (Developing)", style=plot.style_stepline, color=c_va_edge_line, linewidth=1)
+p_dev_poc = plot(dev_poc, title="POC (Developing)", style=plot.style_stepline, color=c_poc_line,     linewidth=2)
+p_dev_val = plot(dev_val, title="VAL (Developing)", style=plot.style_stepline, color=c_va_edge_line, linewidth=1)
+fill(p_dev_vah, p_dev_poc, color=c_va_above, title="VA Trên POC")
+fill(p_dev_poc, p_dev_val, color=c_va_below, title="VA Dưới POC")
+
+// ============================================================================
 // 8. VẼ ĐỐI TƯỢNG LÊN BIỂU ĐỒ (VISUALIZATION)
 // ============================================================================
 if not na(prof.start_bar)
@@ -753,27 +770,7 @@ if not na(prof.start_bar)
                 line.set_xy1(draw.l_ib_ext_d20, x1, ext_d20)
                 line.set_xy2(draw.l_ib_ext_d20, x2, ext_d20)
 
-    // 8.2. Value Area Box (2 vùng trên/dưới POC, mờ, không border) & đường POC/VAH/VAL
-    if show_va and not na(prof.poc)
-        if na(draw.l_poc)
-            draw.b_va_up := box.new(x1, prof.vah, x2, prof.poc, border_width=0, bgcolor=c_va_above)
-            draw.b_va_dn := box.new(x1, prof.poc, x2, prof.val, border_width=0, bgcolor=c_va_below)
-            draw.l_poc   := line.new(x1, prof.poc, x2, prof.poc, color=c_poc_line,     style=line.style_solid,  width=1)
-            draw.l_vah   := line.new(x1, prof.vah, x2, prof.vah, color=c_va_edge_line, style=line.style_dashed, width=1)
-            draw.l_val   := line.new(x1, prof.val, x2, prof.val, color=c_va_edge_line, style=line.style_dashed, width=1)
-        else
-            box.set_top(draw.b_va_up, prof.vah)
-            box.set_bottom(draw.b_va_up, prof.poc)
-            box.set_right(draw.b_va_up, x2)
-            box.set_top(draw.b_va_dn, prof.poc)
-            box.set_bottom(draw.b_va_dn, prof.val)
-            box.set_right(draw.b_va_dn, x2)
-            line.set_xy1(draw.l_poc, x1, prof.poc)
-            line.set_xy2(draw.l_poc, x2, prof.poc)
-            line.set_xy1(draw.l_vah, x1, prof.vah)
-            line.set_xy2(draw.l_vah, x2, prof.vah)
-            line.set_xy1(draw.l_val, x1, prof.val)
-            line.set_xy2(draw.l_val, x2, prof.val)
+    // 8.2. VAH/POC/VAL — xem mục 7.2 phía trên (plot+fill Developing VA)
 
     // 8.3. Tails, Single Prints, Ledge, Late Spike — có thể xuất hiện/biến mất trong phiên
     if show_tails
@@ -890,7 +887,7 @@ var table dash = table.new(dash_position, 2, 13, bgcolor=c_tbl_bg, border_color=
 
 if barstate.islast and show_dash
     table.cell(dash, 0, 0, "MARKET PROFILE", bgcolor=c_navy_poc, text_color=color.white, text_size=size.small, text_halign=text.align_left)
-    table.cell(dash, 1, 0, "v2.1", bgcolor=c_navy_poc, text_color=color.white, text_size=size.small, text_halign=text.align_right)
+    table.cell(dash, 1, 0, "v2.2", bgcolor=c_navy_poc, text_color=color.white, text_size=size.small, text_halign=text.align_right)
 
     color dt_col = f_get_daytype_color(prof.day_type)
     table.cell(dash, 0, 1, "Day Type", bgcolor=c_tbl_header, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)

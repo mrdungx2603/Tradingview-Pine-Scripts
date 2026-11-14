@@ -1,6 +1,6 @@
 # Market Profile (Mind over Markets) — Tài Liệu
 
-> **Script**: [indicators/market_profile.pine](../indicators/market_profile.pine) (v2.1)
+> **Script**: [indicators/market_profile.pine](../indicators/market_profile.pine) (v2.2)
 > **Loại**: Indicator (overlay)
 > **Pine Script**: v6
 > **Ngày tạo**: 2026-11-14 / **Cập nhật**: 2026-11-14
@@ -23,7 +23,7 @@ Indicator Market Profile / TPO (Time Price Opportunity) theo phương pháp kinh
 | Tham Số | Loại | Mặc Định | Mô Tả |
 |---|---|---|---|
 | Hiển thị IB Lines & Extensions | `bool` | `true` | IB High/Low + mở rộng 1.5x, 2.0x |
-| Hiển thị VAH/VAL/POC & Khung VA | `bool` | `true` | Box 2 vùng trên/dưới POC + 3 đường mốc |
+| Hiển thị Developing VAH/POC/VAL & Khung VA | `bool` | `true` | Đường bậc thang (stepline) + 2 vùng tô màu trên/dưới POC theo đúng hình bậc thang — xem mục "Thiết Kế: Developing VA" bên dưới |
 | Hiển thị & kéo dài Naked POC | `bool` | `true` | Đường POC phiên trước chưa bị lấp |
 | Hiển thị VAH/VAL/POC Phiên Trước | `bool` | `true` | Đường kẻ + label `(Open)`/`(Filled)` trên chart |
 | Hiển thị nhãn pVAH/pVAL/pPOC bên Thanh Giá | `bool` | `true` | Nhãn trên price scale (`plot(display=display.price_scale)`), đổi màu xám khi đã lấp |
@@ -64,7 +64,8 @@ Indicator Market Profile / TPO (Time Price Opportunity) theo phương pháp kinh
 6. **Tails/Single Prints/Ledge/Spike**: trên **lưới thô** (`tpo_counts_c`), tìm `poc_row_c` nội bộ (cùng công thức tie-break, chỉ dùng làm điểm neo quét — không phải đường POC hiển thị) rồi quét từ đó ra 2 biên tìm dải TPO=1 liên tiếp (tail), dải TPO=1 ở giữa (single print), 2 hàng liền kề TPO≥3 kẹp giữa hàng TPO≤1 (ledge). Late Spike vẫn dùng lưới mịn (high/low gộp của 2 TPO Period cuối vượt VAH/VAL ≥2 `step`).
 7. **Day Type / Open Type**: phân loại dựa trên tỷ lệ `s_range/ib_rng`, vị trí mở cửa trong IB, hướng mở rộng đầu tiên, `rf_score` (Rotation Factor).
 8. **80% VA Rule**: đếm số **nến chart** liên tiếp giá nằm trong VA phiên trước sau khi mở cửa ngoài VA đó — ⚠️ đây là phần DUY NHẤT còn đếm theo nến chart, chưa chuyển sang TPO Period (xem "Giới Hạn & Lưu Ý").
-9. **Vẽ đối tượng**: tạo 1 lần/phiên, các bar sau chỉ cập nhật tại chỗ (`set_xy`, `box.set_top/bottom/right`) — không xoá/tạo lại mỗi bar (tối ưu hiệu năng).
+9. **Developing VAH/POC/VAL** (từ v2.2): `plot(style=plot.style_stepline)` cho VAH/POC/VAL + `fill()` giữa 2 đường để tô 2 vùng — xem mục "Thiết Kế: Developing VA" bên dưới.
+10. **Vẽ đối tượng còn lại** (IB, Tails, SP, Ledge, band...): tạo 1 lần/phiên, các bar sau chỉ cập nhật tại chỗ (`set_xy`, `box.set_top/bottom/right`) — không xoá/tạo lại mỗi bar (tối ưu hiệu năng).
 
 ## Thiết Kế: TPO Period Thực (Không Phải Nến Chart)
 
@@ -100,9 +101,31 @@ Vì Tail/Poor High-Low/Single Prints đều phụ thuộc chặt vào CÙNG `poc
 
 **Cách tinh chỉnh `shape_step`**: nên đặt xấp xỉ 1/15 đến 1/30 biên độ dao động trung bình trong phiên của mã (để ra khoảng 15–30 hàng/phiên, giống mật độ TPO chart cổ điển). Bật toggle **"Hiện Chẩn Đoán Dedup trên Dashboard"** (`show_diag`, mặc định tắt để dashboard gọn) để dòng RF hiện thêm `(YP)` và dòng TPO Count hiện thêm `(POC:X/YP, Zh)`: `X` (TPO tại hàng POC-thô) phải luôn `<= Y` (số Period đã trôi qua) — nếu không, báo lại ngay vì đó là bug dedup thật. `Z` (số hàng lưới thô) nên nằm trong khoảng vài chục; quá lớn (hàng trăm) → tăng `shape_step`; quá nhỏ (dưới ~10) → giảm `shape_step`.
 
+## Thiết Kế: Developing VA (thay cho Box Tĩnh)
+
+**Vấn đề gặp phải (trước v2.2)**: VAH/POC/VAL được vẽ bằng `box.new`/`line.new`, cập nhật mỗi bar qua `box.set_top/bottom`/`line.set_xy2` — nghĩa là khi giá trị mới nhất đổi, TOÀN BỘ đường/khung (từ đầu phiên tới bar hiện tại) bị "viết lại" theo giá trị mới. Với phiên ĐÃ ĐÓNG thì không sao (kết quả cuối = chính xác), nhưng với phiên ĐANG CHẠY, nhìn vào chart sẽ tưởng VAH/POC/VAL đã như vậy từ đầu phiên — mất hoàn toàn thông tin về việc Value Area đã **phát triển/dịch chuyển** ra sao theo thời gian. Đây không phải "Developing Value Area" đúng nghĩa.
+
+**Cách sửa**: chuyển sang `plot(style=plot.style_stepline)` cho 3 đường VAH/POC/VAL + `fill()` giữa 2 cặp đường để tô 2 vùng:
+
+```pinescript
+float dev_vah = is_new_session or not show_va ? na : prof.vah
+float dev_poc = is_new_session or not show_va ? na : prof.poc
+float dev_val = is_new_session or not show_va ? na : prof.val
+p_dev_vah = plot(dev_vah, style=plot.style_stepline, ...)
+p_dev_poc = plot(dev_poc, style=plot.style_stepline, ...)
+p_dev_val = plot(dev_val, style=plot.style_stepline, ...)
+fill(p_dev_vah, p_dev_poc, color=c_va_above)
+fill(p_dev_poc, p_dev_val, color=c_va_below)
+```
+
+`plot()` không bao giờ "viết lại" giá trị của các bar đã qua — mỗi bar giữ đúng giá trị VAH/POC/VAL tại THỜI ĐIỂM đó, nên đường vẽ ra là đường bậc thang thể hiện đúng quá trình phát triển. Áp dụng cho **mọi phiên, kể cả đã đóng** — nhờ vậy nhìn lịch sử cũng thấy được: ngày Trend Day sẽ có POC trôi dần theo 1 hướng suốt phiên, ngày Nontrend Day sẽ có POC ổn định rất sớm và đi ngang. `is_new_session` ép giá trị về `na` để ngắt đường nối giữa 2 phiên (tránh vẽ xuyên qua giờ nghỉ trưa/qua đêm).
+
+Box/line tĩnh cũ (`draw.b_va_up/dn`, `draw.l_poc/vah/val`) đã bị xoá hoàn toàn — toggle "Hiển thị Developing VAH/POC/VAL & Khung VA" (`show_va`) giờ điều khiển đường bậc thang + vùng tô màu mới này.
+
 ## Output / Tín Hiệu Trên Chart
 
-- Box IB, box Value Area (2 vùng mờ trên/dưới POC, không border), đường POC (nét liền mờ) / VAH-VAL (nét đứt mờ hơn).
+- Đường IB High/Low + mở rộng 1.5x/2.0x.
+- Developing VAH/POC/VAL (đường bậc thang `plot.style_stepline`) + 2 vùng tô màu trên/dưới POC theo `fill()` — xem "Thiết Kế: Developing VA".
 - Đường + label pVAH/pVAL/pPOC phiên trước (text `(Open)`/`(Filled)`), đường Naked POC.
 - Nhãn `pVAH`/`pVAL`/`pPOC` bên price scale (đổi màu xám khi đã lấp).
 - Box Buying/Selling Tail, Single Prints, đường Ledge, label Late Spike, label Poor High/Poor Low.
@@ -134,3 +157,4 @@ Vì Tail/Poor High-Low/Single Prints đều phụ thuộc chặt vào CÙNG `poc
   - Kết quả POC/VAH/VAL/Tail/Ledge có thể lệch nhẹ (≤ ±1 `price_step`) so với v1.2 do đổi cách chia lưới giá — người dùng xác nhận chấp nhận được (chỉ cần chính xác tới 0.1).
   - **Thêm Lưới Kép** (xem mục "Thiết Kế: Lưới Kép" phía trên): phát hiện qua test trên VN30F1M (3m) — TPO Count hiện 294/376 trông vô lý, nhưng chẩn đoán xác nhận dedup theo Period ĐÚNG (X≤Y), nguyên nhân là `price_step=0.1` quá mịn so với biên độ phiên (~200 hàng). Thêm input `shape_step` (mặc định 1.0) + mảng `tpo_counts_c`/`tpo_last_period_c`/`base_row_c` riêng cho TPO Count/Tail/Poor High-Low/Single Prints/Ledge (nhóm này phải dùng CHUNG 1 lưới vì chia sẻ `poc_row`/`buy_tail_rows`/`sell_tail_rows`, tách lưới riêng cho từng cái sẽ gây mâu thuẫn logic). POC/VAH/VAL vẫn dùng `price_step` mịn như cũ. Hàm `f_add_bar_tpo` thêm tham số `row_step`/`track_total` để dùng chung cho 2 lưới mà không đếm trùng `total_tpo`.
 - **v2.1** (2026-11-14): Dọn code — rút gọn changelog/comment dài dòng trong header file (lịch sử chi tiết chuyển hẳn vào tài liệu này); xoá field chẩn đoán lưới mịn không dùng tới (`poc_tpo_cnt`). Dashboard gọn lại: label/value viết tắt (vd "IB" thay "Trạng thái IB", "✓/○" thay "(Đã lấp)/(Còn nguyên)", rút gọn chuỗi trạng thái 80% VA Rule); số liệu chẩn đoán dedup (`POC:X/YP, Zh`) chuyển vào toggle riêng `show_diag` (mặc định tắt) thay vì luôn hiện. Thêm input `dash_pos_opt` chọn vị trí Dashboard (4 góc: Trên Trái/Phải, Dưới Trái/Phải) thay vì cố định `position.top_right`.
+- **v2.2** (2026-11-14): Chuyển VAH/POC/VAL từ box/line tĩnh (bị "viết lại" cả đoạn lịch sử mỗi khi giá trị mới nhất đổi) thành **Developing VA** đúng nghĩa — `plot(style=plot.style_stepline)` cho 3 đường + `fill()` tô 2 vùng, giữ đúng giá trị lịch sử từng bar, áp dụng cho mọi phiên kể cả đã đóng (xem mục "Thiết Kế: Developing VA"). Xoá hẳn `draw.b_va_up/dn`, `draw.l_poc/vah/val` (dead code) khỏi `SessionDrawings`.
