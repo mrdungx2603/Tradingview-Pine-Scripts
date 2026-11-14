@@ -366,24 +366,39 @@ var array<box> col_rf    = array.new<box>()
 var array<box> col_rsi   = array.new<box>()
 
 if barstate.isconfirmed
-    f_push_cell(col_delta, Y_DELTA, Y_DELTA - 1, str.tostring(delta, format.volume), color.gray, n_bars_display)
-    f_push_cell(col_cvd,   Y_CVD,   Y_CVD - 1,   str.tostring(cvd, format.volume), color.gray, n_bars_display)
-    f_push_cell(col_tpo,   Y_TPO,   Y_TPO - 1,   str.tostring(prof.tpo_above_poc) + "/" + str.tostring(prof.tpo_below_poc), color.gray, n_bars_display)
-    f_push_cell(col_rf,    Y_RF,    Y_RF - 1,    str.tostring(prof.rf_score), color.gray, n_bars_display)
-    f_push_cell(col_rsi,   Y_RSI,   Y_RSI - 1,   str.tostring(rsi_val, "#.#"), color.gray, n_bars_display)
+    // Màu dương=forest green, âm=burgundy, trung tính=gray (đồng bộ bảng màu market_profile.pine).
+    color  c_delta    = delta > 0 ? color.rgb(27, 77, 62) : delta < 0 ? color.rgb(139, 0, 0) : color.gray
+    color  c_cvd      = cvd > 0 ? color.rgb(27, 77, 62) : cvd < 0 ? color.rgb(139, 0, 0) : color.gray
+    color  c_rf       = prof.rf_score > 0 ? color.rgb(27, 77, 62) : prof.rf_score < 0 ? color.rgb(139, 0, 0) : color.gray
+    color  c_tpo      = prof.tpo_below_poc > prof.tpo_above_poc ? color.rgb(27, 77, 62) : prof.tpo_above_poc > prof.tpo_below_poc ? color.rgb(139, 0, 0) : color.gray
+    color  c_rsi      = rsi_val > 70 ? color.rgb(139, 0, 0) : rsi_val < 30 ? color.rgb(27, 77, 62) : color.rgb(26, 54, 93)
+    string delta_tag  = delta_source == "Footprint" ? "F" : delta_source == "LowerTF" ? "L" : "A"
+    string delta_txt  = str.tostring(delta, format.volume) + " " + delta_tag
+
+    f_push_cell(col_delta, Y_DELTA, Y_DELTA - 1, delta_txt, c_delta, n_bars_display)
+    f_push_cell(col_cvd,   Y_CVD,   Y_CVD - 1,   str.tostring(cvd, format.volume), c_cvd, n_bars_display)
+    f_push_cell(col_tpo,   Y_TPO,   Y_TPO - 1,   str.tostring(prof.tpo_above_poc) + "/" + str.tostring(prof.tpo_below_poc), c_tpo, n_bars_display)
+    f_push_cell(col_rf,    Y_RF,    Y_RF - 1,    str.tostring(prof.rf_score), c_rf, n_bars_display)
+    f_push_cell(col_rsi,   Y_RSI,   Y_RSI - 1,   str.tostring(rsi_val, "#.#"), c_rsi, n_bars_display)
 
 // Band Day Type / Open Type — 1 box/dòng/phiên, trải từ đầu phiên tới nến
 // hiện tại (merge full D1), cập nhật tại chỗ, không tạo mới mỗi bar.
 var box b_daytype  = na
 var box b_opentype = na
 
+// Day Type dùng f_get_daytype_color() (tái dùng mapping màu market_profile.pine).
+// Open Type dùng màu navy trung tính cố định (c_dt_normal), không phân loại theo hướng.
+color c_daytype_now = f_get_daytype_color(prof.day_type)
+
 if is_new_session
     box.delete(b_daytype)
     box.delete(b_opentype)
-    b_daytype  := box.new(prof.start_bar, Y_DAYTYPE, bar_index, Y_DAYTYPE - 1, border_color=color.gray, bgcolor=color.gray, text=prof.day_type, text_color=color.white, text_size=size.small)
-    b_opentype := box.new(prof.start_bar, Y_OPENTYPE, bar_index, Y_OPENTYPE - 1, border_color=color.gray, bgcolor=color.gray, text=prof.open_type, text_color=color.white, text_size=size.small)
+    b_daytype  := box.new(prof.start_bar, Y_DAYTYPE, bar_index, Y_DAYTYPE - 1, border_color=c_daytype_now, bgcolor=c_daytype_now, text=prof.day_type, text_color=color.white, text_size=size.small)
+    b_opentype := box.new(prof.start_bar, Y_OPENTYPE, bar_index, Y_OPENTYPE - 1, border_color=c_dt_normal, bgcolor=c_dt_normal, text=prof.open_type, text_color=color.white, text_size=size.small)
 else
     box.set_right(b_daytype, bar_index)
     box.set_text(b_daytype, prof.day_type)
+    box.set_bgcolor(b_daytype, c_daytype_now)
+    box.set_border_color(b_daytype, c_daytype_now)
     box.set_right(b_opentype, bar_index)
     box.set_text(b_opentype, prof.open_type)
