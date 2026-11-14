@@ -1,6 +1,6 @@
 # Order Flow & Market Profile Panel — Tài Liệu
 
-> **Script**: [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) (v1.6)
+> **Script**: [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) (v1.7)
 > **Loại**: Indicator (pane riêng, không overlay)
 > **Pine Script**: v6
 > **Ngày tạo**: 2026-11-14 / **Cập nhật**: 2026-11-14
@@ -29,10 +29,10 @@ Engine POC/VAH/VAL/TPO Count/RF được **port từ `market_profile.pine` v1.2*
 | Ngưỡng Imbalance (%) | `float` | `300.0` | Footprint | `imbalance_percent` cho `request.footprint()` |
 | Khung Thời Gian Dự Phòng | `string` | `"1S"` | Footprint | Lower TF dùng ở Tầng 2 khi `request.footprint()` không có dữ liệu |
 | Khung Gộp Cột | `timeframe` | `"5"` | Hiển Thị | `col_tf` — dropdown timeframe chuẩn Pine (1, 5, 15, 30, 60, 120, 240, 1D, 1W...) |
-| Số Cột Hiển Thị | `int` | `60` (10–62) | Hiển Thị | Rolling window cho tất cả dòng (giới hạn `max_boxes_count=500`: tối đa 8 dòng × 62 = 496 < 500) |
+| Số Cột Hiển Thị | `int` | `55` (10–55) | Hiển Thị | Rolling window cho tất cả dòng (giới hạn `max_boxes_count=500`: tối đa 9 dòng × 55 = 495 < 500) |
 | Cỡ Chữ Hiển Thị | `string` | `"Small"` | Hiển Thị | `Tiny`/`Small`/`Normal`/`Large` — áp dụng cho mọi box/label trong panel |
 | Hiện hậu tố nguồn Delta | `bool` | `true` | Hiển Thị | Hiện/ẩn hậu tố `F`/`L`/`A` ở ô Delta |
-| Delta / CVD / VAH / POC / VAL / TPO Count / RF / RSI | `bool` ×8 | `true` | Hiện/Ẩn Dòng | Mỗi dòng 1 toggle riêng — ẩn thì bỏ qua cả tính toán liên quan và không chiếm chỗ trên grid |
+| Time / Delta / CVD / VAH / POC / VAL / TPO Count / RF / RSI | `bool` ×9 | `true` | Hiện/Ẩn Dòng | Mỗi dòng 1 toggle riêng — ẩn thì bỏ qua cả tính toán liên quan và không chiếm chỗ trên grid |
 | Độ Phân Giải Lưới Giá TPO | `int` | `60` (20–120) | Market Profile | Số hàng chia phiên để đếm TPO |
 | Chu Kỳ RSI | `int` | `14` | RSI | Dùng cho RSI thật theo khung `col_tf` (`request.security()`), không phải RSI(M1) |
 | Nguồn RSI | `source` | `close` | RSI | |
@@ -57,11 +57,12 @@ Engine POC/VAH/VAL/TPO Count/RF được **port từ `market_profile.pine` v1.2*
 6. **Vị trí dòng tính động** (`y_cursor`, Section 2): đếm từ dưới (RSI) lên theo thứ tự cố định, chỉ cấp số thứ tự Y cho dòng đang hiện — dòng ẩn không được cấp Y, nên không chiếm chỗ; các dòng còn lại tự dồn khít. Scale pane neo theo `0..total_rows_visible` (số dòng đang hiện).
 7. **Gộp cột `col_tf`**: `is_new_col = timeframe.change(col_tf)` phát hiện biên khung mới dù chart chạy M1. Khi biên mới bắt đầu, "flush" khung vừa đóng thành 1 cột: **Delta** = tổng `delta` các nến M1 trong khung (`bucket_delta_sum`), **CVD/VAH/POC/VAL/TPO Count/RF** = lấy mẫu giá trị tích lũy-theo-phiên *tại thời điểm đó*, **RSI** = `rsi_5m`. Toạ độ box lấy từ `bucket_start_time`/`bucket_last_time` (time thật của nến M1 đầu/cuối khung), không suy từ `col_tf` để tránh sai lệch qua các mốc có gap dữ liệu (nghỉ trưa, qua đêm).
 8. **Renderer**: `f_push_cell()` tạo 1 box/cột (toạ độ `xloc.bar_time`, biên đúng `[đầu khung, cuối khung)`), tự xoá box cũ nhất khi vượt `n_bars_display` (giống pattern FIFO đã dùng cho Naked POC trong `market_profile.pine`).
-9. **Nhãn tên dòng**: `label.new()` đặt ngay bên phải cột mới nhất (`bar_index + 2`), cập nhật vị trí mỗi bar để không bị cuộn mất. Dòng bị ẩn thì không tạo nhãn.
+9. **Dòng Time**: hiển thị giờ:phút bắt đầu mỗi cột qua `str.format_time(bucket_start_time, "HH:mm", syminfo.timezone)`, ở vị trí trên cùng khi hiện (toggle `show_time` riêng, không gắn với tính toán nào khác nên luôn "rẻ").
+10. **Nhãn tên dòng**: `label.new()` đặt ngay bên phải cột mới nhất (`bar_index + 2`), cập nhật vị trí mỗi bar để không bị cuộn mất. Dòng bị ẩn thì không tạo nhãn.
 
 ## Output / Tín Hiệu Trên Chart
 
-- Pane riêng, thứ tự Delta/CVD/VAH/POC/VAL/TPO Count/RF/RSI (dòng ẩn không chiếm chỗ):
+- Pane riêng, thứ tự Time/Delta/CVD/VAH/POC/VAL/TPO Count/RF/RSI (dòng ẩn không chiếm chỗ):
   - Delta/CVD/RF: xanh forest (dương) / đỏ burgundy (âm) / xám (trung tính). Ô Delta có hậu tố `F`/`L`/`A` (tắt được qua input) cho biết đang chạy tầng fallback nào.
   - VAH/POC/VAL: giá trị session, màu navy trung tính (mức giá, không phải delta nên không phân loại theo dấu).
   - TPO Count: hiển thị `trên/dưới`, màu theo bên nào nhiều TPO hơn.
@@ -71,7 +72,7 @@ Engine POC/VAH/VAL/TPO Count/RF được **port từ `market_profile.pine` v1.2*
 ## Giới Hạn & Lưu Ý
 
 - `request.footprint()` yêu cầu TradingView Premium/Ultimate và sàn hỗ trợ dữ liệu tick-level — **đã xác nhận `HNX:VN30F1!` có hỗ trợ** (chạy Tầng 1 "F" theo phản hồi thực tế khi test).
-- Tối đa 8 dòng × `n_bars_display` (10–62) cột gần nhất do giới hạn `max_boxes_count=500` của Pine. Ở `col_tf="5"` (mặc định) và 60 cột ≈ 300 phút ≈ 5 giờ — "max về trước" thực tế theo đúng giới hạn cứng của Pine, không phải vô hạn.
+- Tối đa 9 dòng × `n_bars_display` (10–55) cột gần nhất do giới hạn `max_boxes_count=500` của Pine. Ở `col_tf="5"` (mặc định) và 55 cột ≈ 275 phút ≈ 4.5 giờ — "max về trước" thực tế theo đúng giới hạn cứng của Pine, không phải vô hạn.
 - Động cơ TPO quét lại toàn bộ bar trong phiên mỗi bar mới (giống `market_profile.pine`, chưa tối ưu incremental) — nặng hơn bản 30 phút gốc ~2 bậc độ lớn do chạy trên M1; đã giới hạn `calc_bars_count=3000`, và có thể bỏ qua hoàn toàn nếu ẩn hết VAH/POC/VAL/TPO Count (xem Logic Chính §5).
 - Chỉ 1 lệnh `request.footprint()` duy nhất trong toàn script (giới hạn của Pine), đặt trong `if need_delta` — Pine v6 cho phép `request.*()` trong `if` khi điều kiện chỉ phụ thuộc input (simple), không phải dữ liệu series.
 - Giới hạn vẽ: `max_boxes_count=500`, `max_labels_count=500`.
@@ -86,3 +87,4 @@ Engine POC/VAH/VAL/TPO Count/RF được **port từ `market_profile.pine` v1.2*
 - **v1.4** (2026-11-14): Đổi input khung gộp cột sang dropdown timeframe chuẩn; thêm toggle ẩn/hiện hậu tố F/L/A; đổi thứ tự dòng (Delta/CVD/VAH/POC/VAL/TPO Count/RF/Open Type/Day Type/RSI); thêm input cỡ chữ; thêm 3 dòng VAH/POC/VAL; thêm toggle ẩn/hiện riêng từng dòng kèm bỏ qua tính toán nặng khi ẩn.
 - **v1.5** (2026-11-14): (1) Sửa lỗi dòng bị ẩn vẫn chừa khoảng trống trên grid — Y tính động theo số dòng đang hiện. (2) Bỏ hẳn Day Type & Open Type (không chỉ ẩn — xoá toàn bộ phân loại, band vẽ, toggle, tracking Initial Balance, tails/single-prints liên quan) vì không còn dùng tới; panel còn 8 dòng: Delta, CVD, VAH, POC, VAL, TPO Count, RF, RSI. (3) Thêm tooltip giải thích `ticks_per_row` trong input. Backup v1.4 tại `indicators/hist/order_flow_profile_panel_v1.4.pine`.
 - **v1.6** (2026-11-14): Delta/CVD trước đó dùng `format.volume` — mặc định hiện 3 số lẻ khi có hậu tố K/M/B (vd `"-1.234K"`) và không có cách chỉnh số lẻ. Viết hàm `f_format_delta()` riêng để luôn hiện đúng 2 số lẻ (`x.xxK`/`M`/`B`). Backup v1.5 tại `indicators/hist/order_flow_profile_panel_v1.5.pine`.
+- **v1.7** (2026-11-14): Thêm dòng "Time" (giờ:phút mỗi cột, `str.format_time(... , "HH:mm", syminfo.timezone)`) ở vị trí trên cùng, toggle ẩn/hiện riêng như các dòng khác. Giảm `n_bars_display` mặc định/tối đa 60/62 → 55/55 vì giờ có 9 dòng gộp cột (9×55=495 < 500) thay vì 8. Backup v1.6 tại `indicators/hist/order_flow_profile_panel_v1.6.pine`.

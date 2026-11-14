@@ -2,11 +2,11 @@
 // ─── Order Flow & Market Profile Panel ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-11-14
-// Phiên bản: 1.6
+// Phiên bản: 1.7
 // Mô tả: Pane riêng (không overlay) hiển thị dữ liệu dạng grid, thứ tự trên
-//        xuống: Delta (footprint), CVD, VAH, POC, VAL, TPO Count (trên/dưới
-//        POC), RF (Rotation Factor), RSI. Chart chính chạy M1 (để vào
-//        lệnh); mỗi dòng gộp cột thành 1 khung thời gian (`col_tf`, input
+//        xuống: Time (giờ:phút), Delta (footprint), CVD, VAH, POC, VAL,
+//        TPO Count (trên/dưới POC), RF (Rotation Factor), RSI. Chart chính
+//        chạy M1 (để vào lệnh); mỗi dòng gộp cột thành 1 khung thời gian (`col_tf`, input
 //        timeframe, mặc định 5 phút) độc lập với khung chart — Delta là
 //        tổng delta các nến M1 trong khung, CVD/VAH/POC/VAL/TPO/RF lấy mẫu
 //        giá trị tích lũy-theo-phiên tại cuối khung, RSI tính thật theo
@@ -42,6 +42,11 @@
 // Changelog v1.6: Delta/CVD dùng format.volume mặc định hiện 3 số lẻ khi có
 //        hậu tố K/M/B (vd "-1.234K") và không thể chỉnh số lẻ — viết hàm
 //        f_format_delta() riêng để luôn hiện đúng 2 số lẻ (x.xxK/M/B).
+// Changelog v1.7: Thêm dòng "Time" (giờ:phút của mỗi cột, định dạng HH:mm
+//        theo syminfo.timezone qua str.format_time()) ở vị trí trên cùng,
+//        có toggle ẩn/hiện riêng như các dòng khác. Giảm maxval/default
+//        n_bars_display 62/60 → 55/55 vì giờ có 9 dòng gộp cột (9×55=495
+//        < 500) thay vì 8.
 // Phase: 1/2 — file độc lập, không import/export, không sửa market_profile.pine.
 indicator(title="Order Flow & Market Profile Panel", shorttitle="OF Panel v6", overlay=false, max_boxes_count=500, max_labels_count=500, calc_bars_count=3000)
 
@@ -56,11 +61,12 @@ lower_tf_fallback = input.string("1S", "Khung Thời Gian Dự Phòng (Lower TF)
 
 grp_display    = "Hiển Thị"
 col_tf         = input.timeframe("5", "Khung Gộp Cột (Delta/CVD/VAH/POC/VAL/TPO/RF/RSI)", group=grp_display)
-n_bars_display = input.int(60, "Số Cột Hiển Thị (Rolling Window, tối đa theo giới hạn 500 box)", minval=10, maxval=62, group=grp_display)
+n_bars_display = input.int(55, "Số Cột Hiển Thị (Rolling Window, tối đa theo giới hạn 500 box)", minval=10, maxval=55, group=grp_display)
 font_choice    = input.string("Small", "Cỡ Chữ Hiển Thị", options=["Tiny", "Small", "Normal", "Large"], group=grp_display)
 show_delta_tag = input.bool(true, "Hiện hậu tố nguồn Delta (F = Footprint / L = LowerTF / A = Approx)", group=grp_display)
 
 grp_rows        = "Hiện/Ẩn Dòng"
+show_time       = input.bool(true, "Time (giờ:phút, dòng trên cùng)", group=grp_rows)
 show_delta      = input.bool(true, "Delta", group=grp_rows)
 show_cvd        = input.bool(true, "CVD", group=grp_rows)
 show_vah        = input.bool(true, "VAH", group=grp_rows)
@@ -121,6 +127,8 @@ y_cursor := show_cvd   ? y_cursor + 1 : y_cursor
 int Y_CVD = y_cursor
 y_cursor := show_delta ? y_cursor + 1 : y_cursor
 int Y_DELTA = y_cursor
+y_cursor := show_time  ? y_cursor + 1 : y_cursor
+int Y_TIME = y_cursor
 int total_rows_visible = y_cursor
 
 // Neo scale của pane theo đúng dải y 0..total_rows_visible — panel chỉ vẽ box
@@ -352,6 +360,7 @@ f_push_cell(array<box> col_boxes, float y_top, float y_bottom, string txt, color
     if array.size(col_boxes) > max_cols
         box.delete(array.shift(col_boxes))
 
+var array<box> col_time  = array.new<box>()
 var array<box> col_delta = array.new<box>()
 var array<box> col_cvd   = array.new<box>()
 var array<box> col_vah   = array.new<box>()
@@ -383,8 +392,11 @@ if barstate.isconfirmed
         string delta_tag  = delta_source == "Footprint" ? "F" : delta_source == "LowerTF" ? "L" : "A"
         string delta_txt  = f_format_delta(bucket_delta_sum) + (show_delta_tag ? " " + delta_tag : "")
         string rsi_txt    = na(rsi_5m) ? "—" : str.tostring(rsi_5m, "#.#")
+        string time_txt   = na(bucket_start_time) ? "—" : str.format_time(bucket_start_time, "HH:mm", syminfo.timezone)
 
         if bucket_has_data
+            if show_time
+                f_push_cell(col_time, Y_TIME, Y_TIME - 1, time_txt, c_price_level, n_bars_display, bucket_start_time, bucket_last_time)
             if show_delta
                 f_push_cell(col_delta, Y_DELTA, Y_DELTA - 1, delta_txt, c_delta, n_bars_display, bucket_start_time, bucket_last_time)
             if show_cvd
@@ -425,6 +437,7 @@ f_update_row_label(label lb, float y, string txt) =>
         label.set_x(lb, bar_index + 2)
     result
 
+var label lb_time  = na
 var label lb_delta = na
 var label lb_cvd   = na
 var label lb_vah   = na
@@ -435,6 +448,8 @@ var label lb_rf    = na
 var label lb_rsi   = na
 
 if barstate.islast
+    if show_time
+        lb_time := f_update_row_label(lb_time, Y_TIME, "Time")
     if show_delta
         lb_delta := f_update_row_label(lb_delta, Y_DELTA, "Delta")
     if show_cvd
