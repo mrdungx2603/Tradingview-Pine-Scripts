@@ -1,13 +1,13 @@
 # Order Flow & Market Profile Panel — Tài Liệu
 
-> **Script**: [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) (v1.8)
+> **Script**: [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) (v1.9)
 > **Loại**: Indicator (pane riêng, không overlay)
 > **Pine Script**: v6
 > **Ngày tạo**: 2026-11-14 / **Cập nhật**: 2026-11-14
 
 ## Tổng Quan
 
-Pane riêng (giống pane Delta footprint gốc của TradingView) hiển thị dữ liệu dạng grid, trôi đồng bộ theo trục thời gian với chart chính (dùng `box.new(xloc=xloc.bar_time)`, không dùng `table.*` vì `table.*` neo cố định góc màn hình, không đồng bộ thời gian). Thiết kế cho trader scalping nến M1 cần theo dõi order flow trong phiên và cấu trúc giá theo phương pháp Market Profile ("Mind over Markets").
+Pane riêng (giống pane Delta footprint gốc của TradingView) hiển thị dữ liệu dạng grid, trôi đồng bộ theo chart chính (dùng `box.new(xloc=xloc.bar_index)` — neo theo **thứ tự nến**, không phải thời gian thật, để luôn khớp đúng vị trí render ngay cả khi chart ở chế độ hiển thị không tuyến tính theo thời gian như "Volume Candles"; không dùng `table.*` vì `table.*` neo cố định góc màn hình, không đồng bộ với trục ngang của chart). Thiết kế cho trader scalping nến M1 cần theo dõi order flow trong phiên và cấu trúc giá theo phương pháp Market Profile ("Mind over Markets").
 
 Chart chính chạy **M1** (để vào lệnh chính xác). Mỗi dòng **gộp cột thành 1 khung thời gian `col_tf`** (chọn qua dropdown timeframe chuẩn Pine, mặc định 5 phút) độc lập với khung chart.
 
@@ -22,18 +22,20 @@ Engine POC/VAH/VAL/TPO Count/RF được **port từ `market_profile.pine` v1.2*
 
 ## Tham Số Đầu Vào
 
+Chia theo 5 nhóm chức năng (khớp đúng tên group hiện trong Settings):
+
 | Tham Số | Loại | Mặc Định | Group | Mô Tả |
 |---|---|---|---|---|
-| Ticks mỗi dòng | `int` | `10` | Footprint | `ticks_per_row` cho `request.footprint()` — xem giải thích riêng ở cuối mục này |
-| Value Area (%) | `float` | `70.0` | Footprint | `va_percent` cho `request.footprint()` **và** VA walk nội bộ (chia 100 tại điểm dùng) |
-| Ngưỡng Imbalance (%) | `float` | `300.0` | Footprint | `imbalance_percent` cho `request.footprint()` |
-| Khung Thời Gian Dự Phòng | `string` | `"1S"` | Footprint | Lower TF dùng ở Tầng 2 khi `request.footprint()` không có dữ liệu |
-| Khung Gộp Cột | `timeframe` | `"5"` | Hiển Thị | `col_tf` — dropdown timeframe chuẩn Pine (1, 5, 15, 30, 60, 120, 240, 1D, 1W...) |
-| Số Cột Hiển Thị | `int` | `55` (10–55) | Hiển Thị | Rolling window cho tất cả dòng (giới hạn `max_boxes_count=500`: tối đa 9 dòng × 55 = 495 < 500) |
-| Cỡ Chữ Hiển Thị | `string` | `"Small"` | Hiển Thị | `Tiny`/`Small`/`Normal`/`Large` — áp dụng cho mọi box/label trong panel |
-| Hiện hậu tố nguồn Delta | `bool` | `true` | Hiển Thị | Hiện/ẩn hậu tố `F`/`L`/`A` ở ô Delta |
+| Ticks mỗi dòng | `int` | `10` | Footprint & Delta | `ticks_per_row` cho `request.footprint()` — xem giải thích riêng ở cuối mục này |
+| Value Area (%) | `float` | `70.0` | Footprint & Delta | `va_percent` cho `request.footprint()` **và** VA walk nội bộ (chia 100 tại điểm dùng) |
+| Ngưỡng Imbalance (%) | `float` | `300.0` | Footprint & Delta | `imbalance_percent` cho `request.footprint()` |
+| Khung Thời Gian Dự Phòng | `string` | `"1S"` | Footprint & Delta | Lower TF dùng ở Tầng 2 khi `request.footprint()` không có dữ liệu |
+| Hiện hậu tố nguồn Delta | `bool` | `true` | Footprint & Delta | Hiện/ẩn hậu tố `F`/`L`/`A` ở ô Delta |
+| Khung Gộp Cột | `timeframe` | `"5"` | Market Profile & Khung Gộp Cột | `col_tf` — dropdown timeframe chuẩn Pine (1, 5, 15, 30, 60, 120, 240, 1D, 1W...), ảnh hưởng mọi dòng gộp cột (không riêng hiển thị nên gộp cùng nhóm Market Profile) |
+| Độ Phân Giải Lưới Giá TPO | `int` | `60` (20–120) | Market Profile & Khung Gộp Cột | `grid_rows` — số hàng chia phiên để đếm TPO |
 | Time / Delta / CVD / VAH / POC / VAL / TPO Count / RF / RSI | `bool` ×9 | `true` | Hiện/Ẩn Dòng | Mỗi dòng 1 toggle riêng — ẩn thì bỏ qua cả tính toán liên quan và không chiếm chỗ trên grid |
-| Độ Phân Giải Lưới Giá TPO | `int` | `60` (20–120) | Market Profile | Số hàng chia phiên để đếm TPO |
+| Số Cột Hiển Thị | `int` | `55` (10–55) | Hiển Thị (Giao Diện) | Rolling window cho tất cả dòng (giới hạn `max_boxes_count=500`: tối đa 9 dòng × 55 = 495 < 500) |
+| Cỡ Chữ Hiển Thị | `string` | `"Small"` | Hiển Thị (Giao Diện) | `Tiny`/`Small`/`Normal`/`Large` — áp dụng cho mọi box/plot tên dòng trong panel |
 | Chu Kỳ RSI | `int` | `14` | RSI | Dùng cho RSI thật theo khung `col_tf` (`request.security()`), không phải RSI(M1) |
 | Nguồn RSI | `source` | `close` | RSI | |
 
@@ -55,10 +57,10 @@ Engine POC/VAH/VAL/TPO Count/RF được **port từ `market_profile.pine` v1.2*
    - `need_rf = show_rf` → gate tính Rotation Factor.
    - `show_rsi=false` → bỏ qua `request.security()` tính RSI theo `col_tf`.
 6. **Vị trí dòng tính động** (`y_cursor`, Section 2): đếm từ dưới (RSI) lên theo thứ tự cố định, chỉ cấp số thứ tự Y cho dòng đang hiện — dòng ẩn không được cấp Y, nên không chiếm chỗ; các dòng còn lại tự dồn khít. Scale pane neo theo `0..total_rows_visible` (số dòng đang hiện).
-7. **Gộp cột `col_tf`**: `is_new_col = timeframe.change(col_tf)` phát hiện biên khung mới dù chart chạy M1. Khi biên mới bắt đầu, "flush" khung vừa đóng thành 1 cột: **Delta** = tổng `delta` các nến M1 trong khung (`bucket_delta_sum`), **CVD/VAH/POC/VAL/TPO Count/RF** = lấy mẫu giá trị tích lũy-theo-phiên *tại thời điểm đó*, **RSI** = `rsi_5m`. Toạ độ box lấy từ `bucket_start_time`/`bucket_last_time` (time thật của nến M1 đầu/cuối khung), không suy từ `col_tf` để tránh sai lệch qua các mốc có gap dữ liệu (nghỉ trưa, qua đêm).
-8. **Renderer**: `f_push_cell()` tạo 1 box/cột (toạ độ `xloc.bar_time`, biên đúng `[đầu khung, cuối khung)`), tự xoá box cũ nhất khi vượt `n_bars_display` (giống pattern FIFO đã dùng cho Naked POC trong `market_profile.pine`).
-9. **Dòng Time**: hiển thị giờ:phút bắt đầu mỗi cột qua `str.format_time(bucket_start_time, "HH:mm", syminfo.timezone)`, ở vị trí trên cùng khi hiện (toggle `show_time` riêng, không gắn với tính toán nào khác nên luôn "rẻ").
-10. **Nhãn tên dòng**: `label.new()` đặt ngay bên phải cột mới nhất (`bar_index + 2`), cập nhật vị trí mỗi bar để không bị cuộn mất. Dòng bị ẩn thì không tạo nhãn.
+7. **Gộp cột `col_tf`**: `is_new_col = timeframe.change(col_tf)` phát hiện biên khung mới dù chart chạy M1. Khi biên mới bắt đầu, "flush" khung vừa đóng thành 1 cột: **Delta** = tổng `delta` các nến M1 trong khung (`bucket_delta_sum`), **CVD/VAH/POC/VAL/TPO Count/RF** = lấy mẫu giá trị tích lũy-theo-phiên *tại thời điểm đó*, **RSI** = `rsi_5m`.
+8. **Renderer — neo theo `bar_index`, không theo thời gian thật**: `f_push_cell()` tạo 1 box/cột dùng `xloc.bar_index` (mặc định của `box.new()`) với toạ độ `bucket_start_bar`/`bucket_last_bar + 1` (số thứ tự nến đầu/cuối khung), tự xoá box cũ nhất khi vượt `n_bars_display` (giống pattern FIFO đã dùng cho Naked POC trong `market_profile.pine`). Lý do không dùng `xloc.bar_time` (thời gian thật, dùng ở v1.0-v1.8): nếu chart đang ở chế độ hiển thị không tuyến tính theo thời gian (vd **Volume Candles** — độ rộng mỗi nến tỷ lệ theo volume của nến đó), vị trí pixel của 1 mốc thời gian thật không còn khớp với vị trí nến tương ứng, khiến box bị lệch khỏi đúng cột nến. Neo theo `bar_index` luôn khớp đúng vì TradingView áp dụng cùng 1 phép biến dạng trục ngang cho MỌI đối tượng vẽ theo `bar_index`, kể cả nến.
+9. **Dòng Time**: hiển thị giờ:phút bắt đầu mỗi cột qua `str.format_time(bucket_start_time, "HH:mm", syminfo.timezone)` — `bucket_start_time` (time thật) giờ **chỉ** dùng để tạo chữ hiển thị, không còn dùng để định vị box. Dòng Time ở vị trí trên cùng khi hiện (toggle `show_time` riêng, không gắn với tính toán nào khác nên luôn "rẻ").
+10. **Tên dòng — neo vào trục giá bên phải**: mỗi dòng có 1 `plot(show_X ? Y_X : na, title="...", display=display.price_scale)` hiện đúng 1 tag nhỏ tại trục giá bên phải, ngang đúng vị trí dòng đó — không hiện trong legend/data window/pane (khác `label.new()` nổi giữa khu vực vẽ dùng ở v1.2-v1.8, dễ chồng lấp box và trôi lệch khi cuộn). Dòng bị ẩn thì tag biến mất (plot giá trị `na`).
 
 ## Output / Tín Hiệu Trên Chart
 
@@ -67,7 +69,7 @@ Engine POC/VAH/VAL/TPO Count/RF được **port từ `market_profile.pine` v1.2*
   - VAH/POC/VAL: giá trị session, màu navy trung tính (mức giá, không phải delta nên không phân loại theo dấu).
   - TPO Count: hiển thị `trên/dưới`, màu theo bên nào nhiều TPO hơn.
   - RSI: đỏ nhạt khi >70, xanh khi <30, navy khi giữa.
-- Nhãn tên dòng bám theo cột mới nhất, cỡ chữ theo input "Cỡ Chữ Hiển Thị" (áp dụng chung cho toàn panel).
+- Tên dòng hiện dưới dạng tag nhỏ trên trục giá bên phải (không hiện trong khu vực vẽ, không chồng lấp box dữ liệu). Cỡ chữ của box theo input "Cỡ Chữ Hiển Thị".
 
 ## Giới Hạn & Lưu Ý
 
@@ -78,6 +80,7 @@ Engine POC/VAH/VAL/TPO Count/RF được **port từ `market_profile.pine` v1.2*
 - Giới hạn vẽ: `max_boxes_count=500`, `max_labels_count=500`.
 - Cột chỉ hiện khung `col_tf` *đã đóng hoàn toàn* (flush khi qua biên mới) — khung đang hình thành chưa có cột, đúng 1 nhịp trễ tối đa `col_tf`.
 - **CVD dùng snapshot riêng (`bucket_cvd_end`), không đọc `cvd` trực tiếp lúc flush.** Section 6 (cộng dồn `cvd` mỗi bar) chạy trước Section 7 (flush cột) trong cùng 1 bar — nếu đọc `cvd` trực tiếp lúc flush, giá trị đã bị cộng thêm delta của bar đầu tiên của cột MỚI (lệch 1 bar so với Delta của cột vừa đóng). `bucket_cvd_end` được cập nhật mỗi bar TRƯỚC khi cột bị reset, cùng cơ chế với `bucket_delta_sum`, nên CVD cột đầu tiên của phiên luôn khớp đúng Delta cột đó.
+- **Box neo theo `bar_index`, không theo thời gian thật.** Nếu chart đang ở chế độ **Volume Candles** (độ rộng nến tỷ lệ volume, không đều theo thời gian), các cột của panel vẫn khớp đúng từng nến vì được vẽ theo đúng số thứ tự nến (`bar_index`) — không bị lệch như khi neo theo `xloc.bar_time` (cách làm ở v1.0-v1.8, đúng khi trục ngang tuyến tính theo thời gian nhưng sai khi trục ngang bị biến dạng theo volume).
 
 ## Changelog
 
@@ -90,3 +93,4 @@ Engine POC/VAH/VAL/TPO Count/RF được **port từ `market_profile.pine` v1.2*
 - **v1.6** (2026-11-14): Delta/CVD trước đó dùng `format.volume` — mặc định hiện 3 số lẻ khi có hậu tố K/M/B (vd `"-1.234K"`) và không có cách chỉnh số lẻ. Viết hàm `f_format_delta()` riêng để luôn hiện đúng 2 số lẻ (`x.xxK`/`M`/`B`). Backup v1.5 tại `indicators/hist/order_flow_profile_panel_v1.5.pine`.
 - **v1.7** (2026-11-14): Thêm dòng "Time" (giờ:phút mỗi cột, `str.format_time(... , "HH:mm", syminfo.timezone)`) ở vị trí trên cùng, toggle ẩn/hiện riêng như các dòng khác. Giảm `n_bars_display` mặc định/tối đa 60/62 → 55/55 vì giờ có 9 dòng gộp cột (9×55=495 < 500) thay vì 8. Backup v1.6 tại `indicators/hist/order_flow_profile_panel_v1.6.pine`.
 - **v1.8** (2026-11-14): Sửa lỗi CVD cột đầu phiên không bằng Delta cột đó — Section 6 (cộng dồn `cvd`) chạy trước Section 7 (flush cột) trong cùng 1 bar, nên lúc flush, `cvd` đã bị cộng thêm delta của bar đầu tiên của cột MỚI (lệch 1 bar). Thêm `bucket_cvd_end` lưu snapshot `cvd` trước khi reset cho cột mới (cùng cơ chế `bucket_delta_sum`), dùng để hiện CVD thay vì đọc `cvd` trực tiếp. Backup v1.7 tại `indicators/hist/order_flow_profile_panel_v1.7.pine`.
+- **v1.9** (2026-11-14): (1) Chia lại input group theo đúng chức năng: "Footprint & Delta", "Market Profile & Khung Gộp Cột" (gồm cả `col_tf`), "Hiện/Ẩn Dòng", "Hiển Thị (Giao Diện)" (chỉ còn số cột + cỡ chữ), "RSI". (2) Bỏ hệ thống nhãn `label.new()` nổi giữa pane (dễ chồng lấp, trôi lệch) — đổi sang `plot(Y_row, display=display.price_scale)` neo tên dòng đúng vào trục giá bên phải; 2 plot neo scale cũng đổi `display=display.pane` để không hiện tên trong legend. (3) **Xác nhận và sửa nguyên nhân cột lệch khi chart ở chế độ "Volume Candles"**: box trước đó neo theo `xloc.bar_time` (thời gian thật) — sai khi trục ngang không còn tuyến tính theo thời gian (độ rộng nến tỷ lệ volume). Đổi toàn bộ box sang `xloc.bar_index` (mặc định), luôn khớp đúng vị trí nến vì TradingView áp dụng cùng phép biến dạng trục ngang cho mọi đối tượng vẽ theo `bar_index`. Thêm `bucket_start_bar`/`bucket_last_bar` để định vị; `bucket_start_time` chỉ còn dùng hiện chữ dòng Time. Backup v1.8 tại `indicators/hist/order_flow_profile_panel_v1.8.pine`.

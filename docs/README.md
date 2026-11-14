@@ -10,7 +10,7 @@
 |---|---|---|---|
 | LSC Pattern | [indicators/lsc_pattern.pine](../indicators/lsc_pattern.pine) | 1.0 | [lsc-pattern.md](lsc-pattern.md) |
 | Market Profile (Mind over Markets) | [indicators/market_profile.pine](../indicators/market_profile.pine) | 2.0 | [market-profile.md](market-profile.md) |
-| Order Flow & Market Profile Panel | [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) | 1.8 | [order-flow-profile-panel.md](order-flow-profile-panel.md) |
+| Order Flow & Market Profile Panel | [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) | 1.9 | [order-flow-profile-panel.md](order-flow-profile-panel.md) |
 | SMC Market Structure | [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) | 2.0 | [smc-market-structure.md](smc-market-structure.md) |
 | SMC Market Structure + MTF | [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) | 2.0 | [smc-market-structure.md](smc-market-structure.md) *(chung tài liệu với bản base)* |
 | Wyckoff Effort vs Result | [indicators/volume/wyckoff_evr.pine](../indicators/volume/wyckoff_evr.pine) | 1.0 | [wyckoff-evr.md](wyckoff-evr.md) |
