@@ -1,6 +1,6 @@
 # Order Flow & Market Profile Panel — Tài Liệu
 
-> **Script**: [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) (v1.5)
+> **Script**: [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) (v1.6)
 > **Loại**: Indicator (pane riêng, không overlay)
 > **Pine Script**: v6
 > **Ngày tạo**: 2026-11-14 / **Cập nhật**: 2026-11-14
@@ -85,3 +85,4 @@ Engine POC/VAH/VAL/TPO Count/RF được **port từ `market_profile.pine` v1.2*
 - **v1.3** (2026-11-14): Sửa lỗi khung cuối phiên sáng (vd `11:25-11:30` trên `VN30F1!`) không hiện cột — đổi sang lưu đúng `time` nến M1 đầu/cuối mỗi khung.
 - **v1.4** (2026-11-14): Đổi input khung gộp cột sang dropdown timeframe chuẩn; thêm toggle ẩn/hiện hậu tố F/L/A; đổi thứ tự dòng (Delta/CVD/VAH/POC/VAL/TPO Count/RF/Open Type/Day Type/RSI); thêm input cỡ chữ; thêm 3 dòng VAH/POC/VAL; thêm toggle ẩn/hiện riêng từng dòng kèm bỏ qua tính toán nặng khi ẩn.
 - **v1.5** (2026-11-14): (1) Sửa lỗi dòng bị ẩn vẫn chừa khoảng trống trên grid — Y tính động theo số dòng đang hiện. (2) Bỏ hẳn Day Type & Open Type (không chỉ ẩn — xoá toàn bộ phân loại, band vẽ, toggle, tracking Initial Balance, tails/single-prints liên quan) vì không còn dùng tới; panel còn 8 dòng: Delta, CVD, VAH, POC, VAL, TPO Count, RF, RSI. (3) Thêm tooltip giải thích `ticks_per_row` trong input. Backup v1.4 tại `indicators/hist/order_flow_profile_panel_v1.4.pine`.
+- **v1.6** (2026-11-14): Delta/CVD trước đó dùng `format.volume` — mặc định hiện 3 số lẻ khi có hậu tố K/M/B (vd `"-1.234K"`) và không có cách chỉnh số lẻ. Viết hàm `f_format_delta()` riêng để luôn hiện đúng 2 số lẻ (`x.xxK`/`M`/`B`). Backup v1.5 tại `indicators/hist/order_flow_profile_panel_v1.5.pine`.

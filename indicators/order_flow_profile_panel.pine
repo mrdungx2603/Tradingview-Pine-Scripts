@@ -2,7 +2,7 @@
 // ─── Order Flow & Market Profile Panel ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-11-14
-// Phiên bản: 1.5
+// Phiên bản: 1.6
 // Mô tả: Pane riêng (không overlay) hiển thị dữ liệu dạng grid, thứ tự trên
 //        xuống: Delta (footprint), CVD, VAH, POC, VAL, TPO Count (trên/dưới
 //        POC), RF (Rotation Factor), RSI. Chart chính chạy M1 (để vào
@@ -39,6 +39,9 @@
 //        phục vụ Day Type) vì không còn dùng tới. Panel còn lại 8 dòng:
 //        Delta, CVD, VAH, POC, VAL, TPO Count, RF, RSI. (3) Thêm tooltip
 //        giải thích ticks_per_row ngay trong input.
+// Changelog v1.6: Delta/CVD dùng format.volume mặc định hiện 3 số lẻ khi có
+//        hậu tố K/M/B (vd "-1.234K") và không thể chỉnh số lẻ — viết hàm
+//        f_format_delta() riêng để luôn hiện đúng 2 số lẻ (x.xxK/M/B).
 // Phase: 1/2 — file độc lập, không import/export, không sửa market_profile.pine.
 indicator(title="Order Flow & Market Profile Panel", shorttitle="OF Panel v6", overlay=false, max_boxes_count=500, max_labels_count=500, calc_bars_count=3000)
 
@@ -318,6 +321,24 @@ if need_delta
 // ============================================================================
 // 7. RENDERER BOX-GRID — GỘP CỘT col_tf & ROLLING WINDOW
 // ============================================================================
+// format.volume mặc định hiện 3 số lẻ khi có hậu tố K/M/B (vd "-1.234K"), không
+// có cách chỉnh số lẻ. Viết hàm riêng để Delta/CVD luôn đúng 2 số lẻ (x.xxK).
+f_format_delta(float val) =>
+    string res  = "0"
+    float  av   = na(val) ? 0.0 : math.abs(val)
+    string sign = (not na(val) and val < 0) ? "-" : ""
+    if na(val)
+        res := "0"
+    else if av >= 1000000000
+        res := sign + str.tostring(av / 1000000000, "#.##") + "B"
+    else if av >= 1000000
+        res := sign + str.tostring(av / 1000000, "#.##") + "M"
+    else if av >= 1000
+        res := sign + str.tostring(av / 1000, "#.##") + "K"
+    else
+        res := sign + str.tostring(av, "#")
+    res
+
 f_push_cell(array<box> col_boxes, float y_top, float y_bottom, string txt, color bg, int max_cols, int left_time, int right_time) =>
     // box.new() cần left/right kiểu series int khi dùng xloc.bar_index (toạ độ
     // theo nến/float sẽ lỗi biên dịch). Dùng xloc.bar_time với đúng biên thời
@@ -360,14 +381,14 @@ if barstate.isconfirmed
         color  c_tpo      = prof.tpo_below_poc > prof.tpo_above_poc ? color.rgb(27, 77, 62) : prof.tpo_above_poc > prof.tpo_below_poc ? color.rgb(139, 0, 0) : color.gray
         color  c_rsi      = na(rsi_5m) ? color.gray : rsi_5m > 70 ? color.rgb(139, 0, 0) : rsi_5m < 30 ? color.rgb(27, 77, 62) : color.rgb(26, 54, 93)
         string delta_tag  = delta_source == "Footprint" ? "F" : delta_source == "LowerTF" ? "L" : "A"
-        string delta_txt  = str.tostring(bucket_delta_sum, format.volume) + (show_delta_tag ? " " + delta_tag : "")
+        string delta_txt  = f_format_delta(bucket_delta_sum) + (show_delta_tag ? " " + delta_tag : "")
         string rsi_txt    = na(rsi_5m) ? "—" : str.tostring(rsi_5m, "#.#")
 
         if bucket_has_data
             if show_delta
                 f_push_cell(col_delta, Y_DELTA, Y_DELTA - 1, delta_txt, c_delta, n_bars_display, bucket_start_time, bucket_last_time)
             if show_cvd
-                f_push_cell(col_cvd, Y_CVD, Y_CVD - 1, str.tostring(cvd, format.volume), c_cvd, n_bars_display, bucket_start_time, bucket_last_time)
+                f_push_cell(col_cvd, Y_CVD, Y_CVD - 1, f_format_delta(cvd), c_cvd, n_bars_display, bucket_start_time, bucket_last_time)
             if show_vah
                 f_push_cell(col_vah, Y_VAH, Y_VAH - 1, str.tostring(prof.vah, format.mintick), c_price_level, n_bars_display, bucket_start_time, bucket_last_time)
             if show_poc
