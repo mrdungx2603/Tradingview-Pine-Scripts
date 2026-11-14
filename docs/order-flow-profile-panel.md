@@ -1,6 +1,6 @@
 # Order Flow & Market Profile Panel — Tài Liệu
 
-> **Script**: [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) (v1.7)
+> **Script**: [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) (v1.8)
 > **Loại**: Indicator (pane riêng, không overlay)
 > **Pine Script**: v6
 > **Ngày tạo**: 2026-11-14 / **Cập nhật**: 2026-11-14
@@ -44,7 +44,7 @@ Engine POC/VAH/VAL/TPO Count/RF được **port từ `market_profile.pine` v1.2*
 1. **Reset phiên** (`timeframe.change("D")`): khởi tạo `OFProfile` mới (`start_bar`, `sess_high`, `sess_low`, `rf_score`), clear mảng `arr_highs`/`arr_lows`.
 2. **Market Profile engine** (mỗi bar, toàn phiên tới hiện tại — "developing"): dựng histogram TPO theo `grid_rows` → POC → VAH/VAL (VA walk) → TPO Count trên/dưới POC.
 3. **RF (Rotation Factor)**: cộng dồn mỗi bar +1/-1 theo so sánh high/low với bar trước, reset mỗi phiên.
-4. **Delta/CVD — 3 tầng fallback** mỗi bar:
+4. **Delta/CVD — 3 tầng fallback** mỗi bar (xem lưu ý thứ tự Section 6 trước Section 7 ở Giới Hạn & Lưu Ý — quan trọng để CVD cột đầu phiên khớp đúng Delta cột đó):
    - Tầng 1: `request.footprint()` → `fp.delta()` (cần Premium/Ultimate + sàn hỗ trợ tick-level).
    - Tầng 2: `request.security_lower_tf(lower_tf_fallback)` → phân loại buy/sell volume theo close>open của nến con.
    - Tầng 3: xấp xỉ thuần OHLCV kiểu Chaikin `volume*((close-low)-(high-close))/(high-low)` khi 2 tầng trên không có dữ liệu.
@@ -77,6 +77,7 @@ Engine POC/VAH/VAL/TPO Count/RF được **port từ `market_profile.pine` v1.2*
 - Chỉ 1 lệnh `request.footprint()` duy nhất trong toàn script (giới hạn của Pine), đặt trong `if need_delta` — Pine v6 cho phép `request.*()` trong `if` khi điều kiện chỉ phụ thuộc input (simple), không phải dữ liệu series.
 - Giới hạn vẽ: `max_boxes_count=500`, `max_labels_count=500`.
 - Cột chỉ hiện khung `col_tf` *đã đóng hoàn toàn* (flush khi qua biên mới) — khung đang hình thành chưa có cột, đúng 1 nhịp trễ tối đa `col_tf`.
+- **CVD dùng snapshot riêng (`bucket_cvd_end`), không đọc `cvd` trực tiếp lúc flush.** Section 6 (cộng dồn `cvd` mỗi bar) chạy trước Section 7 (flush cột) trong cùng 1 bar — nếu đọc `cvd` trực tiếp lúc flush, giá trị đã bị cộng thêm delta của bar đầu tiên của cột MỚI (lệch 1 bar so với Delta của cột vừa đóng). `bucket_cvd_end` được cập nhật mỗi bar TRƯỚC khi cột bị reset, cùng cơ chế với `bucket_delta_sum`, nên CVD cột đầu tiên của phiên luôn khớp đúng Delta cột đó.
 
 ## Changelog
 
@@ -88,3 +89,4 @@ Engine POC/VAH/VAL/TPO Count/RF được **port từ `market_profile.pine` v1.2*
 - **v1.5** (2026-11-14): (1) Sửa lỗi dòng bị ẩn vẫn chừa khoảng trống trên grid — Y tính động theo số dòng đang hiện. (2) Bỏ hẳn Day Type & Open Type (không chỉ ẩn — xoá toàn bộ phân loại, band vẽ, toggle, tracking Initial Balance, tails/single-prints liên quan) vì không còn dùng tới; panel còn 8 dòng: Delta, CVD, VAH, POC, VAL, TPO Count, RF, RSI. (3) Thêm tooltip giải thích `ticks_per_row` trong input. Backup v1.4 tại `indicators/hist/order_flow_profile_panel_v1.4.pine`.
 - **v1.6** (2026-11-14): Delta/CVD trước đó dùng `format.volume` — mặc định hiện 3 số lẻ khi có hậu tố K/M/B (vd `"-1.234K"`) và không có cách chỉnh số lẻ. Viết hàm `f_format_delta()` riêng để luôn hiện đúng 2 số lẻ (`x.xxK`/`M`/`B`). Backup v1.5 tại `indicators/hist/order_flow_profile_panel_v1.5.pine`.
 - **v1.7** (2026-11-14): Thêm dòng "Time" (giờ:phút mỗi cột, `str.format_time(... , "HH:mm", syminfo.timezone)`) ở vị trí trên cùng, toggle ẩn/hiện riêng như các dòng khác. Giảm `n_bars_display` mặc định/tối đa 60/62 → 55/55 vì giờ có 9 dòng gộp cột (9×55=495 < 500) thay vì 8. Backup v1.6 tại `indicators/hist/order_flow_profile_panel_v1.6.pine`.
+- **v1.8** (2026-11-14): Sửa lỗi CVD cột đầu phiên không bằng Delta cột đó — Section 6 (cộng dồn `cvd`) chạy trước Section 7 (flush cột) trong cùng 1 bar, nên lúc flush, `cvd` đã bị cộng thêm delta của bar đầu tiên của cột MỚI (lệch 1 bar). Thêm `bucket_cvd_end` lưu snapshot `cvd` trước khi reset cho cột mới (cùng cơ chế `bucket_delta_sum`), dùng để hiện CVD thay vì đọc `cvd` trực tiếp. Backup v1.7 tại `indicators/hist/order_flow_profile_panel_v1.7.pine`.

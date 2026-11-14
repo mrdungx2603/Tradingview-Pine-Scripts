@@ -2,7 +2,7 @@
 // ─── Order Flow & Market Profile Panel ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-11-14
-// Phiên bản: 1.7
+// Phiên bản: 1.8
 // Mô tả: Pane riêng (không overlay) hiển thị dữ liệu dạng grid, thứ tự trên
 //        xuống: Time (giờ:phút), Delta (footprint), CVD, VAH, POC, VAL,
 //        TPO Count (trên/dưới POC), RF (Rotation Factor), RSI. Chart chính
@@ -47,6 +47,13 @@
 //        có toggle ẩn/hiện riêng như các dòng khác. Giảm maxval/default
 //        n_bars_display 62/60 → 55/55 vì giờ có 9 dòng gộp cột (9×55=495
 //        < 500) thay vì 8.
+// Changelog v1.8: Sửa lỗi CVD cột đầu phiên không bằng Delta cột đó — do
+//        Section 6 (cộng dồn `cvd`) chạy TRƯỚC Section 7 (flush cột) trong
+//        cùng 1 bar, nên tại bar "chốt" cột cũ, `cvd` đã bị cộng thêm delta
+//        của bar ĐẦU TIÊN của cột MỚI trước khi kịp lấy mẫu cho cột cũ (lệch
+//        đúng 1 bar). Thêm `bucket_cvd_end` lưu snapshot `cvd` tại cuối mỗi
+//        bar TRƯỚC khi reset cho cột mới (cùng kiểu với `bucket_delta_sum`),
+//        dùng snapshot này để hiện CVD thay vì đọc `cvd` trực tiếp.
 // Phase: 1/2 — file độc lập, không import/export, không sửa market_profile.pine.
 indicator(title="Order Flow & Market Profile Panel", shorttitle="OF Panel v6", overlay=false, max_boxes_count=500, max_labels_count=500, calc_bars_count=3000)
 
@@ -377,6 +384,7 @@ var array<box> col_rsi   = array.new<box>()
 bool is_new_col = timeframe.change(col_tf)
 
 var float bucket_delta_sum  = 0.0
+var float bucket_cvd_end    = 0.0
 var bool  bucket_has_data   = false
 var int   bucket_start_time = na
 var int   bucket_last_time  = na
@@ -385,7 +393,7 @@ if barstate.isconfirmed
     if is_new_col
         // Màu dương=forest green, âm=burgundy, trung tính=gray (đồng bộ bảng màu market_profile.pine).
         color  c_delta    = bucket_delta_sum > 0 ? color.rgb(27, 77, 62) : bucket_delta_sum < 0 ? color.rgb(139, 0, 0) : color.gray
-        color  c_cvd      = cvd > 0 ? color.rgb(27, 77, 62) : cvd < 0 ? color.rgb(139, 0, 0) : color.gray
+        color  c_cvd      = bucket_cvd_end > 0 ? color.rgb(27, 77, 62) : bucket_cvd_end < 0 ? color.rgb(139, 0, 0) : color.gray
         color  c_rf       = prof.rf_score > 0 ? color.rgb(27, 77, 62) : prof.rf_score < 0 ? color.rgb(139, 0, 0) : color.gray
         color  c_tpo      = prof.tpo_below_poc > prof.tpo_above_poc ? color.rgb(27, 77, 62) : prof.tpo_above_poc > prof.tpo_below_poc ? color.rgb(139, 0, 0) : color.gray
         color  c_rsi      = na(rsi_5m) ? color.gray : rsi_5m > 70 ? color.rgb(139, 0, 0) : rsi_5m < 30 ? color.rgb(27, 77, 62) : color.rgb(26, 54, 93)
@@ -400,7 +408,7 @@ if barstate.isconfirmed
             if show_delta
                 f_push_cell(col_delta, Y_DELTA, Y_DELTA - 1, delta_txt, c_delta, n_bars_display, bucket_start_time, bucket_last_time)
             if show_cvd
-                f_push_cell(col_cvd, Y_CVD, Y_CVD - 1, f_format_delta(cvd), c_cvd, n_bars_display, bucket_start_time, bucket_last_time)
+                f_push_cell(col_cvd, Y_CVD, Y_CVD - 1, f_format_delta(bucket_cvd_end), c_cvd, n_bars_display, bucket_start_time, bucket_last_time)
             if show_vah
                 f_push_cell(col_vah, Y_VAH, Y_VAH - 1, str.tostring(prof.vah, format.mintick), c_price_level, n_bars_display, bucket_start_time, bucket_last_time)
             if show_poc
@@ -415,11 +423,13 @@ if barstate.isconfirmed
                 f_push_cell(col_rsi, Y_RSI, Y_RSI - 1, rsi_txt, c_rsi, n_bars_display, bucket_start_time, bucket_last_time)
 
         bucket_delta_sum  := nz(delta)
+        bucket_cvd_end    := cvd
         bucket_start_time := time
         bucket_last_time  := time
         bucket_has_data   := true
     else
         bucket_delta_sum += nz(delta)
+        bucket_cvd_end   := cvd
         bucket_last_time := time
 
 // ============================================================================
