@@ -306,7 +306,52 @@ if not na(prof.start_bar) and array.size(arr_highs) > 0
         prof.open_type := "Open-Auction In Range (OAIR)"
 
 // ============================================================================
-// 6. DEBUG TẠM ĐỂ ĐỐI CHIẾU VỚI market_profile.pine (sẽ bị xoá ở Task 4)
+// 6. ENGINE DELTA/CVD — 3 TẦNG FALLBACK
+// ============================================================================
+// Tầng 1: request.footprint() — chính xác nhất, cần TradingView Premium/Ultimate
+// và sàn hỗ trợ dữ liệu tick-level. Gọi KHÔNG điều kiện mỗi bar (Pine yêu cầu
+// request.*() không được đặt trong if).
+footprint fp = request.footprint(ticks_per_row, va_pct, imb_pct)
+
+// Tầng 2: request.security_lower_tf() — xấp xỉ delta từ nến con khung nhỏ hơn.
+// Cũng gọi không điều kiện mỗi bar.
+array<float> ltf_close = request.security_lower_tf(syminfo.tickerid, lower_tf_fallback, close)
+array<float> ltf_open  = request.security_lower_tf(syminfo.tickerid, lower_tf_fallback, open)
+array<float> ltf_vol   = request.security_lower_tf(syminfo.tickerid, lower_tf_fallback, volume)
+
+float  delta        = na
+string delta_source = na
+
+if not na(fp)
+    delta        := fp.delta()
+    delta_source := "Footprint"
+else if array.size(ltf_close) > 0
+    float ltf_delta = 0.0
+    for i = 0 to array.size(ltf_close) - 1
+        float c = array.get(ltf_close, i)
+        float o = array.get(ltf_open, i)
+        float v = array.get(ltf_vol, i)
+        if c > o
+            ltf_delta += v
+        else if c < o
+            ltf_delta -= v
+    delta        := ltf_delta
+    delta_source := "LowerTF"
+else
+    // Tầng 3: xấp xỉ thuần OHLCV kiểu Chaikin — luôn có dữ liệu, không cần request thêm.
+    float rng = high - low
+    delta        := rng > 0 ? volume * ((close - low) - (high - close)) / rng : 0.0
+    delta_source := "OHLCV-Approx"
+
+// CVD — cộng dồn delta theo nến, reset về 0 khi phiên mới bắt đầu. Chỉ cộng dồn
+// khi nến đã đóng (isconfirmed) để tránh CVD trôi theo các giá trị delta tạm
+// (repaint) của nến đang chạy.
+var float cvd = 0.0
+if barstate.isconfirmed
+    cvd := is_new_session ? delta : cvd + delta
+
+// ============================================================================
+// 7. DEBUG TẠM ĐỂ ĐỐI CHIẾU VỚI market_profile.pine (sẽ bị xoá ở Task 4)
 // ============================================================================
 if barstate.islast
-    label.new(bar_index, high, "RF=" + str.tostring(prof.rf_score) + " TPO=" + str.tostring(prof.tpo_above_poc) + "/" + str.tostring(prof.tpo_below_poc) + " | " + prof.day_type + " | " + prof.open_type, style=label.style_label_down)
+    label.new(bar_index, high, "RF=" + str.tostring(prof.rf_score) + " TPO=" + str.tostring(prof.tpo_above_poc) + "/" + str.tostring(prof.tpo_below_poc) + " | " + prof.day_type + " | " + prof.open_type + " | Δ=" + str.tostring(delta) + " CVD=" + str.tostring(cvd) + " [" + delta_source + "]", style=label.style_label_down)
