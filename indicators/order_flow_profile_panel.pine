@@ -2,7 +2,7 @@
 // ─── Order Flow & Market Profile Panel ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-11-14
-// Phiên bản: 1.9
+// Phiên bản: 1.10
 // Mô tả: Pane riêng (không overlay) hiển thị dữ liệu dạng grid, thứ tự trên
 //        xuống: Time (giờ:phút), Delta (footprint), CVD, VAH, POC, VAL,
 //        TPO Count (trên/dưới POC), RF (Rotation Factor), RSI. Chart chính
@@ -74,6 +74,21 @@
 //        áp dụng cho nến. Thêm bucket_start_bar/bucket_last_bar (int,
 //        theo bar_index) để định vị box; bucket_start_time chỉ còn dùng
 //        để hiện text dòng Time (HH:mm), không còn dùng để định vị.
+// Changelog v1.10: XÁC NHẬN & SỬA lỗi "mất cột" khi col_tf nhỏ (vd 3 phút):
+//        nguyên nhân là có những khung col_tf hoàn toàn KHÔNG có nến M1 nào
+//        (sàn không phát sinh nến do thanh khoản quá mỏng trong vài phút liên
+//        tiếp — không phải lỗi script) — vì is_new_col chỉ đánh dấu được khi
+//        có 1 nến M1 thật rơi vào khung đó, khung trống hoàn toàn sẽ không
+//        bao giờ được tạo cột, khiến dòng Time nhảy cóc (ví dụ 14:15→14:21,
+//        mất khung 14:18). Thêm cơ chế lấp "gap": khi phát hiện khoảng cách
+//        giữa cột vừa chốt và cột mới dài hơn 1 khung col_tf, chèn cột
+//        placeholder (nền xám, Delta="0", các dòng tích lũy giữ nguyên giá
+//        trị cũ vì không đổi) cho mỗi khung bị bỏ trống — dùng
+//        f_push_cell_time() neo theo xloc.bar_time (vì không có bar_index
+//        nào tồn tại cho khung không có nến). Chỉ áp dụng khi col_tf là số
+//        phút thuần (vd "3","5"), không áp dụng cho "1D"/"1W". Chỉ lấp gap
+//        trong CÙNG 1 phiên (`not is_new_session`) — không áp dụng qua đêm/
+//        cuối tuần, tránh tạo hàng nghìn box vô ích cho khoảng nghỉ đó.
 // Phase: 1/2 — file độc lập, không import/export, không sửa market_profile.pine.
 indicator(title="Order Flow & Market Profile Panel", shorttitle="OF Panel v6", overlay=false, max_boxes_count=500, max_labels_count=500, calc_bars_count=3000)
 
@@ -387,6 +402,17 @@ f_push_cell(array<box> col_boxes, float y_top, float y_bottom, string txt, color
     if array.size(col_boxes) > max_cols
         box.delete(array.shift(col_boxes))
 
+f_push_cell_time(array<box> col_boxes, float y_top, float y_bottom, string txt, color bg, int max_cols, int left_time, int right_time) =>
+    // Dùng riêng cho cột "gap" (khung col_tf hoàn toàn không có nến M1 nào —
+    // sàn không phát sinh nến do thanh khoản quá mỏng). Không tồn tại bar_index
+    // nào đại diện cho khung này nên PHẢI neo theo thời gian thật (xloc.bar_time)
+    // — khác với f_push_cell() ở trên (dùng cho cột có dữ liệu thật, luôn neo
+    // theo bar_index để khớp đúng Volume Candles).
+    box b = box.new(left_time, y_top, right_time, y_bottom, xloc=xloc.bar_time, border_color=bg, bgcolor=bg, text=txt, text_color=color.white, text_size=cell_text_size)
+    array.push(col_boxes, b)
+    if array.size(col_boxes) > max_cols
+        box.delete(array.shift(col_boxes))
+
 var array<box> col_time  = array.new<box>()
 var array<box> col_delta = array.new<box>()
 var array<box> col_cvd   = array.new<box>()
@@ -402,6 +428,13 @@ var array<box> col_rsi   = array.new<box>()
 // cộng dồn lại — bản chất các chỉ số này đã là "developing" theo toàn phiên);
 // RSI lấy từ rsi_5m (request.security() đã tính thật theo khung col_tf).
 bool is_new_col = timeframe.change(col_tf)
+
+// Phát hiện col_tf có phải số phút thuần không (vd "3","5","15") để biết có nên
+// chạy cơ chế lấp "gap" (khung hoàn toàn không có nến M1) — không áp dụng cho
+// "1D"/"1W" (str.tonumber trả na với các chuỗi này).
+float col_tf_num    = str.tonumber(col_tf)
+bool  col_tf_is_min = not na(col_tf_num)
+int   col_tf_ms     = col_tf_is_min ? int(col_tf_num * 60000) : na
 
 var float bucket_delta_sum  = 0.0
 var float bucket_cvd_end    = 0.0
@@ -422,6 +455,12 @@ if barstate.isconfirmed
         string delta_txt  = f_format_delta(bucket_delta_sum) + (show_delta_tag ? " " + delta_tag : "")
         string rsi_txt    = na(rsi_5m) ? "—" : str.tostring(rsi_5m, "#.#")
         string time_txt   = na(bucket_start_time) ? "—" : str.format_time(bucket_start_time, "HH:mm", syminfo.timezone)
+        string cvd_txt    = f_format_delta(bucket_cvd_end)
+        string vah_txt    = str.tostring(prof.vah, format.mintick)
+        string poc_txt    = str.tostring(prof.poc, format.mintick)
+        string val_txt    = str.tostring(prof.val, format.mintick)
+        string tpo_txt    = str.tostring(prof.tpo_above_poc) + "/" + str.tostring(prof.tpo_below_poc)
+        string rf_txt     = str.tostring(prof.rf_score)
 
         if bucket_has_data
             if show_time
@@ -429,19 +468,59 @@ if barstate.isconfirmed
             if show_delta
                 f_push_cell(col_delta, Y_DELTA, Y_DELTA - 1, delta_txt, c_delta, n_bars_display, bucket_start_bar, bucket_last_bar)
             if show_cvd
-                f_push_cell(col_cvd, Y_CVD, Y_CVD - 1, f_format_delta(bucket_cvd_end), c_cvd, n_bars_display, bucket_start_bar, bucket_last_bar)
+                f_push_cell(col_cvd, Y_CVD, Y_CVD - 1, cvd_txt, c_cvd, n_bars_display, bucket_start_bar, bucket_last_bar)
             if show_vah
-                f_push_cell(col_vah, Y_VAH, Y_VAH - 1, str.tostring(prof.vah, format.mintick), c_price_level, n_bars_display, bucket_start_bar, bucket_last_bar)
+                f_push_cell(col_vah, Y_VAH, Y_VAH - 1, vah_txt, c_price_level, n_bars_display, bucket_start_bar, bucket_last_bar)
             if show_poc
-                f_push_cell(col_poc, Y_POC, Y_POC - 1, str.tostring(prof.poc, format.mintick), c_price_level, n_bars_display, bucket_start_bar, bucket_last_bar)
+                f_push_cell(col_poc, Y_POC, Y_POC - 1, poc_txt, c_price_level, n_bars_display, bucket_start_bar, bucket_last_bar)
             if show_val
-                f_push_cell(col_val, Y_VAL, Y_VAL - 1, str.tostring(prof.val, format.mintick), c_price_level, n_bars_display, bucket_start_bar, bucket_last_bar)
+                f_push_cell(col_val, Y_VAL, Y_VAL - 1, val_txt, c_price_level, n_bars_display, bucket_start_bar, bucket_last_bar)
             if show_tpo
-                f_push_cell(col_tpo, Y_TPO, Y_TPO - 1, str.tostring(prof.tpo_above_poc) + "/" + str.tostring(prof.tpo_below_poc), c_tpo, n_bars_display, bucket_start_bar, bucket_last_bar)
+                f_push_cell(col_tpo, Y_TPO, Y_TPO - 1, tpo_txt, c_tpo, n_bars_display, bucket_start_bar, bucket_last_bar)
             if show_rf
-                f_push_cell(col_rf, Y_RF, Y_RF - 1, str.tostring(prof.rf_score), c_rf, n_bars_display, bucket_start_bar, bucket_last_bar)
+                f_push_cell(col_rf, Y_RF, Y_RF - 1, rf_txt, c_rf, n_bars_display, bucket_start_bar, bucket_last_bar)
             if show_rsi
                 f_push_cell(col_rsi, Y_RSI, Y_RSI - 1, rsi_txt, c_rsi, n_bars_display, bucket_start_bar, bucket_last_bar)
+
+        // Lấp "gap" — khung col_tf trước đó hoàn toàn không có nến M1 (thanh
+        // khoản quá mỏng, không phải lỗi script): chèn 1 cột placeholder (nền
+        // xám, Delta="0", các dòng tích lũy/giá giữ nguyên vì không đổi) cho
+        // MỖI khung col_tf bị bỏ trống giữa cột vừa chốt và cột mới, để dòng
+        // Time không bị nhảy cóc. Neo theo thời gian thật vì không tồn tại
+        // bar_index nào cho các khung này. `not is_new_session` chặn áp dụng
+        // cơ chế này qua đêm/cuối tuần (gap rất lớn, hàng trăm-nghìn khung) —
+        // chỉ lấp gap trong CÙNG 1 phiên (đủ cho cả giờ nghỉ trưa 11:30-13:00),
+        // tránh tạo/xoá hàng nghìn box vô ích mỗi khi qua phiên mới.
+        if col_tf_is_min and bucket_has_data and not na(bucket_start_time) and not is_new_session
+            int   bucket_end_expected = bucket_start_time + col_tf_ms
+            int   gap_ms              = time - bucket_end_expected
+            int   gap_periods         = gap_ms >= col_tf_ms ? int(gap_ms / col_tf_ms) : 0
+            color c_gap               = color.gray
+
+            if gap_periods > 0
+                for g = 0 to gap_periods - 1
+                    int    ph_start    = bucket_end_expected + g * col_tf_ms
+                    int    ph_end      = ph_start + col_tf_ms
+                    string ph_time_txt = str.format_time(ph_start, "HH:mm", syminfo.timezone)
+
+                    if show_time
+                        f_push_cell_time(col_time, Y_TIME, Y_TIME - 1, ph_time_txt, c_gap, n_bars_display, ph_start, ph_end)
+                    if show_delta
+                        f_push_cell_time(col_delta, Y_DELTA, Y_DELTA - 1, "0", c_gap, n_bars_display, ph_start, ph_end)
+                    if show_cvd
+                        f_push_cell_time(col_cvd, Y_CVD, Y_CVD - 1, cvd_txt, c_gap, n_bars_display, ph_start, ph_end)
+                    if show_vah
+                        f_push_cell_time(col_vah, Y_VAH, Y_VAH - 1, vah_txt, c_gap, n_bars_display, ph_start, ph_end)
+                    if show_poc
+                        f_push_cell_time(col_poc, Y_POC, Y_POC - 1, poc_txt, c_gap, n_bars_display, ph_start, ph_end)
+                    if show_val
+                        f_push_cell_time(col_val, Y_VAL, Y_VAL - 1, val_txt, c_gap, n_bars_display, ph_start, ph_end)
+                    if show_tpo
+                        f_push_cell_time(col_tpo, Y_TPO, Y_TPO - 1, tpo_txt, c_gap, n_bars_display, ph_start, ph_end)
+                    if show_rf
+                        f_push_cell_time(col_rf, Y_RF, Y_RF - 1, rf_txt, c_gap, n_bars_display, ph_start, ph_end)
+                    if show_rsi
+                        f_push_cell_time(col_rsi, Y_RSI, Y_RSI - 1, rsi_txt, c_gap, n_bars_display, ph_start, ph_end)
 
         bucket_delta_sum  := nz(delta)
         bucket_cvd_end    := cvd
