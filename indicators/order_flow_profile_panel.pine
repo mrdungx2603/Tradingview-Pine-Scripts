@@ -2,13 +2,21 @@
 // ─── Order Flow & Market Profile Panel ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-11-14
-// Phiên bản: 1.0
-// Mô tả: Pane riêng (không overlay) hiển thị 7 dòng dữ liệu, mỗi cột = 1 nến,
-//        trôi đồng bộ theo chart chính: Delta (footprint), CVD, TPO Count
-//        (trên/dưới POC), Day Type, Open Type, RF (Rotation Factor), RSI.
+// Phiên bản: 1.1
+// Mô tả: Pane riêng (không overlay) hiển thị 7 dòng dữ liệu: Delta (footprint),
+//        CVD, TPO Count (trên/dưới POC), Day Type, Open Type, RF (Rotation
+//        Factor), RSI. Chart chính chạy M1 (để vào lệnh); 5 dòng động
+//        (Delta/CVD/TPO/RF/RSI) gộp mỗi cột thành 1 khung `col_minutes` phút
+//        (mặc định 5 phút) độc lập với khung chart — Delta là tổng delta các
+//        nến M1 trong khung, CVD/TPO/RF lấy mẫu giá trị tích lũy-theo-phiên
+//        tại cuối khung, RSI tính thật theo khung đó qua request.security().
 //        Day Type & Open Type mỗi dòng merge thành 1 box duy nhất kéo dài
-//        suốt phiên (full D1). Delta/CVD dùng fallback 3 tầng khi
-//        request.footprint() không có dữ liệu cho mã đang chạy (vd VN30F1!).
+//        suốt phiên (full D1), không bị gộp cột. Delta/CVD dùng fallback 3
+//        tầng khi request.footprint() không có dữ liệu cho mã đang chạy.
+// Changelog v1.1: Đổi 5 dòng động từ "1 cột = 1 nến M1" sang "1 cột = N phút"
+//        (mặc định 5) để xem được nhiều lịch sử hơn trong giới hạn 500 box
+//        của Pine; thêm RSI thật theo khung N phút qua request.security()
+//        thay vì lấy mẫu RSI(M1).
 // Phase: 1/2 — file độc lập, không import/export, không sửa market_profile.pine.
 indicator(title="Order Flow & Market Profile Panel", shorttitle="OF Panel v6", overlay=false, max_boxes_count=500, max_labels_count=500, calc_bars_count=3000)
 
@@ -22,7 +30,8 @@ imb_pct           = input.float(300.0, "Ngưỡng Imbalance (%)", minval=100.0, 
 lower_tf_fallback = input.string("1S", "Khung Thời Gian Dự Phòng (Lower TF)", group=grp_footprint)
 
 grp_display = "Hiển Thị"
-n_bars_display = input.int(60, "Số Cột Hiển Thị (Rolling Window)", minval=20, maxval=90, group=grp_display)
+col_minutes    = input.int(5, "Độ Dài Mỗi Cột (phút) — gộp từ nến M1", minval=1, maxval=60, group=grp_display)
+n_bars_display = input.int(95, "Số Cột Hiển Thị (Rolling Window, tối đa theo giới hạn 500 box)", minval=10, maxval=95, group=grp_display)
 
 grp_mp = "Market Profile"
 grid_rows   = input.int(60, "Độ Phân Giải Lưới Giá TPO (grid_rows)", minval=20, maxval=120, group=grp_mp)
@@ -33,9 +42,12 @@ rsi_len = input.int(14, "Chu Kỳ RSI", minval=1, group=grp_rsi)
 rsi_src = input.source(close, "Nguồn RSI", group=grp_rsi)
 
 // ============================================================================
-// 2. RSI & HẰNG SỐ VỊ TRÍ DÒNG TRONG PANE
+// 2. RSI THEO KHUNG col_minutes PHÚT & HẰNG SỐ VỊ TRÍ DÒNG TRONG PANE
 // ============================================================================
-float rsi_val = ta.rsi(rsi_src, rsi_len)
+// RSI thật theo khung col_minutes phút (không lấy mẫu RSI tính trên M1) —
+// request.security() gọi không điều kiện ở top-level, giống request.footprint().
+string col_tf_str = str.tostring(col_minutes)
+float  rsi_5m     = request.security(syminfo.tickerid, col_tf_str, ta.rsi(rsi_src, rsi_len))
 
 // Mỗi dòng cao 1 đơn vị trục y; dòng trên cùng = Delta, dòng dưới cùng = RSI.
 var int Y_DELTA    = 7
@@ -360,14 +372,14 @@ if barstate.isconfirmed
     cvd := is_new_session ? nz(delta) : cvd + nz(delta)
 
 // ============================================================================
-// 7. RENDERER BOX-GRID — ROLLING WINDOW & BAND PHIÊN
+// 7. RENDERER BOX-GRID — GỘP CỘT col_minutes PHÚT, ROLLING WINDOW & BAND PHIÊN
 // ============================================================================
-f_push_cell(array<box> col_boxes, float y_top, float y_bottom, string txt, color bg, int max_cols) =>
-    // box.new() cần left/right kiểu series int khi dùng xloc.bar_index (bar_index-0.5
-    // là float → lỗi biên dịch). Dùng xloc.bar_time + nửa độ dài 1 bar (ms) để vẫn
-    // canh giữa đúng dưới nến mà toạ độ luôn là int (time là int Unix ms).
-    int half_ms = timeframe.in_seconds() * 500
-    box b = box.new(time - half_ms, y_top, time + half_ms, y_bottom, xloc=xloc.bar_time, border_color=bg, bgcolor=bg, text=txt, text_color=color.white, text_size=size.tiny)
+f_push_cell(array<box> col_boxes, float y_top, float y_bottom, string txt, color bg, int max_cols, int bucket_end_time) =>
+    // box.new() cần left/right kiểu series int khi dùng xloc.bar_index (toạ độ
+    // theo nến/float sẽ lỗi biên dịch). Dùng xloc.bar_time với đúng biên thời
+    // gian thật [đầu khung, cuối khung) của khung col_minutes phút vừa đóng.
+    int full_ms = col_minutes * 60 * 1000
+    box b = box.new(bucket_end_time - full_ms, y_top, bucket_end_time, y_bottom, xloc=xloc.bar_time, border_color=bg, bgcolor=bg, text=txt, text_color=color.white, text_size=size.tiny)
     array.push(col_boxes, b)
     if array.size(col_boxes) > max_cols
         box.delete(array.shift(col_boxes))
@@ -378,21 +390,38 @@ var array<box> col_tpo   = array.new<box>()
 var array<box> col_rf    = array.new<box>()
 var array<box> col_rsi   = array.new<box>()
 
-if barstate.isconfirmed
-    // Màu dương=forest green, âm=burgundy, trung tính=gray (đồng bộ bảng màu market_profile.pine).
-    color  c_delta    = delta > 0 ? color.rgb(27, 77, 62) : delta < 0 ? color.rgb(139, 0, 0) : color.gray
-    color  c_cvd      = cvd > 0 ? color.rgb(27, 77, 62) : cvd < 0 ? color.rgb(139, 0, 0) : color.gray
-    color  c_rf       = prof.rf_score > 0 ? color.rgb(27, 77, 62) : prof.rf_score < 0 ? color.rgb(139, 0, 0) : color.gray
-    color  c_tpo      = prof.tpo_below_poc > prof.tpo_above_poc ? color.rgb(27, 77, 62) : prof.tpo_above_poc > prof.tpo_below_poc ? color.rgb(139, 0, 0) : color.gray
-    color  c_rsi      = rsi_val > 70 ? color.rgb(139, 0, 0) : rsi_val < 30 ? color.rgb(27, 77, 62) : color.rgb(26, 54, 93)
-    string delta_tag  = delta_source == "Footprint" ? "F" : delta_source == "LowerTF" ? "L" : "A"
-    string delta_txt  = str.tostring(delta, format.volume) + " " + delta_tag
+// Gộp cột: Delta = tổng delta các nến M1 trong khung col_minutes phút vừa đóng;
+// CVD/TPO Count/RF lấy mẫu giá trị tích lũy-theo-phiên tại cuối khung (không
+// cộng dồn lại — bản chất các chỉ số này đã là "developing" theo toàn phiên);
+// RSI lấy từ rsi_5m (request.security() đã tính thật theo khung col_minutes).
+bool is_new_col = timeframe.change(col_tf_str)
 
-    f_push_cell(col_delta, Y_DELTA, Y_DELTA - 1, delta_txt, c_delta, n_bars_display)
-    f_push_cell(col_cvd,   Y_CVD,   Y_CVD - 1,   str.tostring(cvd, format.volume), c_cvd, n_bars_display)
-    f_push_cell(col_tpo,   Y_TPO,   Y_TPO - 1,   str.tostring(prof.tpo_above_poc) + "/" + str.tostring(prof.tpo_below_poc), c_tpo, n_bars_display)
-    f_push_cell(col_rf,    Y_RF,    Y_RF - 1,    str.tostring(prof.rf_score), c_rf, n_bars_display)
-    f_push_cell(col_rsi,   Y_RSI,   Y_RSI - 1,   str.tostring(rsi_val, "#.#"), c_rsi, n_bars_display)
+var float bucket_delta_sum = 0.0
+var bool  bucket_has_data  = false
+
+if barstate.isconfirmed
+    if is_new_col
+        // Màu dương=forest green, âm=burgundy, trung tính=gray (đồng bộ bảng màu market_profile.pine).
+        color  c_delta    = bucket_delta_sum > 0 ? color.rgb(27, 77, 62) : bucket_delta_sum < 0 ? color.rgb(139, 0, 0) : color.gray
+        color  c_cvd      = cvd > 0 ? color.rgb(27, 77, 62) : cvd < 0 ? color.rgb(139, 0, 0) : color.gray
+        color  c_rf       = prof.rf_score > 0 ? color.rgb(27, 77, 62) : prof.rf_score < 0 ? color.rgb(139, 0, 0) : color.gray
+        color  c_tpo      = prof.tpo_below_poc > prof.tpo_above_poc ? color.rgb(27, 77, 62) : prof.tpo_above_poc > prof.tpo_below_poc ? color.rgb(139, 0, 0) : color.gray
+        color  c_rsi      = na(rsi_5m) ? color.gray : rsi_5m > 70 ? color.rgb(139, 0, 0) : rsi_5m < 30 ? color.rgb(27, 77, 62) : color.rgb(26, 54, 93)
+        string delta_tag  = delta_source == "Footprint" ? "F" : delta_source == "LowerTF" ? "L" : "A"
+        string delta_txt  = str.tostring(bucket_delta_sum, format.volume) + " " + delta_tag
+        string rsi_txt    = na(rsi_5m) ? "—" : str.tostring(rsi_5m, "#.#")
+
+        if bucket_has_data
+            f_push_cell(col_delta, Y_DELTA, Y_DELTA - 1, delta_txt, c_delta, n_bars_display, time)
+            f_push_cell(col_cvd,   Y_CVD,   Y_CVD - 1,   str.tostring(cvd, format.volume), c_cvd, n_bars_display, time)
+            f_push_cell(col_tpo,   Y_TPO,   Y_TPO - 1,   str.tostring(prof.tpo_above_poc) + "/" + str.tostring(prof.tpo_below_poc), c_tpo, n_bars_display, time)
+            f_push_cell(col_rf,    Y_RF,    Y_RF - 1,    str.tostring(prof.rf_score), c_rf, n_bars_display, time)
+            f_push_cell(col_rsi,   Y_RSI,   Y_RSI - 1,   rsi_txt, c_rsi, n_bars_display, time)
+
+        bucket_delta_sum := delta
+        bucket_has_data  := true
+    else
+        bucket_delta_sum += delta
 
 // Band Day Type / Open Type — 1 box/dòng/phiên, trải từ đầu phiên tới nến
 // hiện tại (merge full D1), cập nhật tại chỗ, không tạo mới mỗi bar.
