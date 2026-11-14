@@ -351,7 +351,39 @@ if barstate.isconfirmed
     cvd := is_new_session ? delta : cvd + delta
 
 // ============================================================================
-// 7. DEBUG TẠM ĐỂ ĐỐI CHIẾU VỚI market_profile.pine (sẽ bị xoá ở Task 4)
+// 7. RENDERER BOX-GRID — ROLLING WINDOW & BAND PHIÊN
 // ============================================================================
-if barstate.islast
-    label.new(bar_index, high, "RF=" + str.tostring(prof.rf_score) + " TPO=" + str.tostring(prof.tpo_above_poc) + "/" + str.tostring(prof.tpo_below_poc) + " | " + prof.day_type + " | " + prof.open_type + " | Δ=" + str.tostring(delta) + " CVD=" + str.tostring(cvd) + " [" + delta_source + "]", style=label.style_label_down)
+f_push_cell(array<box> col_boxes, float y_top, float y_bottom, string txt, color bg, int max_cols) =>
+    box b = box.new(bar_index - 0.5, y_top, bar_index + 0.5, y_bottom, border_color=bg, bgcolor=bg, text=txt, text_color=color.white, text_size=size.tiny)
+    array.push(col_boxes, b)
+    if array.size(col_boxes) > max_cols
+        box.delete(array.shift(col_boxes))
+
+var array<box> col_delta = array.new<box>()
+var array<box> col_cvd   = array.new<box>()
+var array<box> col_tpo   = array.new<box>()
+var array<box> col_rf    = array.new<box>()
+var array<box> col_rsi   = array.new<box>()
+
+if barstate.isconfirmed
+    f_push_cell(col_delta, Y_DELTA, Y_DELTA - 1, str.tostring(delta, format.volume), color.gray, n_bars_display)
+    f_push_cell(col_cvd,   Y_CVD,   Y_CVD - 1,   str.tostring(cvd, format.volume), color.gray, n_bars_display)
+    f_push_cell(col_tpo,   Y_TPO,   Y_TPO - 1,   str.tostring(prof.tpo_above_poc) + "/" + str.tostring(prof.tpo_below_poc), color.gray, n_bars_display)
+    f_push_cell(col_rf,    Y_RF,    Y_RF - 1,    str.tostring(prof.rf_score), color.gray, n_bars_display)
+    f_push_cell(col_rsi,   Y_RSI,   Y_RSI - 1,   str.tostring(rsi_val, "#.#"), color.gray, n_bars_display)
+
+// Band Day Type / Open Type — 1 box/dòng/phiên, trải từ đầu phiên tới nến
+// hiện tại (merge full D1), cập nhật tại chỗ, không tạo mới mỗi bar.
+var box b_daytype  = na
+var box b_opentype = na
+
+if is_new_session
+    box.delete(b_daytype)
+    box.delete(b_opentype)
+    b_daytype  := box.new(prof.start_bar, Y_DAYTYPE, bar_index, Y_DAYTYPE - 1, border_color=color.gray, bgcolor=color.gray, text=prof.day_type, text_color=color.white, text_size=size.small)
+    b_opentype := box.new(prof.start_bar, Y_OPENTYPE, bar_index, Y_OPENTYPE - 1, border_color=color.gray, bgcolor=color.gray, text=prof.open_type, text_color=color.white, text_size=size.small)
+else
+    box.set_right(b_daytype, bar_index)
+    box.set_text(b_daytype, prof.day_type)
+    box.set_right(b_opentype, bar_index)
+    box.set_text(b_opentype, prof.open_type)
