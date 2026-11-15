@@ -1,9 +1,9 @@
 # SMC Market Structure Indicator — Tài Liệu Hướng Dẫn
 
-> **Script**: [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) (v2.0)
+> **Script**: [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) (v1.9)
 > **Script MTF**: [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) (v2.0)
-> **Library dùng chung**: [libraries/smc_core.pine](smc-core.md) (v1.0)
-> **Ngày tạo**: 2026-06-18 / **Cập nhật**: 2026-07-10
+> **Library dùng chung**: [libraries/smc_core.pine](smc-core.md) (v1.0), chỉ bản MTF import. Bản base có state machine riêng trong file.
+> **Ngày tạo**: 2026-06-18 / **Cập nhật**: 2026-11-15
 > **Pine Script**: v6
 > **Loại**: Indicator (overlay)
 
@@ -570,7 +570,7 @@ Bảng sử dụng nền tối `#1e222d` (không transparency) để đảm bả
 
 ### Alert Conditions
 
-Indicator cung cấp 10 alert conditions có thể dùng để tạo cảnh báo trên TradingView:
+Indicator cung cấp 8 alert conditions có thể dùng để tạo cảnh báo trên TradingView:
 
 | Alert | Kích Hoạt Khi |
 |---|---|
@@ -580,6 +580,8 @@ Indicator cung cấp 10 alert conditions có thể dùng để tạo cảnh báo
 | **Bearish OG** | Xuất hiện Opening Gap giảm |
 | **Bullish VI** | Xuất hiện Volume Imbalance tăng |
 | **Bearish VI** | Xuất hiện Volume Imbalance giảm |
+| **Bullish CHoCH** | Giá đóng cửa vượt LH, bắt đầu săn đảo chiều tăng (chưa xác nhận HH) |
+| **Bearish CHoCH** | Giá đóng cửa phá HL, bắt đầu săn đảo chiều giảm (chưa xác nhận LL) |
 
 ---
 
@@ -666,10 +668,10 @@ Bảng MTF hiển thị trend (BULL/BEAR/WAIT) thật từ `SwingState.trend` k�
 
 ### So Sánh 2 Phiên Bản
 
-| | Base (v2.0) | MTF (v2.0) |
+| | Base (v1.9) | MTF (v2.0) |
 |---|---|---|
 | **File** | `indicators/smc_market_structure.pine` | `indicators/smc_market_structure_mtf.pine` |
-| **State machine** | Dùng trực tiếp `smc_core` trên chart TF | Dùng `smc_core` qua `request.security()` wrapper cho mỗi TF phụ |
+| **State machine** | Nằm trong file, chạy trên chart TF | Dùng `smc_core` qua `request.security()` wrapper cho mỗi TF phụ |
 | **Input groups** | 11 | 12 (+ Multi-Timeframe) |
 | **request.security()** | 0 | 0–3 (tuỳ số TF bật, `"None"` để tắt từng slot) |
 | **Phù hợp** | Máy yếu, chart đơn giản | Phân tích đa khung thời gian |
@@ -677,6 +679,15 @@ Bảng MTF hiển thị trend (BULL/BEAR/WAIT) thật từ `SwingState.trend` k�
 ---
 
 ## Kế Hoạch Phát Triển
+
+### v1.9 (Đã Hoàn Thành — 2026-11-15)
+
+- [x] Sửa alert CHoCH bị bắn lặp ở mọi bar sau lần đầu: cờ được reset mỗi bar.
+- [x] Dashboard imbalance: các hàm đếm gap đã lấp chỉ chạy khi bật `Hiển Thị Dashboard`.
+- [x] Box OB: kéo dài và đổi style chỉ tính ở bar cuối, giảm việc vẽ lại mỗi bar.
+- [x] Gọn code: helper `add_ob()` và `evict_oldest_ob()` thay cho các khối lặp tạo/xoá OB.
+- [x] Backup bản trước khi sửa: `indicators/hist/smc_market_structure_v1.8b.pine`.
+- [ ] Chưa làm: quét lại temp pivot mỗi bar, gom khối xác nhận HH/LL, gom bảng dashboard, bỏ `last_mitigated_idx`.
 
 ### v2.0 (Đã Hoàn Thành — 2026-07-10)
 
