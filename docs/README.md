@@ -13,6 +13,7 @@
 | Order Flow & Market Profile Panel | [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) | 1.14 | [order-flow-profile-panel.md](order-flow-profile-panel.md) |
 | Order Flow Overlay | [indicators/order_flow_overlay.pine](../indicators/order_flow_overlay.pine) | 1.0 | [order-flow-overlay.md](order-flow-overlay.md) |
 | SMC Market Structure | [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) | 1.16b | [smc-market-structure.md](smc-market-structure.md) |
+| SMC MTF Dashboard | [indicators/smc_mtf_dashboard.pine](../indicators/smc_mtf_dashboard.pine) | 1.2 | [smc-mtf-dashboard.md](smc-mtf-dashboard.md) |
 | SMC Market Structure + MTF | [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) | 2.0 | [smc-market-structure.md](smc-market-structure.md) *(chung tài liệu với bản base)* |
 | Wyckoff Effort vs Result | [indicators/volume/wyckoff_evr.pine](../indicators/volume/wyckoff_evr.pine) | 1.0 | [wyckoff-evr.md](wyckoff-evr.md) |
 

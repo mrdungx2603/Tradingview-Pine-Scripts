@@ -1,0 +1,275 @@
+//@version=6
+// ─── SMC MTF Dashboard — Xu hướng HH/HL và LL/LH trên 3 khung thời gian tự chọn ───
+// Tác giả: TV Pine
+// Ngày tạo: 2026-11-15
+// Phiên bản: 1.1b
+// Mô tả: Hiển thị xu hướng cấu trúc SMC (HH/HL = tăng, LL/LH = giảm) của 3 khung thời gian.
+//        Logic cấu trúc giống smc_market_structure.pine v1.16b, chỉ dùng Pivot Seed.
+//        Mỗi khung chạy state machine riêng trên các nến đã đóng mà chart đã tải.
+//        Khung tự chọn phải lớn hơn hoặc bằng khung chart, nếu nhỏ hơn thì dòng đó báo "KHUNG < CHART".
+indicator(
+    title="SMC MTF Dashboard",
+    shorttitle="SMC_MTF",
+    overlay=true
+)
+
+// ╔══════════════════════════════════════════╗
+// ║              INPUTS                      ║
+// ╚══════════════════════════════════════════╝
+
+pivotLength = input.int(
+    5,
+    "Pivot Length",
+    minval=2,
+    maxval=50,
+    group="Tham Số Chính"
+)
+
+tf_input_1 = input.string("15", "Khung TG 1", group="Khung Thời Gian",
+    tooltip="Ví dụ: 5, 15, 60, 240, D. Để trống để tắt.")
+tf_input_2 = input.string("60", "Khung TG 2", group="Khung Thời Gian",
+    tooltip="Ví dụ: 5, 15, 60, 240, D. Để trống để tắt.")
+tf_input_3 = input.string("240", "Khung TG 3", group="Khung Thời Gian",
+    tooltip="Ví dụ: 5, 15, 60, 240, D. Để trống để tắt.")
+
+show_dashboard = input.bool(true, "Hiển Thị", group="Dashboard")
+dashboard_pos  = input.string("Top Right", "Vị Trí",
+    options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"],
+    group="Dashboard")
+bullColor      = input.color(color.blue, "Màu Tăng (HH/HL)", group="Dashboard")
+bearColor      = input.color(color.red,  "Màu Giảm (LL/LH)", group="Dashboard")
+
+// ╔══════════════════════════════════════════╗
+// ║        HÀM HELPER — CHUYỂN ĐỔI          ║
+// ╚══════════════════════════════════════════╝
+
+get_dashboard_pos(string pos_name) =>
+    switch pos_name
+        "Top Right"     => position.top_right
+        "Top Left"      => position.top_left
+        "Bottom Right"  => position.bottom_right
+        "Bottom Left"   => position.bottom_left
+        => position.top_right
+
+// ╔══════════════════════════════════════════╗
+// ║        TRẠNG THÁI CẤU TRÚC MỖI KHUNG     ║
+// ╚══════════════════════════════════════════╝
+
+// n là số nến đã xử lý của khung. Mảng highs/lows/tms lưu theo chỉ số nến, phần tử 0 là giá trị rỗng.
+type TfState
+    int          n
+    bool         seeded
+    int          trend          // 1 = UPTREND, -1 = DOWNTREND, 0 = chưa xác định
+    int          hh_bar
+    float        hh_price
+    int          hl_bar
+    float        hl_price
+    int          ll_bar
+    float        ll_price
+    int          lh_bar
+    float        lh_price
+    int          cand_type      // 1 = săn HH, -1 = săn LL, 0 = không hoạt động
+    int          cand_bar
+    float        cand_high
+    float        cand_low
+    int          trigger_bar
+    int          last_ph_bar
+    float        last_ph_val
+    int          last_pl_bar
+    float        last_pl_val
+    array<float> highs
+    array<float> lows
+    array<int>   tms
+
+f_new_state() =>
+    TfState.new(n=0, seeded=false, trend=0, cand_type=0,
+         highs=array.new<float>(1, na), lows=array.new<float>(1, na), tms=array.new<int>(1, 0))
+
+// ─── Tìm đáy thấp nhất trong khoảng nến, loại trừ 1 nến (như find_extreme_in_range bên chart) ───
+f_find_low(TfState s, int start_n, int end_n, int exclude_n) =>
+    int   best_n = start_n
+    float best_p = array.get(s.lows, start_n)
+    for i = start_n to end_n
+        if i != exclude_n and array.get(s.lows, i) < best_p
+            best_p := array.get(s.lows, i)
+            best_n := i
+    [best_n, best_p]
+
+// ─── Tìm đỉnh cao nhất trong khoảng nến, loại trừ 1 nến ───
+f_find_high(TfState s, int start_n, int end_n, int exclude_n) =>
+    int   best_n = start_n
+    float best_p = array.get(s.highs, start_n)
+    for i = start_n to end_n
+        if i != exclude_n and array.get(s.highs, i) > best_p
+            best_p := array.get(s.highs, i)
+            best_n := i
+    [best_n, best_p]
+
+// ─── Xử lý một nến đã đóng của khung: seed rồi chạy state machine ───
+f_step(TfState s, float h, float l, float c, int t, float ph, float pl, int piv_len) =>
+    array.push(s.highs, h)
+    array.push(s.lows, l)
+    array.push(s.tms, t)
+    s.n := s.n + 1
+    int n = s.n
+
+    // Pivot được xác nhận sau piv_len nến, nên vị trí thực của pivot là n - piv_len
+    if not na(ph)
+        s.last_ph_bar := n - piv_len
+        s.last_ph_val := ph
+    if not na(pl)
+        s.last_pl_bar := n - piv_len
+        s.last_pl_val := pl
+
+    // Seed theo Pivot: pivot nào xuất hiện sau thì quyết định xu hướng ban đầu
+    if not s.seeded and not na(s.last_ph_bar) and not na(s.last_pl_bar)
+        s.seeded := true
+        // Thời điểm seed là nến của pivot xuất hiện trước, để người dùng kiểm tra được điểm bắt đầu
+        int seed_idx = s.last_ph_bar < s.last_pl_bar ? s.last_ph_bar : s.last_pl_bar
+        if s.last_ph_bar > s.last_pl_bar
+            s.trend    := 1
+            s.hh_bar   := s.last_ph_bar
+            s.hh_price := s.last_ph_val
+            s.hl_bar   := s.last_pl_bar
+            s.hl_price := s.last_pl_val
+        else
+            s.trend    := -1
+            s.ll_bar   := s.last_pl_bar
+            s.ll_price := s.last_pl_val
+            s.lh_bar   := s.last_ph_bar
+            s.lh_price := s.last_ph_val
+
+    // State machine: săn HH/LL, xác nhận khi đóng nến vượt cực trị của nến ứng viên
+    if s.seeded and s.trend != 0
+        if s.cand_type == 0
+            if s.trend == 1
+                if c > s.hh_price
+                    s.cand_type   := 1
+                    s.cand_bar    := n
+                    s.cand_high   := h
+                    s.trigger_bar := s.hh_bar
+                else if c < s.hl_price
+                    s.cand_type   := -1
+                    s.cand_bar    := n
+                    s.cand_low    := l
+                    s.trigger_bar := s.hl_bar
+            else
+                if c < s.ll_price
+                    s.cand_type   := -1
+                    s.cand_bar    := n
+                    s.cand_low    := l
+                    s.trigger_bar := s.ll_bar
+                else if c > s.lh_price
+                    s.cand_type   := 1
+                    s.cand_bar    := n
+                    s.cand_high   := h
+                    s.trigger_bar := s.lh_bar
+
+        else if s.cand_type == 1
+            if h > s.cand_high
+                s.cand_bar  := n
+                s.cand_high := h
+            else if c < array.get(s.lows, s.cand_bar)
+                // Xác nhận HH mới, HL mới là đáy thấp nhất từ trigger đến HH mới
+                [lowest_n, lowest_p] = f_find_low(s, s.trigger_bar, s.cand_bar, s.cand_bar)
+                s.hl_bar    := lowest_n
+                s.hl_price  := lowest_p
+                s.hh_bar    := s.cand_bar
+                s.hh_price  := s.cand_high
+                s.trend     := 1
+                s.cand_type := 0
+
+        else if s.cand_type == -1
+            if l < s.cand_low
+                s.cand_bar := n
+                s.cand_low := l
+            else if c > array.get(s.highs, s.cand_bar)
+                // Xác nhận LL mới, LH mới là đỉnh cao nhất từ trigger đến LL mới
+                [highest_n, highest_p] = f_find_high(s, s.trigger_bar, s.cand_bar, s.cand_bar)
+                s.lh_bar    := highest_n
+                s.lh_price  := highest_p
+                s.ll_bar    := s.cand_bar
+                s.ll_price  := s.cand_low
+                s.trend     := -1
+                s.cand_type := 0
+    s.n
+
+// ╔══════════════════════════════════════════╗
+// ║     DỮ LIỆU 3 KHUNG & CẬP NHẬT STATE    ║
+// ╚══════════════════════════════════════════╝
+
+// Khung rỗng nghĩa là tắt. Khung nhỏ hơn chart không đọc được nến đúng, nên không xử lý.
+f_tf_eff(string tf_in) => str.trim(tf_in) == "" ? timeframe.period : str.trim(tf_in)
+f_tf_ok(string tf_in) =>
+    str.trim(tf_in) != "" and timeframe.in_seconds(f_tf_eff(tf_in)) >= timeframe.in_seconds(timeframe.period)
+
+tf1_eff = f_tf_eff(tf_input_1)
+tf2_eff = f_tf_eff(tf_input_2)
+tf3_eff = f_tf_eff(tf_input_3)
+tf1_on  = str.trim(tf_input_1) != ""
+tf2_on  = str.trim(tf_input_2) != ""
+tf3_on  = str.trim(tf_input_3) != ""
+tf1_ok  = f_tf_ok(tf_input_1)
+tf2_ok  = f_tf_ok(tf_input_2)
+tf3_ok  = f_tf_ok(tf_input_3)
+
+// Giá trị của nến đã đóng gần nhất của khung (lookahead tắt). t là thời điểm mở nến, float để đồng kiểu tuple.
+[h1, l1, c1, t1, ph1, pl1] = request.security(syminfo.tickerid, tf1_eff,
+    [high, low, close, float(time), ta.pivothigh(high, pivotLength, pivotLength), ta.pivotlow(low, pivotLength, pivotLength)],
+    lookahead=barmerge.lookahead_off)
+[h2, l2, c2, t2, ph2, pl2] = request.security(syminfo.tickerid, tf2_eff,
+    [high, low, close, float(time), ta.pivothigh(high, pivotLength, pivotLength), ta.pivotlow(low, pivotLength, pivotLength)],
+    lookahead=barmerge.lookahead_off)
+[h3, l3, c3, t3, ph3, pl3] = request.security(syminfo.tickerid, tf3_eff,
+    [high, low, close, float(time), ta.pivothigh(high, pivotLength, pivotLength), ta.pivotlow(low, pivotLength, pivotLength)],
+    lookahead=barmerge.lookahead_off)
+
+var TfState st1 = f_new_state()
+var TfState st2 = f_new_state()
+var TfState st3 = f_new_state()
+
+// Chỉ xử lý khi thời điểm mở nến khung đổi, tức là một nến khung vừa đóng. Mỗi nến chỉ xử lý một lần.
+if tf1_ok and not na(t1) and not na(h1) and t1 != t1[1]
+    f_step(st1, h1, l1, c1, int(t1), ph1, pl1, pivotLength)
+if tf2_ok and not na(t2) and not na(h2) and t2 != t2[1]
+    f_step(st2, h2, l2, c2, int(t2), ph2, pl2, pivotLength)
+if tf3_ok and not na(t3) and not na(h3) and t3 != t3[1]
+    f_step(st3, h3, l3, c3, int(t3), ph3, pl3, pivotLength)
+
+// ╔══════════════════════════════════════════╗
+// ║              DASHBOARD                   ║
+// ╚══════════════════════════════════════════╝
+
+var table mtf_table = table.new(
+    get_dashboard_pos(dashboard_pos),
+    columns=4,
+    rows=4,
+    bgcolor=#1e222d,
+    border_width=1,
+    border_color=#5b5f6b
+)
+
+// ─── Điền một dòng khung: nhãn khung, xu hướng, Swing High, Swing Low, thời điểm seed ───
+f_fill_row(table tb, int r, string tf_txt, TfState s, bool is_on, bool is_ok) =>
+    bool   active    = is_on and is_ok and s.seeded
+    string trend_txt = not is_on ? "TẮT" : not is_ok ? "KHUNG < CHART" : not s.seeded ? "CHỜ SEED" : s.trend == 1 ? "BULLISH (HH/HL)" : s.trend == -1 ? "BEARISH (LL/LH)" : "WAIT"
+    color  trend_css = not active ? color.gray : s.trend == 1 ? bullColor : s.trend == -1 ? bearColor : color.gray
+    float  sh        = s.trend == 1 ? s.hh_price : s.lh_price
+    float  sl        = s.trend == 1 ? s.hl_price : s.ll_price
+    string sh_txt    = active and not na(sh) ? str.tostring(sh, format.mintick) : "-"
+    string sl_txt    = active and not na(sl) ? str.tostring(sl, format.mintick) : "-"
+
+    table.cell(tb, 0, r, tf_txt, text_color=color.white, text_size=size.small)
+    table.cell(tb, 1, r, trend_txt, text_color=trend_css, text_size=size.small)
+    table.cell(tb, 2, r, sh_txt, text_color=color.white, text_size=size.small)
+    table.cell(tb, 3, r, sl_txt, text_color=color.white, text_size=size.small)
+
+if show_dashboard and barstate.islast
+    table.cell(mtf_table, 0, 0, "Khung", text_color=color.white, text_size=size.small)
+    table.cell(mtf_table, 1, 0, "Xu Hướng", text_color=color.white, text_size=size.small)
+    table.cell(mtf_table, 2, 0, "Swing High", text_color=color.white, text_size=size.small)
+    table.cell(mtf_table, 3, 0, "Swing Low", text_color=color.white, text_size=size.small)
+
+    f_fill_row(mtf_table, 1, tf_input_1 == "" ? "—" : str.trim(tf_input_1), st1, tf1_on, tf1_ok)
+    f_fill_row(mtf_table, 2, tf_input_2 == "" ? "—" : str.trim(tf_input_2), st2, tf2_on, tf2_ok)
+    f_fill_row(mtf_table, 3, tf_input_3 == "" ? "—" : str.trim(tf_input_3), st3, tf3_on, tf3_ok)
