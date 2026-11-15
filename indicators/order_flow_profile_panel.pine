@@ -2,7 +2,7 @@
 // ─── Order Flow & Market Profile Panel ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-11-14
-// Phiên bản: 1.13
+// Phiên bản: 1.14
 // Mô tả: Pane riêng dạng grid, mỗi dòng 1 chỉ số (Time, Delta, CVD, TPO Count,
 //        RF, RSI), mỗi cột 1 khung col_tf (mặc định = khung chart). Changelog
 //        xem docs/order-flow-profile-panel.md.
@@ -20,7 +20,7 @@ show_delta_tag    = input.bool(true, "Hiện hậu tố nguồn Delta (F = Footp
 
 grp_mp    = "Market Profile & Khung Gộp Cột"
 col_tf    = input.timeframe("", "Khung Gộp Cột (Chart = 1 cột/nến)", group=grp_mp, tooltip="Để Chart (mặc định) thì mỗi cột khớp đúng 1 nến. Chọn khung lớn hơn chart (vd 15 trên chart 3m) để gộp nhiều nến thành 1 cột. Khung không chia hết cho khung chart (vd 5 trên chart 3m) sẽ gộp không đều 1-2 nến/cột.")
-grid_rows = input.int(60, "Độ Phân Giải Lưới Giá TPO (grid_rows)", minval=20, maxval=120, group=grp_mp)
+shape_step = input.float(1.0, "Bước giá lưới TPO (Shape Step)", minval=0.0001, step=0.1, group=grp_mp, tooltip="Giống lưới Hình Dạng Profile của Market Profile: hàng lưới cố định theo giá tuyệt đối (floor(giá / bước)). Nên đặt ~1/15–1/30 biên độ phiên.")
 
 string col_tf_eff = col_tf == "" ? timeframe.period : col_tf
 
@@ -91,13 +91,45 @@ type OFProfile
     int    tpo_above_poc = 0
     int    tpo_below_poc = 0
 
-var OFProfile    prof      = OFProfile.new()
-var array<float> arr_highs = array.new<float>()
-var array<float> arr_lows  = array.new<float>()
+var OFProfile    prof       = OFProfile.new()
+var array<int>   tpo_counts = array.new<int>()   // Lưới TPO (bước step_c), cộng dồn incremental
+var int          base_row   = na                 // Chỉ số hàng tuyệt đối ứng với tpo_counts[0]
 
 bool need_tpo_grid = show_tpo
 bool need_rf       = show_rf
 bool need_delta    = show_delta or show_cvd
+
+// Lưới theo bước giá cố định giống lưới thô (shape_step) của market_profile.pine.
+float step_c = math.max(syminfo.mintick, shape_step)
+
+// Cộng TPO của 1 nến vào lưới (mỗi hàng nến chạm +1), nới mảng xuống/lên khi giá ra
+// ngoài lưới. Hàm không gán lại được base_row (biến ngoài scope) nên phải return.
+f_add_bar_tpo(array<int> counts, int cur_base_row, float b_high, float b_low, float row_step) =>
+    int row_lo = int(math.floor(b_low / row_step))
+    int row_hi = int(math.floor(b_high / row_step))
+    int new_base_row = cur_base_row
+
+    if array.size(counts) == 0
+        new_base_row := row_lo
+        for k = 1 to (row_hi - row_lo + 1)
+            array.push(counts, 0)
+    else
+        int add_lo = new_base_row - row_lo
+        if add_lo >= 1
+            for k = 1 to add_lo
+                array.unshift(counts, 0)
+            new_base_row := row_lo
+        int top_row = new_base_row + array.size(counts) - 1
+        int add_hi = row_hi - top_row
+        if add_hi >= 1
+            for k = 1 to add_hi
+                array.push(counts, 0)
+
+    for idx = row_lo to row_hi
+        int pos = idx - new_base_row
+        array.set(counts, pos, array.get(counts, pos) + 1)
+
+    new_base_row
 
 // ============================================================================
 // 4. RESET PHIÊN & RF
@@ -106,18 +138,16 @@ bool is_new_session = timeframe.change("D")
 
 if is_new_session
     prof := OFProfile.new(start_bar=bar_index, sess_high=high, sess_low=low, rf_score=0)
-    array.clear(arr_highs)
-    array.clear(arr_lows)
-    array.push(arr_highs, high)
-    array.push(arr_lows, low)
+    array.clear(tpo_counts)
+    if need_tpo_grid
+        base_row := f_add_bar_tpo(tpo_counts, 0, high, low, step_c)
 else
     if not na(prof.start_bar)
         prof.sess_high := math.max(prof.sess_high, high)
         prof.sess_low  := math.min(prof.sess_low, low)
 
         if need_tpo_grid
-            array.push(arr_highs, high)
-            array.push(arr_lows, low)
+            base_row := f_add_bar_tpo(tpo_counts, base_row, high, low, step_c)
 
         if need_rf
             int bar_rf = 0
@@ -134,25 +164,16 @@ else
 // ============================================================================
 // 5. TPO COUNT (trên/dưới POC)
 // ============================================================================
-if need_tpo_grid and not na(prof.start_bar) and array.size(arr_highs) > 0
-    int   num_bars = array.size(arr_highs)
-    float s_range  = prof.sess_high - prof.sess_low
-    float step     = math.max(syminfo.mintick, s_range / grid_rows)
-    array<int> tpo_counts = array.new<int>(grid_rows, 0)
+if need_tpo_grid and not na(prof.start_bar) and array.size(tpo_counts) > 0
+    int   n_rows   = array.size(tpo_counts)
+    float grid_low = base_row * step_c
 
-    for b = 0 to num_bars - 1
-        float b_h = array.get(arr_highs, b)
-        float b_l = array.get(arr_lows, b)
-        for r = 0 to grid_rows - 1
-            float row_low  = prof.sess_low + r * step
-            float row_high = row_low + step
-            if b_h >= row_low and b_l <= row_high
-                array.set(tpo_counts, r, array.get(tpo_counts, r) + 1)
-
-    int   poc_row = 0
-    int   max_tpo = -1
-    float mid_row = (grid_rows - 1) / 2.0
-    for r = 0 to grid_rows - 1
+    // Tie-break: ưu tiên hàng gần giá giữa phiên thực (mảng phình không đối xứng).
+    int   poc_row   = 0
+    int   max_tpo   = -1
+    float mid_price = (prof.sess_high + prof.sess_low) / 2.0
+    float mid_row   = (mid_price - grid_low) / step_c - 0.5
+    for r = 0 to n_rows - 1
         int cnt = array.get(tpo_counts, r)
         if cnt > max_tpo
             max_tpo := cnt
@@ -163,7 +184,7 @@ if need_tpo_grid and not na(prof.start_bar) and array.size(arr_highs) > 0
 
     int above_cnt = 0
     int below_cnt = 0
-    for r = 0 to grid_rows - 1
+    for r = 0 to n_rows - 1
         if r > poc_row
             above_cnt += array.get(tpo_counts, r)
         else if r < poc_row
