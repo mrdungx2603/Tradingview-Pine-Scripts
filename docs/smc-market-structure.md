@@ -1,6 +1,6 @@
 # SMC Market Structure Indicator — Tài Liệu Hướng Dẫn
 
-> **Script**: [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) (v1.16)
+> **Script**: [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) (v1.16b)
 > **Script MTF**: [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) (v2.0)
 > **Library dùng chung**: [libraries/smc_core.pine](smc-core.md) (v1.0), chỉ bản MTF import. Bản base có state machine riêng trong file.
 > **Ngày tạo**: 2026-06-18 / **Cập nhật**: 2026-11-15
@@ -685,6 +685,11 @@ Bảng MTF hiển thị trend (BULL/BEAR/WAIT) thật từ `SwingState.trend` k�
 ---
 
 ## Kế Hoạch Phát Triển
+
+### v1.16b (Đã Hoàn Thành — 2026-11-15)
+
+- [x] Tối ưu performance: tìm OB vừa mitigated gần nhất được gộp vào vòng kiểm tra mitigation, không còn quét `ob_list` thêm một lần mỗi bar. Hiển thị và kết quả không đổi.
+- [x] Backup bản trước khi sửa: `indicators/hist/smc_market_structure_v1.16.pine`.
 
 ### v1.16 (Đã Hoàn Thành — 2026-11-15)
 

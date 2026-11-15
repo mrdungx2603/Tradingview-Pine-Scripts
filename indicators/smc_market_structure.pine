@@ -2,7 +2,7 @@
 // ─── SMC Market Structure Indicator — Phân tích cấu trúc thị trường theo Smart Money Concepts ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-06-18
-// Phiên bản: 1.16
+// Phiên bản: 1.16b
 // Mô tả: Phát hiện cấu trúc xu hướng (HH/HL, LL/LH), Break of Structure (BoS),
 //        Change of Character (CHoCH), Fair Value Gaps (FVG), Opening Gaps (OG),
 //        Volume Imbalance (VI), Order Blocks (OB), Dashboard thống kê đầy đủ.
@@ -714,12 +714,16 @@ if show_ob and (bull_fvg or bear_fvg)
 // ─── OB Mitigation Check + Bộ Lọc Hiển Thị ───
 if show_ob
     int ob_size = array.size(ob_list)
+    // OB vừa mitigated gần nhất: bar mitigation lớn nhất, trùng bar thì lấy index nhỏ nhất.
+    // Tính ngay trong vòng kiểm tra mitigation để chỉ duyệt ob_list một lần mỗi bar.
+    int last_mit_idx = na
+    int last_mit_bar = na
     if ob_size > 0
+        // Duyệt từ index lớn xuống nhỏ nên index nhỏ hơn thắng khi bằng bar_mitigation (>=)
         for i = ob_size - 1 to 0
             OrderBlock ob_chk   = array.get(ob_list, i)
             bool       is_bull  = ob_chk.is_bullish
-            bool       is_mit   = ob_chk.is_mitigated
-            if not is_mit
+            if not ob_chk.is_mitigated
                 bool triggered = is_bull ? (low <= ob_chk.top) : (high >= ob_chk.bottom)
                 if triggered
                     ob_chk.is_mitigated   := true
@@ -738,6 +742,11 @@ if show_ob
                             is_bull ? ob_bull_color : ob_bear_color,
                             ob_mit_transparency))
 
+            if ob_chk.is_mitigated
+                if na(last_mit_bar) or ob_chk.bar_mitigation >= last_mit_bar
+                    last_mit_bar := ob_chk.bar_mitigation
+                    last_mit_idx := i
+
     // Kéo dài box active đến bar cuối (style cuối cùng quyết định hiển thị)
     if barstate.islast and array.size(ob_boxes) > 0 and array.size(ob_list) > 0
         int box_ct = math.min(array.size(ob_list), array.size(ob_boxes))
@@ -746,17 +755,6 @@ if show_ob
             if not ob_ext.is_mitigated
                 box b_ext = array.get(ob_boxes, i)
                 box.set_right(b_ext, bar_index + 1)
-
-    // OB vừa mitigated gần nhất: bar mitigation lớn nhất, trùng bar thì lấy index nhỏ nhất
-    int last_mit_idx = na
-    int last_mit_bar = na
-    if array.size(ob_list) > 0
-        for i = 0 to array.size(ob_list) - 1
-            OrderBlock ob_scan = array.get(ob_list, i)
-            if ob_scan.is_mitigated
-                if na(last_mit_bar) or ob_scan.bar_mitigation > last_mit_bar
-                    last_mit_bar := ob_scan.bar_mitigation
-                    last_mit_idx := i
 
     // Bộ lọc hiển thị OB theo ob_filter_mode
     bool show_active_ob    = ob_filter_mode == "All" or ob_filter_mode == "Active"
