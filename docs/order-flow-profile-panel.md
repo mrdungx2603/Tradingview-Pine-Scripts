@@ -1,6 +1,6 @@
 # Order Flow & Market Profile Panel — Tài Liệu
 
-> **Script**: [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) (v1.13)
+> **Script**: [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) (v1.14)
 > **Loại**: Indicator (pane riêng, không overlay)
 > **Pine Script**: v6
 > **Ngày tạo**: 2026-11-14 / **Cập nhật**: 2026-11-14
@@ -25,7 +25,7 @@ Pane riêng hiển thị order flow dạng grid, trôi đồng bộ theo chart c
 | Khung Thời Gian Dự Phòng | `string` | `"1S"` | Footprint & Delta | Lower TF dùng ở Tầng 2 khi footprint không có dữ liệu |
 | Hiện hậu tố nguồn Delta | `bool` | `true` | Footprint & Delta | Hậu tố `F`/`L`/`A` ở ô Delta |
 | Khung Gộp Cột | `timeframe` | Chart | Market Profile & Khung Gộp Cột | `col_tf`. Chart = 1 cột/nến; chọn khung lớn hơn (bội số của khung chart) để gộp nhiều nến |
-| Độ Phân Giải Lưới Giá TPO | `int` | `60` (20–120) | Market Profile & Khung Gộp Cột | `grid_rows`, số hàng chia phiên để đếm TPO |
+| Bước giá lưới TPO (Shape Step) | `float` | `1.0` | Market Profile & Khung Gộp Cột | `shape_step`, bước giá cố định của lưới TPO (giống lưới thô của Market Profile). Nên đặt ~1/15–1/30 biên độ phiên |
 | Time / Delta / CVD / TPO Count / RF / RSI | `bool` ×6 | `true` | Hiện/Ẩn Dòng | Toggle từng dòng |
 | Số Cột Hiển Thị | `int` | `55` (10–55) | Hiển Thị (Giao Diện) | Số cột gần nhất được giữ lại (6 dòng × 55 = 330 box < 500) |
 | Cỡ Chữ Hiển Thị | `string` | `"Small"` | Hiển Thị (Giao Diện) | `Tiny`/`Small`/`Normal`/`Large` |
@@ -35,7 +35,7 @@ Pane riêng hiển thị order flow dạng grid, trôi đồng bộ theo chart c
 ## Logic Chính
 
 1. **Reset phiên** (`timeframe.change("D")`): tạo `OFProfile` mới, xoá mảng high/low của phiên.
-2. **TPO Count**: dựng histogram TPO của toàn phiên theo `grid_rows`, tìm POC, đếm TPO trên/dưới POC.
+2. **TPO Count**: lưới giá cố định theo giá tuyệt đối, bước `step_c = max(mintick, shape_step)`, hàng = `floor(giá / step_c)` (giống lưới thô `tpo_counts_c` của `market_profile.pine`). Mỗi nến cộng +1 vào các hàng nó chạm, cộng dồn incremental qua `f_add_bar_tpo()` (mảng tự nới khi giá ra ngoài lưới). Tìm POC (tie-break theo giá giữa phiên), đếm TPO trên/dưới POC.
 3. **RF**: mỗi nến cộng +1/-1 theo high/low so với nến trước, reset mỗi phiên.
 4. **Delta — 3 tầng fallback** mỗi nến:
    - Tầng 1 (`F`): `request.footprint()` → `fp.delta()`.
@@ -60,7 +60,8 @@ Pane riêng hiển thị order flow dạng grid, trôi đồng bộ theo chart c
 - `request.footprint()` cần TradingView Premium/Ultimate và sàn hỗ trợ dữ liệu tick. Đã xác nhận `HNX:VN30F1!` chạy được Tầng 1.
 - **`col_tf` không chia hết cho khung chart** (vd `col_tf=5` trên chart 3m): mỗi khung 5 phút chứa 1 hoặc 2 nến, nên cột rộng không đều và trông như "mất cột". Để Chart hoặc chọn bội số của khung chart.
 - Box neo `xloc.bar_time`. Ở chế độ **Volume Candles** (độ rộng nến tỷ lệ volume), cột có thể lệch nhẹ so với nến.
-- TPO Count quét lại toàn phiên mỗi nến (chưa tối ưu incremental). Đã giới hạn `calc_bars_count=3000`; ẩn dòng TPO Count để bỏ qua phần này.
+- TPO Count tính 1 TPO = 1 nến chart (không dedup theo TPO Period 30 phút như `market_profile.pine`), nên số đếm thay đổi theo timeframe chart.
+- `shape_step` cần chỉnh theo biên độ giá của từng mã: quá nhỏ thì lưới vỡ vụn (hàng trăm hàng), quá lớn thì chỉ còn vài hàng.
 - Script chỉ gọi `request.footprint()` 1 lần (giới hạn của Pine).
 - Giới hạn vẽ: `max_boxes_count=500`.
 
@@ -79,3 +80,4 @@ Pane riêng hiển thị order flow dạng grid, trôi đồng bộ theo chart c
 - **v1.10–v1.11**: Thử cơ chế lấp gap cho khung không có nến (đã bỏ ở v1.13).
 - **v1.12**: Bỏ hẳn VAH/POC/VAL, còn 6 dòng.
 - **v1.13**: (1) Cột căn đúng tâm nến (box neo `xloc.bar_time`, mép tại điểm giữa 2 nến). (2) Ô tạo ngay ở nến đầu khung và cập nhật theo từng nến. (3) `col_tf` mặc định = khung chart; xác nhận "mất cột 14:03" là do `col_tf=5` trên chart 3m. (4) Bỏ gap fill và biến flush cũ; gọn comment, chuyển changelog sang tài liệu. Backup bản trước tại `indicators/hist/order_flow_profile_panel_v1.12.4.pine`.
+- **v1.14**: Lưới giá TPO theo bước giá cố định `shape_step` (thay `grid_rows` chia đều biên độ phiên), follow lưới thô của `market_profile.pine`; TPO cộng dồn incremental, bỏ mảng high/low và quét lại toàn phiên. Backup bản trước tại `indicators/hist/order_flow_profile_panel_v1.13.pine`.
