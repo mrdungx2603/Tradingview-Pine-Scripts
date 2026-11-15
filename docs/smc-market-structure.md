@@ -1,8 +1,6 @@
 # SMC Market Structure Indicator — Tài Liệu Hướng Dẫn
 
 > **Script**: [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) (v1.16b)
-> **Script MTF**: [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) (v2.0)
-> **Library dùng chung**: [libraries/smc_core.pine](smc-core.md) (v1.0), chỉ bản MTF import. Bản base có state machine riêng trong file.
 > **Ngày tạo**: 2026-06-18 / **Cập nhật**: 2026-11-15
 > **Pine Script**: v6
 > **Loại**: Indicator (overlay)
@@ -22,8 +20,7 @@
 9. [Bảng Thống Kê (Dashboard)](#bảng-thống-kê-dashboard)
 10. [Hướng Dẫn Sử Dụng](#hướng-dẫn-sử-dụng)
 11. [Hạn Chế & Lưu Ý](#hạn-chế--lưu-ý)
-12. [Multi-Timeframe (MTF) Trend](#multi-timeframe-mtf-trend--chỉ-có-trong-bản-mtf)
-13. [Kế Hoạch Phát Triển](#kế-hoạch-phát-triển)
+12. [Kế Hoạch Phát Triển](#kế-hoạch-phát-triển)
 
 ---
 
@@ -647,40 +644,6 @@ Indicator cung cấp 8 alert conditions có thể dùng để tạo cảnh báo 
 4. **Khung thời gian thấp**: 1m-5m có nhiều nhiễu. Xác định trend trên H1/H4, tìm entry trên M5/M15.
 
 5. **OB đã mitigated**: Vùng OB đã bị giá xuyên qua không còn hiệu lực làm hỗ trợ/kháng cự.
-
----
-
-## Multi-Timeframe (MTF) Trend — Chỉ Có Trong Bản MTF
-
-Bản **SMC Market Structure + MTF** (`smc_market_structure_mtf.pine`) bổ sung bảng hiển thị xu hướng của 3 khung thời gian khác nhau.
-
-### Cách Hoạt Động (v2.0 — State Machine Thật Trên Từng TF)
-
-> ⚠️ **Thay đổi quan trọng ở v2.0**: bản trước dùng "trend score" xấp xỉ từ 3 pivot (logic sai, dễ cho kết quả không khớp cấu trúc thật). Từ v2.0, MTF chạy **đúng state machine SMC** (`smc.f_process_bar` từ library [smc_core](smc-core.md)) bên trong `request.security()` cho từng khung thời gian, dùng wrapper pattern để tạo execution context độc lập trên TF đích.
-
-```pinescript
-f_run_smc(pivot_len, seed_mode) =>
-    var smc.SwingState s = smc.f_init_state()
-    if not s.seeded
-        s := seed_mode == "Pivot Seed" ? smc.f_seed_pivot(...) : smc.f_seed_session(s)
-    if s.seeded
-        s := smc.f_process_bar(s)
-    s
-
-mtf_s1 := request.security(syminfo.tickerid, mtf_tf1, f_run_smc(pivotLength, seedMode), lookahead=barmerge.lookahead_off)
-```
-
-Bảng MTF hiển thị trend (BULL/BEAR/WAIT) thật từ `SwingState.trend` kèm HH/HL hoặc LL/LH hiện tại của từng khung thời gian (tối đa 3 TF, `mtf_tf1/2/3`, có thể đặt `"None"` để tắt).
-
-### So Sánh 2 Phiên Bản
-
-| | Base (v1.9) | MTF (v2.0) |
-|---|---|---|
-| **File** | `indicators/smc_market_structure.pine` | `indicators/smc_market_structure_mtf.pine` |
-| **State machine** | Nằm trong file, chạy trên chart TF | Dùng `smc_core` qua `request.security()` wrapper cho mỗi TF phụ |
-| **Input groups** | 11 | 12 (+ Multi-Timeframe) |
-| **request.security()** | 0 | 0–3 (tuỳ số TF bật, `"None"` để tắt từng slot) |
-| **Phù hợp** | Máy yếu, chart đơn giản | Phân tích đa khung thời gian |
 
 ---
 

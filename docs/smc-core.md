@@ -4,7 +4,7 @@
 > **Loại**: Library (`library(overlay=false)`)
 > **Pine Script**: v6
 > **Ngày tạo**: 2026-07-10 / **Cập nhật**: 2026-07-10
-> **Dùng trong**: [strategies/smc_strategy.pine](../strategies/smc_strategy.pine), [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine), [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) — cả 3 đều `import mrdungx2603/smc_core/1 as smc`
+> **Dùng trong**: [strategies/smc_strategy.pine](../strategies/smc_strategy.pine) — `import mrdungx2603/smc_core/1 as smc`
 
 ## Tổng Quan
 
@@ -52,7 +52,6 @@ Máy trạng thái 3 nhánh theo `trend`:
 
 - `strategies/smc_strategy.pine` — dùng `SwingState` cho entry/exit signal (BoS/CHoCH) và tính Premium/Discount zone.
 - `indicators/smc_market_structure.pine` — dùng trực tiếp trên timeframe của chart.
-- `indicators/smc_market_structure_mtf.pine` — dùng qua wrapper `f_run_smc()` chạy bên trong `request.security()` cho từng khung thời gian phụ (xem [docs/smc-market-structure.md](smc-market-structure.md#cách-hoạt-động-v20--state-machine-thật-trên-từng-tf)).
 
 ## Giới Hạn & Lưu Ý
 
