@@ -8,6 +8,7 @@
 
 | Tên | File Script | Version | Tài Liệu |
 |---|---|---|---|
+| Global Markets Table | [indicators/global_markets_table.pine](../indicators/global_markets_table.pine) | 1.0 | [global-markets-table.md](global-markets-table.md) |
 | LSC Pattern | [indicators/lsc_pattern.pine](../indicators/lsc_pattern.pine) | 1.0 | [lsc-pattern.md](lsc-pattern.md) |
 | Market Profile (Mind over Markets) | [indicators/market_profile.pine](../indicators/market_profile.pine) | 2.2 | [market-profile.md](market-profile.md) |
 | Order Flow & Market Profile Panel | [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) | 1.10 | [order-flow-profile-panel.md](order-flow-profile-panel.md) |
