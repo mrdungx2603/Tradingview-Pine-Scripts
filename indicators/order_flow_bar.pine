@@ -109,5 +109,15 @@ show_value_labels = input.bool(
     group="Hiển Thị"
 )
 
+// ===== FOOTPRINT TẦNG 1 =====
+// Gọi request.footprint() đúng 1 lần (giới hạn Pine), tham số cố định, không expose input.
+// Tier 1 chỉ cần fp.rows() (danh sách volume_row theo giá) để bucket buy/sell ở Task 3.
+footprint fp = request.footprint(ticks_per_row=1, va_percent=70, imbalance_percent=300)
+
+// Cờ phát hiện có dữ liệu footprint hay không (tài khoản không có Premium/sàn không hỗ trợ
+// tick data -> fp/fp.rows() sẽ na). Không raise lỗi, chỉ coi như "chưa có dữ liệu".
+bool has_footprint_data = not na(fp) and not na(fp.rows()) and array.size(fp.rows()) > 0
+
 // ===== PLACEHOLDER PLOT =====
 plot(na)
+plot(has_footprint_data ? 1 : 0, title="DEBUG_has_fp")
