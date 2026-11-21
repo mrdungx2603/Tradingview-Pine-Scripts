@@ -1,0 +1,315 @@
+//@version=6
+// ─── Order Flow & Market Profile Panel ───
+// Tác giả: TV Pine
+// Ngày tạo: 2026-11-14
+// Phiên bản: 1.13
+// Mô tả: Pane riêng dạng grid, mỗi dòng 1 chỉ số (Time, Delta, CVD, TPO Count,
+//        RF, RSI), mỗi cột 1 khung col_tf (mặc định = khung chart). Changelog
+//        xem docs/order-flow-profile-panel.md.
+indicator(title="Order Flow & Market Profile Panel", shorttitle="OF Panel v6", overlay=false, max_boxes_count=500, max_labels_count=500, calc_bars_count=3000)
+
+// ============================================================================
+// 1. INPUTS
+// ============================================================================
+grp_footprint     = "Footprint & Delta"
+ticks_per_row     = input.int(10, "Ticks mỗi dòng (ticks_per_row)", minval=1, group=grp_footprint, tooltip="Tham số bắt buộc của request.footprint(). Panel chỉ dùng fp.delta() (tổng cả nến) nên giá trị này không ảnh hưởng số liệu Delta/CVD.")
+va_pct            = input.float(70.0, "Value Area (%)", minval=50.0, maxval=90.0, step=1.0, group=grp_footprint)
+imb_pct           = input.float(300.0, "Ngưỡng Imbalance (%)", minval=100.0, step=10.0, group=grp_footprint)
+lower_tf_fallback = input.string("1S", "Khung Thời Gian Dự Phòng (Lower TF)", group=grp_footprint)
+show_delta_tag    = input.bool(true, "Hiện hậu tố nguồn Delta (F = Footprint / L = LowerTF / A = Approx)", group=grp_footprint)
+
+grp_mp    = "Market Profile & Khung Gộp Cột"
+col_tf    = input.timeframe("", "Khung Gộp Cột (Chart = 1 cột/nến)", group=grp_mp, tooltip="Để Chart (mặc định) thì mỗi cột khớp đúng 1 nến. Chọn khung lớn hơn chart (vd 15 trên chart 3m) để gộp nhiều nến thành 1 cột. Khung không chia hết cho khung chart (vd 5 trên chart 3m) sẽ gộp không đều 1-2 nến/cột.")
+grid_rows = input.int(60, "Độ Phân Giải Lưới Giá TPO (grid_rows)", minval=20, maxval=120, group=grp_mp)
+
+string col_tf_eff = col_tf == "" ? timeframe.period : col_tf
+
+grp_rows   = "Hiện/Ẩn Dòng"
+show_time  = input.bool(true, "Time (giờ:phút, dòng trên cùng)", group=grp_rows)
+show_delta = input.bool(true, "Delta", group=grp_rows)
+show_cvd   = input.bool(true, "CVD", group=grp_rows)
+show_tpo   = input.bool(true, "TPO Count", group=grp_rows)
+show_rf    = input.bool(true, "RF (Rotation Factor)", group=grp_rows)
+show_rsi   = input.bool(true, "RSI", group=grp_rows)
+
+grp_display    = "Hiển Thị (Giao Diện)"
+n_bars_display = input.int(55, "Số Cột Hiển Thị", minval=10, maxval=55, group=grp_display)
+font_choice    = input.string("Small", "Cỡ Chữ Hiển Thị", options=["Tiny", "Small", "Normal", "Large"], group=grp_display)
+
+grp_rsi = "RSI"
+rsi_len = input.int(14, "Chu Kỳ RSI", minval=1, group=grp_rsi)
+rsi_src = input.source(close, "Nguồn RSI", group=grp_rsi)
+
+// ============================================================================
+// 2. CỠ CHỮ, RSI, VỊ TRÍ DÒNG
+// ============================================================================
+f_cell_size(string choice) =>
+    string res = size.small
+    if choice == "Tiny"
+        res := size.tiny
+    else if choice == "Normal"
+        res := size.normal
+    else if choice == "Large"
+        res := size.large
+    res
+
+string cell_text_size = f_cell_size(font_choice)
+
+// show_rsi là input (simple) nên được phép đặt request.security() trong if.
+float rsi_5m = na
+if show_rsi
+    rsi_5m := request.security(syminfo.tickerid, col_tf_eff, ta.rsi(rsi_src, rsi_len))
+
+// Đếm từ dưới lên, dòng ẩn không được cấp Y nên grid tự co lại.
+int y_cursor = 0
+y_cursor := show_rsi   ? y_cursor + 1 : y_cursor
+int Y_RSI = y_cursor
+y_cursor := show_rf    ? y_cursor + 1 : y_cursor
+int Y_RF = y_cursor
+y_cursor := show_tpo   ? y_cursor + 1 : y_cursor
+int Y_TPO = y_cursor
+y_cursor := show_cvd   ? y_cursor + 1 : y_cursor
+int Y_CVD = y_cursor
+y_cursor := show_delta ? y_cursor + 1 : y_cursor
+int Y_DELTA = y_cursor
+y_cursor := show_time  ? y_cursor + 1 : y_cursor
+int Y_TIME = y_cursor
+int total_rows_visible = y_cursor
+
+// Box không tham gia tính scale của pane, cần 2 plot ẩn để neo dải y.
+plot(0, title="Neo Scale Dưới", display=display.pane, color=color.new(color.white, 100))
+plot(total_rows_visible, title="Neo Scale Trên", display=display.pane, color=color.new(color.white, 100))
+
+// ============================================================================
+// 3. TRẠNG THÁI PHIÊN
+// ============================================================================
+type OFProfile
+    int    start_bar     = na
+    float  sess_high     = na
+    float  sess_low      = na
+    int    rf_score      = 0
+    int    tpo_above_poc = 0
+    int    tpo_below_poc = 0
+
+var OFProfile    prof      = OFProfile.new()
+var array<float> arr_highs = array.new<float>()
+var array<float> arr_lows  = array.new<float>()
+
+bool need_tpo_grid = show_tpo
+bool need_rf       = show_rf
+bool need_delta    = show_delta or show_cvd
+
+// ============================================================================
+// 4. RESET PHIÊN & RF
+// ============================================================================
+bool is_new_session = timeframe.change("D")
+
+if is_new_session
+    prof := OFProfile.new(start_bar=bar_index, sess_high=high, sess_low=low, rf_score=0)
+    array.clear(arr_highs)
+    array.clear(arr_lows)
+    array.push(arr_highs, high)
+    array.push(arr_lows, low)
+else
+    if not na(prof.start_bar)
+        prof.sess_high := math.max(prof.sess_high, high)
+        prof.sess_low  := math.min(prof.sess_low, low)
+
+        if need_tpo_grid
+            array.push(arr_highs, high)
+            array.push(arr_lows, low)
+
+        if need_rf
+            int bar_rf = 0
+            if high > high[1]
+                bar_rf += 1
+            else if high < high[1]
+                bar_rf -= 1
+            if low > low[1]
+                bar_rf += 1
+            else if low < low[1]
+                bar_rf -= 1
+            prof.rf_score += bar_rf
+
+// ============================================================================
+// 5. TPO COUNT (trên/dưới POC)
+// ============================================================================
+if need_tpo_grid and not na(prof.start_bar) and array.size(arr_highs) > 0
+    int   num_bars = array.size(arr_highs)
+    float s_range  = prof.sess_high - prof.sess_low
+    float step     = math.max(syminfo.mintick, s_range / grid_rows)
+    array<int> tpo_counts = array.new<int>(grid_rows, 0)
+
+    for b = 0 to num_bars - 1
+        float b_h = array.get(arr_highs, b)
+        float b_l = array.get(arr_lows, b)
+        for r = 0 to grid_rows - 1
+            float row_low  = prof.sess_low + r * step
+            float row_high = row_low + step
+            if b_h >= row_low and b_l <= row_high
+                array.set(tpo_counts, r, array.get(tpo_counts, r) + 1)
+
+    int   poc_row = 0
+    int   max_tpo = -1
+    float mid_row = (grid_rows - 1) / 2.0
+    for r = 0 to grid_rows - 1
+        int cnt = array.get(tpo_counts, r)
+        if cnt > max_tpo
+            max_tpo := cnt
+            poc_row := r
+        else if cnt == max_tpo
+            if math.abs(r - mid_row) < math.abs(poc_row - mid_row)
+                poc_row := r
+
+    int above_cnt = 0
+    int below_cnt = 0
+    for r = 0 to grid_rows - 1
+        if r > poc_row
+            above_cnt += array.get(tpo_counts, r)
+        else if r < poc_row
+            below_cnt += array.get(tpo_counts, r)
+
+    prof.tpo_above_poc := above_cnt
+    prof.tpo_below_poc := below_cnt
+
+// ============================================================================
+// 6. DELTA/CVD — 3 TẦNG FALLBACK
+// ============================================================================
+float  delta        = na
+string delta_source = na
+var float cvd = 0.0
+
+if need_delta
+    footprint fp = request.footprint(ticks_per_row, va_pct, imb_pct)
+    array<float> ltf_close = request.security_lower_tf(syminfo.tickerid, lower_tf_fallback, close, ignore_invalid_timeframe=true)
+    array<float> ltf_open  = request.security_lower_tf(syminfo.tickerid, lower_tf_fallback, open, ignore_invalid_timeframe=true)
+    array<float> ltf_vol   = request.security_lower_tf(syminfo.tickerid, lower_tf_fallback, volume, ignore_invalid_timeframe=true)
+
+    if not na(fp) and not na(fp.delta())
+        delta        := fp.delta()
+        delta_source := "Footprint"
+    else if array.size(ltf_close) > 0
+        float ltf_delta = 0.0
+        for i = 0 to array.size(ltf_close) - 1
+            float c = array.get(ltf_close, i)
+            float o = array.get(ltf_open, i)
+            float v = array.get(ltf_vol, i)
+            if c > o
+                ltf_delta += v
+            else if c < o
+                ltf_delta -= v
+        delta        := ltf_delta
+        delta_source := "LowerTF"
+    else
+        float rng = high - low
+        delta        := rng > 0 ? volume * ((close - low) - (high - close)) / rng : 0.0
+        delta_source := "OHLCV-Approx"
+
+    // Pine rollback biến var trước mỗi tick realtime nên không bị cộng trùng.
+    cvd := is_new_session ? nz(delta) : cvd + nz(delta)
+
+// ============================================================================
+// 7. RENDERER
+// ============================================================================
+// format.volume luôn hiện 3 số lẻ, nên tự định dạng 2 số lẻ.
+f_format_delta(float val) =>
+    string res  = "0"
+    float  av   = na(val) ? 0.0 : math.abs(val)
+    string sign = (not na(val) and val < 0) ? "-" : ""
+    if na(val)
+        res := "0"
+    else if av >= 1000000000
+        res := sign + str.tostring(av / 1000000000, "#.##") + "B"
+    else if av >= 1000000
+        res := sign + str.tostring(av / 1000000, "#.##") + "M"
+    else if av >= 1000
+        res := sign + str.tostring(av / 1000, "#.##") + "K"
+    else
+        res := sign + str.tostring(av, "#")
+    res
+
+f_new_cell(array<box> col_boxes, float y_top, int left_t, int max_cols) =>
+    box b = box.new(left_t, y_top, left_t, y_top - 1, xloc=xloc.bar_time, border_color=color.gray, bgcolor=color.gray, text="", text_color=color.white, text_size=cell_text_size)
+    array.push(col_boxes, b)
+    if array.size(col_boxes) > max_cols
+        box.delete(array.shift(col_boxes))
+
+f_set_cell(array<box> col_boxes, int right_t, string txt, color bg) =>
+    int n = array.size(col_boxes)
+    if n > 0
+        box.set_right(array.get(col_boxes, n - 1), right_t)
+        box.set_text(array.get(col_boxes, n - 1), txt)
+        box.set_bgcolor(array.get(col_boxes, n - 1), bg)
+        box.set_border_color(array.get(col_boxes, n - 1), bg)
+
+var array<box> col_time  = array.new<box>()
+var array<box> col_delta = array.new<box>()
+var array<box> col_cvd   = array.new<box>()
+var array<box> col_tpo   = array.new<box>()
+var array<box> col_rf    = array.new<box>()
+var array<box> col_rsi   = array.new<box>()
+
+bool is_new_col = timeframe.change(col_tf_eff)
+var bool col_started = false
+bool start_col = is_new_col or not col_started
+col_started := true
+
+// Mép ô đặt tại điểm giữa 2 nến liền kề để tâm ô trùng tâm nến.
+int bar_half_ms = timeframe.in_seconds(timeframe.period) * 500
+int left_t      = time - bar_half_ms
+int right_t     = time + bar_half_ms
+
+var float bucket_delta      = 0.0
+var int   bucket_start_time = na
+bucket_delta      := start_col ? nz(delta) : bucket_delta + nz(delta)
+bucket_start_time := start_col ? time : bucket_start_time
+
+color  c_delta   = bucket_delta > 0 ? color.rgb(27, 77, 62) : bucket_delta < 0 ? color.rgb(139, 0, 0) : color.gray
+color  c_cvd     = cvd > 0 ? color.rgb(27, 77, 62) : cvd < 0 ? color.rgb(139, 0, 0) : color.gray
+color  c_rf      = prof.rf_score > 0 ? color.rgb(27, 77, 62) : prof.rf_score < 0 ? color.rgb(139, 0, 0) : color.gray
+color  c_tpo     = prof.tpo_below_poc > prof.tpo_above_poc ? color.rgb(27, 77, 62) : prof.tpo_above_poc > prof.tpo_below_poc ? color.rgb(139, 0, 0) : color.gray
+color  c_rsi     = na(rsi_5m) ? color.gray : rsi_5m > 70 ? color.rgb(139, 0, 0) : rsi_5m < 30 ? color.rgb(27, 77, 62) : color.rgb(26, 54, 93)
+string delta_tag = delta_source == "Footprint" ? "F" : delta_source == "LowerTF" ? "L" : "A"
+string delta_txt = f_format_delta(bucket_delta) + (show_delta_tag ? " " + delta_tag : "")
+string rsi_txt   = na(rsi_5m) ? "—" : str.tostring(rsi_5m, "#.#")
+string time_txt  = str.format_time(bucket_start_time, "HH:mm", syminfo.timezone)
+string cvd_txt   = f_format_delta(cvd)
+string tpo_txt   = str.tostring(prof.tpo_above_poc) + "/" + str.tostring(prof.tpo_below_poc)
+string rf_txt    = str.tostring(prof.rf_score)
+
+if start_col
+    if show_time
+        f_new_cell(col_time, Y_TIME, left_t, n_bars_display)
+    if show_delta
+        f_new_cell(col_delta, Y_DELTA, left_t, n_bars_display)
+    if show_cvd
+        f_new_cell(col_cvd, Y_CVD, left_t, n_bars_display)
+    if show_tpo
+        f_new_cell(col_tpo, Y_TPO, left_t, n_bars_display)
+    if show_rf
+        f_new_cell(col_rf, Y_RF, left_t, n_bars_display)
+    if show_rsi
+        f_new_cell(col_rsi, Y_RSI, left_t, n_bars_display)
+
+if show_time
+    f_set_cell(col_time, right_t, time_txt, color.gray)
+if show_delta
+    f_set_cell(col_delta, right_t, delta_txt, c_delta)
+if show_cvd
+    f_set_cell(col_cvd, right_t, cvd_txt, c_cvd)
+if show_tpo
+    f_set_cell(col_tpo, right_t, tpo_txt, c_tpo)
+if show_rf
+    f_set_cell(col_rf, right_t, rf_txt, c_rf)
+if show_rsi
+    f_set_cell(col_rsi, right_t, rsi_txt, c_rsi)
+
+// ============================================================================
+// 8. TÊN DÒNG — tag trên trục giá bên phải
+// ============================================================================
+plot(show_time  ? Y_TIME  : na, title="Time",      display=display.price_scale, color=color.gray)
+plot(show_delta ? Y_DELTA : na, title="Delta",     display=display.price_scale, color=color.gray)
+plot(show_cvd   ? Y_CVD   : na, title="CVD",       display=display.price_scale, color=color.gray)
+plot(show_tpo   ? Y_TPO   : na, title="TPO Count", display=display.price_scale, color=color.gray)
+plot(show_rf    ? Y_RF    : na, title="RF",        display=display.price_scale, color=color.gray)
+plot(show_rsi   ? Y_RSI   : na, title="RSI",       display=display.price_scale, color=color.gray)

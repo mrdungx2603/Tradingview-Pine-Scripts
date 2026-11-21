@@ -1,9 +1,9 @@
 # SMC Market Structure Indicator — Tài Liệu Hướng Dẫn
 
-> **Script**: [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) (v2.0)
+> **Script**: [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) (v1.16)
 > **Script MTF**: [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) (v2.0)
-> **Library dùng chung**: [libraries/smc_core.pine](smc-core.md) (v1.0)
-> **Ngày tạo**: 2026-06-18 / **Cập nhật**: 2026-07-10
+> **Library dùng chung**: [libraries/smc_core.pine](smc-core.md) (v1.0), chỉ bản MTF import. Bản base có state machine riêng trong file.
+> **Ngày tạo**: 2026-06-18 / **Cập nhật**: 2026-11-15
 > **Pine Script**: v6
 > **Loại**: Indicator (overlay)
 
@@ -228,6 +228,9 @@ OB Mitigated (đã bị phá):
 | **Màu OB Tăng (Demand)** | `color` | `#089981` | Màu Bullish OB |
 | **Màu OB Giảm (Supply)** | `color` | `#f23645` | Màu Bearish OB |
 | **Độ Trong Suốt OB Active** | `int` | `70` | 0–100, càng cao càng trong suốt |
+| **Kiểu Viền OB Active** | `string` | `"Dashed"` | `Solid` / `Dashed` / `Dotted` / `None` (không viền) |
+| **Độ Trong Suốt OB Mitigated** | `int` | `85` | 0–100, áp dụng cho OB đã mitigated |
+| **Kiểu Viền OB Mitigated** | `string` | `"Solid"` | `Solid` / `Dashed` / `Dotted` / `None` (không viền) |
 
 ### Nhóm "Bộ Lọc Imbalance"
 
@@ -310,8 +313,11 @@ Script chạy một lần duy nhất (hoặc mỗi phiên nếu dùng Session Se
 3. Gán giá trị cho các biến `hh/hl/ll/lh` tương ứng
 
 **Session Seed**:
-1. Lấy bar đầu tiên của phiên: gán tất cả `hh/hl/ll/lh = bar_index`
-2. `trend = 0`, chờ breakout để xác định trend
+1. Nến đầu phiên: `hh = hl = ll = lh = bar_index`, H và L của nến này chỉ là mốc tạm, chưa phải cực trị. `trend = 0`
+2. Nến đầu tiên đóng vượt H hoặc L quyết định trend:
+   - Đóng trên H: L đầu được gán HL, vẽ BoS, bắt đầu săn HH. `trend = 1`
+   - Đóng dưới L: H đầu được gán LH, vẽ BoS, bắt đầu săn LL. `trend = -1`
+3. Sau khi trend đã xác định, các lần phá tiếp theo theo logic HH/HL/LL/LH thông thường
 
 ### Bước 2: State Machine (Máy Trạng Thái)
 
@@ -570,7 +576,7 @@ Bảng sử dụng nền tối `#1e222d` (không transparency) để đảm bả
 
 ### Alert Conditions
 
-Indicator cung cấp 10 alert conditions có thể dùng để tạo cảnh báo trên TradingView:
+Indicator cung cấp 8 alert conditions có thể dùng để tạo cảnh báo trên TradingView:
 
 | Alert | Kích Hoạt Khi |
 |---|---|
@@ -580,6 +586,8 @@ Indicator cung cấp 10 alert conditions có thể dùng để tạo cảnh báo
 | **Bearish OG** | Xuất hiện Opening Gap giảm |
 | **Bullish VI** | Xuất hiện Volume Imbalance tăng |
 | **Bearish VI** | Xuất hiện Volume Imbalance giảm |
+| **Bullish CHoCH** | Nến đóng vượt LH, bắt đầu săn đảo chiều tăng. Alert chỉ bắn trên nến đã đóng |
+| **Bearish CHoCH** | Nến đóng phá HL, bắt đầu săn đảo chiều giảm. Alert chỉ bắn trên nến đã đóng |
 
 ---
 
@@ -666,10 +674,10 @@ Bảng MTF hiển thị trend (BULL/BEAR/WAIT) thật từ `SwingState.trend` k�
 
 ### So Sánh 2 Phiên Bản
 
-| | Base (v2.0) | MTF (v2.0) |
+| | Base (v1.9) | MTF (v2.0) |
 |---|---|---|
 | **File** | `indicators/smc_market_structure.pine` | `indicators/smc_market_structure_mtf.pine` |
-| **State machine** | Dùng trực tiếp `smc_core` trên chart TF | Dùng `smc_core` qua `request.security()` wrapper cho mỗi TF phụ |
+| **State machine** | Nằm trong file, chạy trên chart TF | Dùng `smc_core` qua `request.security()` wrapper cho mỗi TF phụ |
 | **Input groups** | 11 | 12 (+ Multi-Timeframe) |
 | **request.security()** | 0 | 0–3 (tuỳ số TF bật, `"None"` để tắt từng slot) |
 | **Phù hợp** | Máy yếu, chart đơn giản | Phân tích đa khung thời gian |
@@ -677,6 +685,50 @@ Bảng MTF hiển thị trend (BULL/BEAR/WAIT) thật từ `SwingState.trend` k�
 ---
 
 ## Kế Hoạch Phát Triển
+
+### v1.16 (Đã Hoàn Thành — 2026-11-15)
+
+- [x] Kiểu viền OB có thêm lựa chọn `None` cho cả trạng thái Active và Mitigated.
+- [x] Nhãn BoS và CHoCH nằm ở giữa đường thay vì phía trên. Nền nhãn trong suốt, đường đi xuyên sau chữ.
+
+### v1.15 (Đã Hoàn Thành — 2026-11-15)
+
+- [x] Thêm nhóm input "Định Dạng OB": kiểu viền Active, độ trong suốt và kiểu viền Mitigated. Mặc định khớp hành vi cũ.
+
+### v1.14 (Đã Hoàn Thành — 2026-11-15)
+
+- [x] OB vừa mitigated hiện theo checkbox "Hiển Thị OB Vừa Mitigated" ở mọi bộ lọc, kể cả `Active`. Các OB mitigated khác vẫn theo bộ lọc.
+
+### v1.13 (Đã Hoàn Thành — 2026-11-15)
+
+- [x] Session Seed: H và L của nến đầu session là mốc tạm, chưa phải cực trị. Khi nến n đóng trên H, L đầu được gán HL và bắt đầu săn HH. Khi nến n đóng dưới L, H đầu được gán LH và bắt đầu săn LL. Pivot Seed không đổi.
+
+### v1.12 (Đã Hoàn Thành — 2026-11-15)
+
+- [x] Mỗi bar chỉ hiển thị một nhãn cấu trúc (HH/HL/LL/LH). Khi hai nhãn trùng bar, nhãn xác nhận sau sẽ thay nhãn cũ. Logic tìm đỉnh đáy không đổi.
+
+### v1.11 (Đã Hoàn Thành — 2026-11-15)
+
+- [x] Đưa `ta.pivothigh` / `ta.pivotlow` ra scope chung, không còn nằm trong block seeding có điều kiện.
+- [x] Gộp 4 khối xác nhận HH/LL thành 2 nhánh: hai trend dùng chung logic săn, chỉ khác ở nhánh chưa săn.
+- [x] Bỏ biến `last_mitigated_idx`. OB vừa mitigated được tìm bằng một lần quét mảng mỗi bar, hiển thị không đổi.
+- [x] Gom 8 lệnh `table.cell` của bảng SMC bằng hàm `set_smc_row()`.
+- [ ] Không làm: gate `ta.atr(200)` theo `imb_width_method`. `ta.atr` là RMA, chi phí O(1) mỗi bar nên lợi ích nhỏ. Đặt `ta` trong biểu thức điều kiện cũng có rủi ro về state, nên giữ nguyên.
+
+### v1.10 (Đã Hoàn Thành — 2026-11-15)
+
+- [x] Alert CHoCH chỉ bắn khi nến đóng (`barstate.isconfirmed`) và giá đóng vẫn vượt mức đã phá, giống BOS.
+- [x] Temp pivot (HL?/LH?) cập nhật dần từng bar thay vì quét lại toàn bộ khoảng săn.
+- [ ] Chưa làm: gom 4 khối xác nhận HH/LL, gom bảng dashboard, bỏ `last_mitigated_idx`.
+
+### v1.9 (Đã Hoàn Thành — 2026-11-15)
+
+- [x] Sửa alert CHoCH bị bắn lặp ở mọi bar sau lần đầu: cờ được reset mỗi bar.
+- [x] Dashboard imbalance: các hàm đếm gap đã lấp chỉ chạy khi bật `Hiển Thị Dashboard`.
+- [x] Box OB: kéo dài và đổi style chỉ tính ở bar cuối, giảm việc vẽ lại mỗi bar.
+- [x] Gọn code: helper `add_ob()` và `evict_oldest_ob()` thay cho các khối lặp tạo/xoá OB.
+- [x] Backup bản trước khi sửa: `indicators/hist/smc_market_structure_v1.8b.pine`.
+- [ ] Chưa làm: quét lại temp pivot mỗi bar, gom khối xác nhận HH/LL, gom bảng dashboard, bỏ `last_mitigated_idx`.
 
 ### v2.0 (Đã Hoàn Thành — 2026-07-10)
 

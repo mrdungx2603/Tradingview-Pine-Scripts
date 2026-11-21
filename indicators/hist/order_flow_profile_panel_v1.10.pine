@@ -1,0 +1,549 @@
+//@version=6
+// ─── Order Flow & Market Profile Panel ───
+// Tác giả: TV Pine
+// Ngày tạo: 2026-11-14
+// Phiên bản: 1.10
+// Mô tả: Pane riêng (không overlay) hiển thị dữ liệu dạng grid, thứ tự trên
+//        xuống: Time (giờ:phút), Delta (footprint), CVD, VAH, POC, VAL,
+//        TPO Count (trên/dưới POC), RF (Rotation Factor), RSI. Chart chính
+//        chạy M1 (để vào lệnh); mỗi dòng gộp cột thành 1 khung thời gian
+//        (`col_tf`, input timeframe, mặc định 5 phút) độc lập với khung
+//        chart — Delta là tổng delta các nến M1 trong khung, CVD/VAH/POC/
+//        VAL/TPO/RF lấy mẫu giá trị tích lũy-theo-phiên tại cuối khung, RSI
+//        tính thật theo khung đó qua request.security(). Delta/CVD dùng
+//        fallback 3 tầng khi request.footprint() không có dữ liệu cho mã
+//        đang chạy. Mỗi dòng có toggle ẩn/hiện riêng — ẩn sẽ bỏ qua luôn
+//        phần tính toán nặng tương ứng (không chỉ ẩn hiển thị) để tăng
+//        tốc, và grid tự co lại (không chừa dòng trống) khi 1 dòng bị ẩn.
+// Changelog v1.1: Đổi 5 dòng động từ "1 cột = 1 nến M1" sang "1 cột = N phút"
+//        (mặc định 5) để xem được nhiều lịch sử hơn trong giới hạn 500 box
+//        của Pine; thêm RSI thật theo khung N phút qua request.security()
+//        thay vì lấy mẫu RSI(M1).
+// Changelog v1.2: Tăng cỡ chữ (5 dòng động: tiny→small; Day/Open Type:
+//        small→normal) vì chữ quá nhỏ không đọc được; thêm nhãn tên dòng
+//        bám theo cột mới nhất bằng label.new(), không dùng table.*.
+// Changelog v1.3: Sửa lỗi khung col_minutes phút cuối phiên sáng (vd 11:25-
+//        11:30 trên VN30F1!) không hiện cột — đổi sang lưu đúng time của
+//        nến M1 đầu/cuối mỗi khung (bucket_start_time/bucket_last_time),
+//        không suy luận từ thời điểm flush.
+// Changelog v1.4: Đổi col_minutes (input.int) sang col_tf (input.timeframe);
+//        thêm toggle ẩn/hiện hậu tố F/L/A; đổi thứ tự dòng; thêm input cỡ
+//        chữ; thêm 3 dòng VAH/POC/VAL; thêm toggle ẩn/hiện riêng từng dòng
+//        kèm bỏ qua tính toán nặng tương ứng khi ẩn.
+// Changelog v1.5: (1) Sửa lỗi dòng bị ẩn vẫn chừa khoảng trống trên grid —
+//        đổi Y_* từ hằng số cố định sang tính động theo số dòng ĐANG hiện,
+//        dòng ẩn không còn chiếm chỗ, các dòng còn lại tự dồn lên khít
+//        nhau. (2) Bỏ hẳn thuật toán Day Type & Open Type (không chỉ ẩn —
+//        xoá toàn bộ code liên quan: phân loại, band vẽ, toggle, input
+//        ib_bars_cnt, tracking Initial Balance, tails/single-prints chỉ
+//        phục vụ Day Type) vì không còn dùng tới. Panel còn lại 8 dòng:
+//        Delta, CVD, VAH, POC, VAL, TPO Count, RF, RSI. (3) Thêm tooltip
+//        giải thích ticks_per_row ngay trong input.
+// Changelog v1.6: Delta/CVD dùng format.volume mặc định hiện 3 số lẻ khi có
+//        hậu tố K/M/B (vd "-1.234K") và không thể chỉnh số lẻ — viết hàm
+//        f_format_delta() riêng để luôn hiện đúng 2 số lẻ (x.xxK/M/B).
+// Changelog v1.7: Thêm dòng "Time" (giờ:phút của mỗi cột, định dạng HH:mm
+//        theo syminfo.timezone qua str.format_time()) ở vị trí trên cùng,
+//        có toggle ẩn/hiện riêng như các dòng khác. Giảm maxval/default
+//        n_bars_display 62/60 → 55/55 vì giờ có 9 dòng gộp cột (9×55=495
+//        < 500) thay vì 8.
+// Changelog v1.8: Sửa lỗi CVD cột đầu phiên không bằng Delta cột đó — do
+//        Section 6 (cộng dồn `cvd`) chạy TRƯỚC Section 7 (flush cột) trong
+//        cùng 1 bar, nên tại bar "chốt" cột cũ, `cvd` đã bị cộng thêm delta
+//        của bar ĐẦU TIÊN của cột MỚI trước khi kịp lấy mẫu cho cột cũ (lệch
+//        đúng 1 bar). Thêm `bucket_cvd_end` lưu snapshot `cvd` tại cuối mỗi
+//        bar TRƯỚC khi reset cho cột mới (cùng kiểu với `bucket_delta_sum`),
+//        dùng snapshot này để hiện CVD thay vì đọc `cvd` trực tiếp.
+// Changelog v1.9: (1) Chia lại input group theo đúng chức năng: "Footprint &
+//        Delta" (gồm cả show_delta_tag), "Market Profile & Khung Gộp Cột"
+//        (gồm cả col_tf vì ảnh hưởng mọi dòng gộp cột, không riêng hiển
+//        thị), "Hiển Thị (Giao Diện)" chỉ còn n_bars_display + cỡ chữ,
+//        "Hiện/Ẩn Dòng", "RSI". (2) Bỏ hệ thống nhãn tên dòng bằng
+//        label.new() (nổi giữa pane, dễ chồng lấp) — đổi sang
+//        plot(Y_row, display=display.price_scale) neo đúng vào trục giá
+//        bên phải, không hiện trong legend/data window. 2 plot neo scale
+//        (Section 2) cũng đổi display=display.pane để không hiện tên
+//        trong legend (vẫn tham gia tính scale). (3) XÁC NHẬN nguyên nhân
+//        cột lệch khi chart ở chế độ "Volume Candles" (độ rộng nến tỷ lệ
+//        theo volume, không đều theo thời gian thật): box trước đó neo
+//        theo xloc.bar_time (thời gian thật) nên không khớp vị trí render
+//        của nến khi trục ngang không còn tuyến tính theo thời gian. Đổi
+//        toàn bộ box sang xloc.bar_index (mặc định) — luôn khớp đúng vị
+//        trí nến bất kể chart đang ở chế độ hiển thị nào, vì mọi vẽ theo
+//        bar_index tự động theo cùng độ biến dạng trục ngang TradingView
+//        áp dụng cho nến. Thêm bucket_start_bar/bucket_last_bar (int,
+//        theo bar_index) để định vị box; bucket_start_time chỉ còn dùng
+//        để hiện text dòng Time (HH:mm), không còn dùng để định vị.
+// Changelog v1.10: XÁC NHẬN & SỬA lỗi "mất cột" khi col_tf nhỏ (vd 3 phút):
+//        nguyên nhân là có những khung col_tf hoàn toàn KHÔNG có nến M1 nào
+//        (sàn không phát sinh nến do thanh khoản quá mỏng trong vài phút liên
+//        tiếp — không phải lỗi script) — vì is_new_col chỉ đánh dấu được khi
+//        có 1 nến M1 thật rơi vào khung đó, khung trống hoàn toàn sẽ không
+//        bao giờ được tạo cột, khiến dòng Time nhảy cóc (ví dụ 14:15→14:21,
+//        mất khung 14:18). Thêm cơ chế lấp "gap": khi phát hiện khoảng cách
+//        giữa cột vừa chốt và cột mới dài hơn 1 khung col_tf, chèn cột
+//        placeholder (nền xám, Delta="0", các dòng tích lũy giữ nguyên giá
+//        trị cũ vì không đổi) cho mỗi khung bị bỏ trống — dùng
+//        f_push_cell_time() neo theo xloc.bar_time (vì không có bar_index
+//        nào tồn tại cho khung không có nến). Chỉ áp dụng khi col_tf là số
+//        phút thuần (vd "3","5"), không áp dụng cho "1D"/"1W". Chỉ lấp gap
+//        trong CÙNG 1 phiên (`not is_new_session`) — không áp dụng qua đêm/
+//        cuối tuần, tránh tạo hàng nghìn box vô ích cho khoảng nghỉ đó.
+// Phase: 1/2 — file độc lập, không import/export, không sửa market_profile.pine.
+indicator(title="Order Flow & Market Profile Panel", shorttitle="OF Panel v6", overlay=false, max_boxes_count=500, max_labels_count=500, calc_bars_count=3000)
+
+// ============================================================================
+// 1. INPUTS — chia theo nhóm chức năng
+// ============================================================================
+grp_footprint     = "Footprint & Delta"
+ticks_per_row     = input.int(10, "Ticks mỗi dòng (ticks_per_row)", minval=1, group=grp_footprint, tooltip="Độ phân giải giá bên trong request.footprint(): mỗi 'dòng' (row) trong footprint gộp bao nhiêu tick giá tối thiểu (syminfo.mintick) làm 1 mức. Ticks_per_row=10 trên mã có tick=0.1 nghĩa là mỗi dòng rộng 1.0 điểm giá. Panel này CHỈ dùng fp.delta() (tổng cả nến), không dùng dữ liệu theo từng dòng giá của footprint (fp.rows()/POC riêng của footprint...), nên tham số này KHÔNG ảnh hưởng tới số liệu Delta/CVD hiển thị — chỉ cần có giá trị hợp lệ để request.footprint() chạy được.")
+va_pct            = input.float(70.0, "Value Area (%)", minval=50.0, maxval=90.0, step=1.0, group=grp_footprint)
+imb_pct           = input.float(300.0, "Ngưỡng Imbalance (%)", minval=100.0, step=10.0, group=grp_footprint)
+lower_tf_fallback = input.string("1S", "Khung Thời Gian Dự Phòng (Lower TF)", group=grp_footprint)
+show_delta_tag    = input.bool(true, "Hiện hậu tố nguồn Delta (F = Footprint / L = LowerTF / A = Approx)", group=grp_footprint)
+
+grp_mp    = "Market Profile & Khung Gộp Cột"
+col_tf    = input.timeframe("5", "Khung Gộp Cột (áp dụng cho mọi dòng gộp cột)", group=grp_mp)
+grid_rows = input.int(60, "Độ Phân Giải Lưới Giá TPO (grid_rows)", minval=20, maxval=120, group=grp_mp)
+
+grp_rows  = "Hiện/Ẩn Dòng"
+show_time  = input.bool(true, "Time (giờ:phút, dòng trên cùng)", group=grp_rows)
+show_delta = input.bool(true, "Delta", group=grp_rows)
+show_cvd   = input.bool(true, "CVD", group=grp_rows)
+show_vah   = input.bool(true, "VAH", group=grp_rows)
+show_poc   = input.bool(true, "POC", group=grp_rows)
+show_val   = input.bool(true, "VAL", group=grp_rows)
+show_tpo   = input.bool(true, "TPO Count", group=grp_rows)
+show_rf    = input.bool(true, "RF (Rotation Factor)", group=grp_rows)
+show_rsi   = input.bool(true, "RSI", group=grp_rows)
+
+grp_display    = "Hiển Thị (Giao Diện)"
+n_bars_display = input.int(55, "Số Cột Hiển Thị (Rolling Window, tối đa theo giới hạn 500 box)", minval=10, maxval=55, group=grp_display)
+font_choice    = input.string("Small", "Cỡ Chữ Hiển Thị", options=["Tiny", "Small", "Normal", "Large"], group=grp_display)
+
+grp_rsi = "RSI"
+rsi_len = input.int(14, "Chu Kỳ RSI", minval=1, group=grp_rsi)
+rsi_src = input.source(close, "Nguồn RSI", group=grp_rsi)
+
+// ============================================================================
+// 2. CỠ CHỮ, RSI THEO KHUNG col_tf, VỊ TRÍ DÒNG ĐỘNG (dòng ẩn không chiếm chỗ)
+// ============================================================================
+f_cell_size(string choice) =>
+    string res = size.small
+    if choice == "Tiny"
+        res := size.tiny
+    else if choice == "Normal"
+        res := size.normal
+    else if choice == "Large"
+        res := size.large
+    res
+
+string cell_text_size = f_cell_size(font_choice)
+
+// RSI thật theo khung col_tf (không lấy mẫu RSI tính trên M1). request.security()
+// đặt trong `if show_rsi` — HỢP LỆ vì show_rsi là input.bool (simple, cố định suốt
+// vòng chạy script, không đổi theo bar); Pine chỉ cấm điều kiện theo dữ liệu SERIES
+// (vd barstate.isconfirmed) vì có thể làm số lần gọi không nhất quán giữa các bar.
+float rsi_5m = na
+if show_rsi
+    rsi_5m := request.security(syminfo.tickerid, col_tf, ta.rsi(rsi_src, rsi_len))
+
+// Vị trí Y của từng dòng tính ĐỘNG theo thứ tự cố định (Delta trên cùng, RSI dưới
+// cùng), chỉ đếm các dòng ĐANG hiện — dòng bị ẩn không được cấp số thứ tự, nên các
+// dòng còn lại tự dồn lên khít nhau, không chừa khoảng trống trên grid. Đếm từ
+// dưới (RSI) lên để dòng trên cùng luôn có Y lớn nhất.
+int y_cursor = 0
+y_cursor := show_rsi   ? y_cursor + 1 : y_cursor
+int Y_RSI = y_cursor
+y_cursor := show_rf    ? y_cursor + 1 : y_cursor
+int Y_RF = y_cursor
+y_cursor := show_tpo   ? y_cursor + 1 : y_cursor
+int Y_TPO = y_cursor
+y_cursor := show_val   ? y_cursor + 1 : y_cursor
+int Y_VAL = y_cursor
+y_cursor := show_poc   ? y_cursor + 1 : y_cursor
+int Y_POC = y_cursor
+y_cursor := show_vah   ? y_cursor + 1 : y_cursor
+int Y_VAH = y_cursor
+y_cursor := show_cvd   ? y_cursor + 1 : y_cursor
+int Y_CVD = y_cursor
+y_cursor := show_delta ? y_cursor + 1 : y_cursor
+int Y_DELTA = y_cursor
+y_cursor := show_time  ? y_cursor + 1 : y_cursor
+int Y_TIME = y_cursor
+int total_rows_visible = y_cursor
+
+// Neo scale của pane theo đúng dải y 0..total_rows_visible — panel chỉ vẽ box
+// (không có plot thường nào), và theo tài liệu Pine chỉ giá trị plot() mới tham
+// gia tính scale của pane; thiếu neo này pane có rủi ro không tự giãn theo box,
+// hiện ra trống. display=display.pane: chỉ tham gia vẽ/tính scale trong pane,
+// KHÔNG hiện tên trong legend/data window (khác display.none — bị loại khỏi tính
+// scale hoàn toàn, không dùng được cho mục đích neo này).
+plot(0, title="Neo Scale Dưới", display=display.pane, color=color.new(color.white, 100))
+plot(total_rows_visible, title="Neo Scale Trên", display=display.pane, color=color.new(color.white, 100))
+
+// ============================================================================
+// 3. MÀU & UDT OFProfile
+// ============================================================================
+c_price_level = color.rgb(26, 54, 93) // Màu navy trung tính cho VAH/POC/VAL (mức giá, không phải delta nên không phân loại theo dấu)
+
+type OFProfile
+    int    start_bar     = na
+    float  sess_high     = na
+    float  sess_low      = na
+    float  poc           = na
+    float  vah           = na
+    float  val           = na
+    int    rf_score      = 0
+    int    tpo_above_poc = 0
+    int    tpo_below_poc = 0
+
+var OFProfile       prof      = OFProfile.new()
+var array<float>    arr_highs = array.new<float>()
+var array<float>    arr_lows  = array.new<float>()
+
+// Cờ điều kiện "simple" (chỉ phụ thuộc input.bool, cố định suốt vòng chạy script)
+// để bỏ qua các khối tính toán nặng khi mọi dòng tiêu thụ chúng đều bị ẩn.
+bool need_tpo_grid = show_vah or show_poc or show_val or show_tpo
+bool need_rf       = show_rf
+bool need_delta    = show_delta or show_cvd
+
+// ============================================================================
+// 4. RESET PHIÊN MỚI & CỘNG DỒN THEO NẾN (port dòng 203-294 market_profile.pine,
+//    đã bỏ phần Initial Balance/ext_up_first/ext_dn_first — chỉ phục vụ Open Type
+//    đã bị xoá ở v1.5)
+// ============================================================================
+bool is_new_session = timeframe.change("D")
+
+if is_new_session
+    prof := OFProfile.new(
+         start_bar = bar_index,
+         sess_high = high,
+         sess_low  = low,
+         rf_score  = 0
+     )
+    array.clear(arr_highs)
+    array.clear(arr_lows)
+    array.push(arr_highs, high)
+    array.push(arr_lows, low)
+else
+    if not na(prof.start_bar)
+        prof.sess_high := math.max(prof.sess_high, high)
+        prof.sess_low  := math.min(prof.sess_low, low)
+
+        if need_tpo_grid
+            array.push(arr_highs, high)
+            array.push(arr_lows, low)
+
+        if need_rf
+            int bar_rf = 0
+            if high > high[1]
+                bar_rf += 1
+            else if high < high[1]
+                bar_rf -= 1
+
+            if low > low[1]
+                bar_rf += 1
+            else if low < low[1]
+                bar_rf -= 1
+            prof.rf_score += bar_rf
+
+// ============================================================================
+// 5. ĐỘNG CƠ TPO, POC, VALUE AREA, TPO COUNT (port dòng 348-415 market_profile.pine)
+//    Chỉ chạy khi need_tpo_grid=true (bỏ qua hoàn toàn nếu VAH/POC/VAL/TPO Count
+//    đều bị ẩn) — đây là phần tính toán nặng nhất của cả script (O(số nến trong
+//    phiên × grid_rows) mỗi bar). Phần tails/single-prints/Day Type/Open Type của
+//    bản gốc đã bỏ hẳn ở v1.5 vì không còn dòng nào dùng tới.
+// ============================================================================
+if need_tpo_grid and not na(prof.start_bar) and array.size(arr_highs) > 0
+    int num_bars = array.size(arr_highs)
+    float s_range = prof.sess_high - prof.sess_low
+    float step = math.max(syminfo.mintick, s_range / grid_rows)
+
+    array<int> tpo_counts = array.new<int>(grid_rows, 0)
+    int total_tpo_accum = 0
+
+    for b = 0 to num_bars - 1
+        float b_h = array.get(arr_highs, b)
+        float b_l = array.get(arr_lows, b)
+        for r = 0 to grid_rows - 1
+            float row_low  = prof.sess_low + r * step
+            float row_high = row_low + step
+            if b_h >= row_low and b_l <= row_high
+                array.set(tpo_counts, r, array.get(tpo_counts, r) + 1)
+                total_tpo_accum += 1
+
+    // 5.1. Point of Control (POC)
+    int max_tpo = -1
+    int poc_row = 0
+    float mid_row = (grid_rows - 1) / 2.0
+
+    for r = 0 to grid_rows - 1
+        int cnt = array.get(tpo_counts, r)
+        if cnt > max_tpo
+            max_tpo := cnt
+            poc_row := r
+        else if cnt == max_tpo
+            if math.abs(r - mid_row) < math.abs(poc_row - mid_row)
+                poc_row := r
+
+    prof.poc := prof.sess_low + (poc_row + 0.5) * step
+
+    // 5.2. Value Area (VAH & VAL) — va_pct là % thô (0-100, dùng chung với
+    // request.footprint()) nên phải chia 100 tại đây để ra tỷ lệ.
+    int target_va_tpo = math.round(total_tpo_accum * (va_pct / 100.0))
+    int current_va_tpo = array.get(tpo_counts, poc_row)
+    int up_idx = poc_row
+    int dn_idx = poc_row
+
+    while current_va_tpo < target_va_tpo and (up_idx < grid_rows - 1 or dn_idx > 0)
+        int up_tpo = up_idx < grid_rows - 1 ? array.get(tpo_counts, up_idx + 1) : -1
+        int dn_tpo = dn_idx > 0 ? array.get(tpo_counts, dn_idx - 1) : -1
+
+        if up_tpo >= dn_tpo and up_idx < grid_rows - 1
+            up_idx += 1
+            current_va_tpo += up_tpo
+        else if dn_idx > 0
+            dn_idx -= 1
+            current_va_tpo += dn_tpo
+
+    prof.vah := prof.sess_low + (up_idx + 1.0) * step
+    prof.val := prof.sess_low + dn_idx * step
+
+    // 5.3. TPO Count Above/Below POC
+    int above_cnt = 0
+    int below_cnt = 0
+    for r = 0 to grid_rows - 1
+        if r > poc_row
+            above_cnt += array.get(tpo_counts, r)
+        else if r < poc_row
+            below_cnt += array.get(tpo_counts, r)
+
+    prof.tpo_above_poc := above_cnt
+    prof.tpo_below_poc := below_cnt
+
+// ============================================================================
+// 6. ENGINE DELTA/CVD — 3 TẦNG FALLBACK (chỉ chạy khi need_delta=true, tức
+//    Delta hoặc CVD còn hiện; nếu cả 2 bị ẩn thì bỏ qua toàn bộ request.*())
+// ============================================================================
+float  delta        = na
+string delta_source = na
+var float cvd = 0.0
+
+if need_delta
+    // Tầng 1: request.footprint() — chính xác nhất, cần TradingView Premium/Ultimate
+    // và sàn hỗ trợ dữ liệu tick-level.
+    footprint fp = request.footprint(ticks_per_row, va_pct, imb_pct)
+
+    // Tầng 2: request.security_lower_tf() — xấp xỉ delta từ nến con khung nhỏ hơn.
+    array<float> ltf_close = request.security_lower_tf(syminfo.tickerid, lower_tf_fallback, close, ignore_invalid_timeframe=true)
+    array<float> ltf_open  = request.security_lower_tf(syminfo.tickerid, lower_tf_fallback, open, ignore_invalid_timeframe=true)
+    array<float> ltf_vol   = request.security_lower_tf(syminfo.tickerid, lower_tf_fallback, volume, ignore_invalid_timeframe=true)
+
+    // not na(fp.delta()) nữa — nếu Tầng 1 có fp nhưng fp.delta() lại na (bar không có
+    // giao dịch), phải tụt xuống Tầng 2/3 thay vì để delta/CVD bị nhiễm na vĩnh viễn.
+    if not na(fp) and not na(fp.delta())
+        delta        := fp.delta()
+        delta_source := "Footprint"
+    else if array.size(ltf_close) > 0
+        float ltf_delta = 0.0
+        for i = 0 to array.size(ltf_close) - 1
+            float c = array.get(ltf_close, i)
+            float o = array.get(ltf_open, i)
+            float v = array.get(ltf_vol, i)
+            if c > o
+                ltf_delta += v
+            else if c < o
+                ltf_delta -= v
+        delta        := ltf_delta
+        delta_source := "LowerTF"
+    else
+        // Tầng 3: xấp xỉ thuần OHLCV kiểu Chaikin — luôn có dữ liệu, không cần request thêm.
+        float rng = high - low
+        delta        := rng > 0 ? volume * ((close - low) - (high - close)) / rng : 0.0
+        delta_source := "OHLCV-Approx"
+
+    // CVD — cộng dồn delta theo nến, reset về 0 khi phiên mới bắt đầu. Chỉ cộng dồn
+    // khi nến đã đóng (isconfirmed) để tránh CVD trôi theo các giá trị delta tạm
+    // (repaint) của nến đang chạy.
+    if barstate.isconfirmed
+        cvd := is_new_session ? nz(delta) : cvd + nz(delta)
+
+// ============================================================================
+// 7. RENDERER BOX-GRID — GỘP CỘT col_tf & ROLLING WINDOW
+// ============================================================================
+// format.volume mặc định hiện 3 số lẻ khi có hậu tố K/M/B (vd "-1.234K"), không
+// có cách chỉnh số lẻ. Viết hàm riêng để Delta/CVD luôn đúng 2 số lẻ (x.xxK).
+f_format_delta(float val) =>
+    string res  = "0"
+    float  av   = na(val) ? 0.0 : math.abs(val)
+    string sign = (not na(val) and val < 0) ? "-" : ""
+    if na(val)
+        res := "0"
+    else if av >= 1000000000
+        res := sign + str.tostring(av / 1000000000, "#.##") + "B"
+    else if av >= 1000000
+        res := sign + str.tostring(av / 1000000, "#.##") + "M"
+    else if av >= 1000
+        res := sign + str.tostring(av / 1000, "#.##") + "K"
+    else
+        res := sign + str.tostring(av, "#")
+    res
+
+f_push_cell(array<box> col_boxes, float y_top, float y_bottom, string txt, color bg, int max_cols, int left_bar, int right_bar) =>
+    // Neo theo xloc.bar_index (mặc định) — KHÔNG dùng xloc.bar_time, vì chart có
+    // thể ở chế độ "Volume Candles" (độ rộng nến tỷ lệ theo volume, trục ngang
+    // không còn tuyến tính theo thời gian thật). Mọi đối tượng vẽ theo bar_index
+    // luôn tự động khớp đúng vị trí render của nến bất kể TradingView đang biến
+    // dạng trục ngang theo cách nào; neo theo thời gian thật sẽ bị lệch trong
+    // trường hợp đó. right_bar + 1 để box phủ hết độ rộng của nến cuối khung.
+    box b = box.new(left_bar, y_top, right_bar + 1, y_bottom, border_color=bg, bgcolor=bg, text=txt, text_color=color.white, text_size=cell_text_size)
+    array.push(col_boxes, b)
+    if array.size(col_boxes) > max_cols
+        box.delete(array.shift(col_boxes))
+
+f_push_cell_time(array<box> col_boxes, float y_top, float y_bottom, string txt, color bg, int max_cols, int left_time, int right_time) =>
+    // Dùng riêng cho cột "gap" (khung col_tf hoàn toàn không có nến M1 nào —
+    // sàn không phát sinh nến do thanh khoản quá mỏng). Không tồn tại bar_index
+    // nào đại diện cho khung này nên PHẢI neo theo thời gian thật (xloc.bar_time)
+    // — khác với f_push_cell() ở trên (dùng cho cột có dữ liệu thật, luôn neo
+    // theo bar_index để khớp đúng Volume Candles).
+    box b = box.new(left_time, y_top, right_time, y_bottom, xloc=xloc.bar_time, border_color=bg, bgcolor=bg, text=txt, text_color=color.white, text_size=cell_text_size)
+    array.push(col_boxes, b)
+    if array.size(col_boxes) > max_cols
+        box.delete(array.shift(col_boxes))
+
+var array<box> col_time  = array.new<box>()
+var array<box> col_delta = array.new<box>()
+var array<box> col_cvd   = array.new<box>()
+var array<box> col_vah   = array.new<box>()
+var array<box> col_poc   = array.new<box>()
+var array<box> col_val   = array.new<box>()
+var array<box> col_tpo   = array.new<box>()
+var array<box> col_rf    = array.new<box>()
+var array<box> col_rsi   = array.new<box>()
+
+// Gộp cột: Delta = tổng delta các nến M1 trong khung col_tf vừa đóng; CVD/VAH/
+// POC/VAL/TPO Count/RF lấy mẫu giá trị tích lũy-theo-phiên tại cuối khung (không
+// cộng dồn lại — bản chất các chỉ số này đã là "developing" theo toàn phiên);
+// RSI lấy từ rsi_5m (request.security() đã tính thật theo khung col_tf).
+bool is_new_col = timeframe.change(col_tf)
+
+// Phát hiện col_tf có phải số phút thuần không (vd "3","5","15") để biết có nên
+// chạy cơ chế lấp "gap" (khung hoàn toàn không có nến M1) — không áp dụng cho
+// "1D"/"1W" (str.tonumber trả na với các chuỗi này).
+float col_tf_num    = str.tonumber(col_tf)
+bool  col_tf_is_min = not na(col_tf_num)
+int   col_tf_ms     = col_tf_is_min ? int(col_tf_num * 60000) : na
+
+var float bucket_delta_sum  = 0.0
+var float bucket_cvd_end    = 0.0
+var bool  bucket_has_data   = false
+var int   bucket_start_time = na // chỉ dùng để hiện text dòng Time (HH:mm)
+var int   bucket_start_bar  = na // dùng để định vị box theo bar_index
+var int   bucket_last_bar   = na
+
+if barstate.isconfirmed
+    if is_new_col
+        // Màu dương=forest green, âm=burgundy, trung tính=gray (đồng bộ bảng màu market_profile.pine).
+        color  c_delta    = bucket_delta_sum > 0 ? color.rgb(27, 77, 62) : bucket_delta_sum < 0 ? color.rgb(139, 0, 0) : color.gray
+        color  c_cvd      = bucket_cvd_end > 0 ? color.rgb(27, 77, 62) : bucket_cvd_end < 0 ? color.rgb(139, 0, 0) : color.gray
+        color  c_rf       = prof.rf_score > 0 ? color.rgb(27, 77, 62) : prof.rf_score < 0 ? color.rgb(139, 0, 0) : color.gray
+        color  c_tpo      = prof.tpo_below_poc > prof.tpo_above_poc ? color.rgb(27, 77, 62) : prof.tpo_above_poc > prof.tpo_below_poc ? color.rgb(139, 0, 0) : color.gray
+        color  c_rsi      = na(rsi_5m) ? color.gray : rsi_5m > 70 ? color.rgb(139, 0, 0) : rsi_5m < 30 ? color.rgb(27, 77, 62) : color.rgb(26, 54, 93)
+        string delta_tag  = delta_source == "Footprint" ? "F" : delta_source == "LowerTF" ? "L" : "A"
+        string delta_txt  = f_format_delta(bucket_delta_sum) + (show_delta_tag ? " " + delta_tag : "")
+        string rsi_txt    = na(rsi_5m) ? "—" : str.tostring(rsi_5m, "#.#")
+        string time_txt   = na(bucket_start_time) ? "—" : str.format_time(bucket_start_time, "HH:mm", syminfo.timezone)
+        string cvd_txt    = f_format_delta(bucket_cvd_end)
+        string vah_txt    = str.tostring(prof.vah, format.mintick)
+        string poc_txt    = str.tostring(prof.poc, format.mintick)
+        string val_txt    = str.tostring(prof.val, format.mintick)
+        string tpo_txt    = str.tostring(prof.tpo_above_poc) + "/" + str.tostring(prof.tpo_below_poc)
+        string rf_txt     = str.tostring(prof.rf_score)
+
+        if bucket_has_data
+            if show_time
+                f_push_cell(col_time, Y_TIME, Y_TIME - 1, time_txt, c_price_level, n_bars_display, bucket_start_bar, bucket_last_bar)
+            if show_delta
+                f_push_cell(col_delta, Y_DELTA, Y_DELTA - 1, delta_txt, c_delta, n_bars_display, bucket_start_bar, bucket_last_bar)
+            if show_cvd
+                f_push_cell(col_cvd, Y_CVD, Y_CVD - 1, cvd_txt, c_cvd, n_bars_display, bucket_start_bar, bucket_last_bar)
+            if show_vah
+                f_push_cell(col_vah, Y_VAH, Y_VAH - 1, vah_txt, c_price_level, n_bars_display, bucket_start_bar, bucket_last_bar)
+            if show_poc
+                f_push_cell(col_poc, Y_POC, Y_POC - 1, poc_txt, c_price_level, n_bars_display, bucket_start_bar, bucket_last_bar)
+            if show_val
+                f_push_cell(col_val, Y_VAL, Y_VAL - 1, val_txt, c_price_level, n_bars_display, bucket_start_bar, bucket_last_bar)
+            if show_tpo
+                f_push_cell(col_tpo, Y_TPO, Y_TPO - 1, tpo_txt, c_tpo, n_bars_display, bucket_start_bar, bucket_last_bar)
+            if show_rf
+                f_push_cell(col_rf, Y_RF, Y_RF - 1, rf_txt, c_rf, n_bars_display, bucket_start_bar, bucket_last_bar)
+            if show_rsi
+                f_push_cell(col_rsi, Y_RSI, Y_RSI - 1, rsi_txt, c_rsi, n_bars_display, bucket_start_bar, bucket_last_bar)
+
+        // Lấp "gap" — khung col_tf trước đó hoàn toàn không có nến M1 (thanh
+        // khoản quá mỏng, không phải lỗi script): chèn 1 cột placeholder (nền
+        // xám, Delta="0", các dòng tích lũy/giá giữ nguyên vì không đổi) cho
+        // MỖI khung col_tf bị bỏ trống giữa cột vừa chốt và cột mới, để dòng
+        // Time không bị nhảy cóc. Neo theo thời gian thật vì không tồn tại
+        // bar_index nào cho các khung này. `not is_new_session` chặn áp dụng
+        // cơ chế này qua đêm/cuối tuần (gap rất lớn, hàng trăm-nghìn khung) —
+        // chỉ lấp gap trong CÙNG 1 phiên (đủ cho cả giờ nghỉ trưa 11:30-13:00),
+        // tránh tạo/xoá hàng nghìn box vô ích mỗi khi qua phiên mới.
+        if col_tf_is_min and bucket_has_data and not na(bucket_start_time) and not is_new_session
+            int   bucket_end_expected = bucket_start_time + col_tf_ms
+            int   gap_ms              = time - bucket_end_expected
+            int   gap_periods         = gap_ms >= col_tf_ms ? int(gap_ms / col_tf_ms) : 0
+            color c_gap               = color.gray
+
+            if gap_periods > 0
+                for g = 0 to gap_periods - 1
+                    int    ph_start    = bucket_end_expected + g * col_tf_ms
+                    int    ph_end      = ph_start + col_tf_ms
+                    string ph_time_txt = str.format_time(ph_start, "HH:mm", syminfo.timezone)
+
+                    if show_time
+                        f_push_cell_time(col_time, Y_TIME, Y_TIME - 1, ph_time_txt, c_gap, n_bars_display, ph_start, ph_end)
+                    if show_delta
+                        f_push_cell_time(col_delta, Y_DELTA, Y_DELTA - 1, "0", c_gap, n_bars_display, ph_start, ph_end)
+                    if show_cvd
+                        f_push_cell_time(col_cvd, Y_CVD, Y_CVD - 1, cvd_txt, c_gap, n_bars_display, ph_start, ph_end)
+                    if show_vah
+                        f_push_cell_time(col_vah, Y_VAH, Y_VAH - 1, vah_txt, c_gap, n_bars_display, ph_start, ph_end)
+                    if show_poc
+                        f_push_cell_time(col_poc, Y_POC, Y_POC - 1, poc_txt, c_gap, n_bars_display, ph_start, ph_end)
+                    if show_val
+                        f_push_cell_time(col_val, Y_VAL, Y_VAL - 1, val_txt, c_gap, n_bars_display, ph_start, ph_end)
+                    if show_tpo
+                        f_push_cell_time(col_tpo, Y_TPO, Y_TPO - 1, tpo_txt, c_gap, n_bars_display, ph_start, ph_end)
+                    if show_rf
+                        f_push_cell_time(col_rf, Y_RF, Y_RF - 1, rf_txt, c_gap, n_bars_display, ph_start, ph_end)
+                    if show_rsi
+                        f_push_cell_time(col_rsi, Y_RSI, Y_RSI - 1, rsi_txt, c_gap, n_bars_display, ph_start, ph_end)
+
+        bucket_delta_sum  := nz(delta)
+        bucket_cvd_end    := cvd
+        bucket_start_time := time
+        bucket_start_bar  := bar_index
+        bucket_last_bar   := bar_index
+        bucket_has_data   := true
+    else
+        bucket_delta_sum += nz(delta)
+        bucket_cvd_end   := cvd
+        bucket_last_bar  := bar_index
+
+// ============================================================================
+// 8. TÊN DÒNG — neo vào trục giá bên phải (display.price_scale), không hiện
+//    trong legend/data window/pane. Thay cho label.new() nổi giữa khu vực vẽ
+//    (dễ chồng lấp box, trôi lệch) dùng ở các bản trước.
+// ============================================================================
+plot(show_time  ? Y_TIME  : na, title="Time",      display=display.price_scale, color=color.gray)
+plot(show_delta ? Y_DELTA : na, title="Delta",     display=display.price_scale, color=color.gray)
+plot(show_cvd   ? Y_CVD   : na, title="CVD",       display=display.price_scale, color=color.gray)
+plot(show_vah   ? Y_VAH   : na, title="VAH",       display=display.price_scale, color=color.gray)
+plot(show_poc   ? Y_POC   : na, title="POC",       display=display.price_scale, color=color.gray)
+plot(show_val   ? Y_VAL   : na, title="VAL",       display=display.price_scale, color=color.gray)
+plot(show_tpo   ? Y_TPO   : na, title="TPO Count", display=display.price_scale, color=color.gray)
+plot(show_rf    ? Y_RF    : na, title="RF",        display=display.price_scale, color=color.gray)
+plot(show_rsi   ? Y_RSI   : na, title="RSI",       display=display.price_scale, color=color.gray)
