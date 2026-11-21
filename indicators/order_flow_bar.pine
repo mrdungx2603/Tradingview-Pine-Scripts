@@ -5,6 +5,8 @@
 //
 // Phiên bản: 1.0
 
+import mrdungx2603/smc_core/1 as smc
+
 indicator(
     title="Order Flow Tổng",
     shorttitle="OF_BAR",
@@ -183,6 +185,15 @@ type RowProfile
 
 var RowProfile sess_profile = RowProfile.new(array.new<int>(), array.new<float>(), array.new<float>())
 
+// ===== SMC STATE MACHINE (Last HL) — RESEED MỖI PHIÊN (TASK 6) =====
+// Dùng library smc_core — UDT SwingState + pure state machine đã có sẵn (xem
+// libraries/smc_core.pine và indicators/smc_market_structure_mtf.pine / strategies/smc_strategy.pine
+// để biết cách gọi đúng). Khác bản gốc indicators/smc_market_structure.pine (seed CHỈ 1 LẦN
+// xuyên suốt lịch sử dù seed_mode là gì): ở đây state machine được f_init_state() lại và seed
+// lại mỗi khi sang phiên mới (is_new_session, tính bên dưới), để biên Last HL luôn thuộc cấu
+// trúc swing của phiên hiện tại, không mang theo trạng thái của phiên trước.
+var smc.SwingState of_smc_state = smc.f_init_state()
+
 // Gộp 1 cặp row_ids/buys/sells bất kỳ vào `profile` (mutate trực tiếp mảng bên trong
 // profile — Pine truyền UDT theo tham chiếu). Logic gộp giống f_bucket_bar_rows ở trên
 // nhưng tổng quát cho input bất kỳ (không gắn cứng với footprint/bar hiện tại) để Task 7
@@ -208,6 +219,15 @@ f_merge_into_profile(RowProfile profile, array<int> row_ids, array<float> buys, 
 // thái theo dõi nội bộ. Hành động reset/gộp mới bị gate theo barstate.isconfirmed.
 bool is_new_session = timeframe.change("D")
 
+// ta.pivothigh/ta.pivotlow cũng PHẢI gọi vô điều kiện mỗi bar (cùng lý do như trên) — nếu
+// gọi có điều kiện chỉ trong nhánh reseed (1 bar/phiên), hàm sẽ mất liên tục theo dõi lịch sử
+// nội bộ và KHÔNG BAO GIỜ xác nhận được pivot (đã kiểm chứng thực nghiệm qua
+// mcp-tv-run-pine-indicator trên bản inline test: DEBUG_hl_bar luôn = -1 suốt toàn bộ cửa sổ
+// dữ liệu khi gọi ta.pivothigh/pivotlow bên trong `if is_new_session`). Tính sẵn ở đây, chỉ
+// DÙNG giá trị bên trong nhánh reseed (Task 6).
+float smc_ph = ta.pivothigh(pivot_length, pivot_length)
+float smc_pl = ta.pivotlow(pivot_length, pivot_length)
+
 // ===== DEBUG TẠM (Task 3) — sẽ xoá ở Task 11 =====
 [dbg_rows, dbg_buy, dbg_sell] = f_bucket_bar_rows(fp, price_step)
 
@@ -226,6 +246,20 @@ if barstate.isconfirmed
         array.clear(sess_profile.sells)
     f_merge_into_profile(sess_profile, dbg_rows, dbg_buy, dbg_sell)
 
+    // SMC state machine (Last HL — TASK 6): nếu sang phiên mới thì reset về trạng thái
+    // trống rồi seed lại ngay theo seed_mode (đúng pattern f_seed_pivot/f_seed_session của
+    // smc_market_structure_mtf.pine/smc_strategy.pine); nếu KHÔNG phải bar reseed, chạy tiếp
+    // state machine qua f_process_bar. of_smc_state.hl_bar/hh_bar/... có thể còn na cho tới
+    // khi seed xong trong phiên hiện tại — nơi dùng (Task sau) phải tự kiểm tra na.
+    if is_new_session
+        of_smc_state := smc.f_init_state()
+        if seed_mode == "Pivot Seed"
+            of_smc_state := smc.f_seed_pivot(of_smc_state, smc_ph, smc_pl, pivot_length)
+        else if seed_mode == "Session Seed"
+            of_smc_state := smc.f_seed_session(of_smc_state)
+    else
+        of_smc_state := smc.f_process_bar(of_smc_state)
+
 // ===== PLACEHOLDER PLOT =====
 plot(na)
 plot(has_footprint_data ? 1 : 0, title="DEBUG_has_fp")
@@ -238,3 +272,5 @@ plot(array.sum(sess_profile.buys) + array.sum(sess_profile.sells), title="DEBUG_
 // trên toàn bộ các bar thay vì crash ngay từ bar đầu (lệch nhẹ so với literal brief Step 2,
 // ghi rõ trong task-3-report.md).
 plot(not na(fp) and not na(fp.delta()) ? fp.delta() : na, title="DEBUG_fp_delta")
+plot(of_smc_state.trend, title="DEBUG_smc_trend")
+plot(na(of_smc_state.hl_bar) ? -1 : of_smc_state.hl_bar, title="DEBUG_hl_bar")
