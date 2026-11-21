@@ -151,13 +151,41 @@ f_bucket_bar_rows(footprint fp_, float step) =>
                     array.push(sells, row_sell)
     [row_ids, buys, sells]
 
+// ===== CIRCULAR BUFFER LƯU BUCKET THEO BAR (TASK 4) =====
+// Lưu lại kết quả bucket (row_ids/buys/sells) của từng bar đã đóng, giữ tối đa
+// max_lookback_bars phần tử gần nhất. Task 7 dùng lại of_buffer để dựng lại profile.
+type BarRowVol
+    int          bar_idx
+    array<int>   row_ids
+    array<float> buys
+    array<float> sells
+
+var array<BarRowVol> of_buffer = array.new<BarRowVol>()
+
+// Đẩy 1 phần tử mới vào buffer (push), loại phần tử cũ nhất (shift) nếu vượt cap.
+// Không tự đọc barstate.isconfirmed ở đây — nơi gọi (bên dưới) chịu trách nhiệm chỉ
+// gọi hàm này khi nến đã đóng hoàn toàn, để không ghi đè/lặp dữ liệu nhiều lần trong
+// 1 nến đang hình thành (gây sai lệch khi dựng lại profile ở Task 7).
+f_push_bar_buffer(array<BarRowVol> buf, int bar_idx, array<int> row_ids, array<float> buys, array<float> sells, int cap) =>
+    BarRowVol item = BarRowVol.new(bar_idx, row_ids, buys, sells)
+    array.push(buf, item)
+    if array.size(buf) > cap
+        array.shift(buf)
+
 // ===== DEBUG TẠM (Task 3) — sẽ xoá ở Task 11 =====
 [dbg_rows, dbg_buy, dbg_sell] = f_bucket_bar_rows(fp, price_step)
+
+// Chỉ push vào buffer khi nến đã xác nhận đóng (barstate.isconfirmed == true).
+// BẮT BUỘC: push khi nến chưa đóng sẽ ghi đè/lặp dữ liệu nhiều lần trong 1 nến đang
+// hình thành -> sai lệch khi dựng lại profile ở Task 7 (repaint).
+if barstate.isconfirmed
+    f_push_bar_buffer(of_buffer, bar_index, dbg_rows, dbg_buy, dbg_sell, max_lookback_bars)
 
 // ===== PLACEHOLDER PLOT =====
 plot(na)
 plot(has_footprint_data ? 1 : 0, title="DEBUG_has_fp")
 plot(array.sum(dbg_buy) - array.sum(dbg_sell), title="DEBUG_bucket_delta")
+plot(array.size(of_buffer), title="DEBUG_buffer_size")
 // Lưu ý: fp.delta() cũng raise runtime error "cannot be na" nếu gọi trực tiếp khi fp còn na
 // (vd bar 0 / chưa có dữ liệu) — giống fp.rows(). Thêm guard not na(fp) để script chạy được
 // trên toàn bộ các bar thay vì crash ngay từ bar đầu (lệch nhẹ so với literal brief Step 2,
