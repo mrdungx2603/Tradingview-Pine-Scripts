@@ -1,0 +1,9 @@
+{
+  "name": "tv-research-fetch",
+  "private": true,
+  "type": "module",
+  "description": "Tải nến lịch sử TradingView cho research. Không publish.",
+  "dependencies": {
+    "@mathieuc/tradingview": "4.1.2"
+  }
+}
