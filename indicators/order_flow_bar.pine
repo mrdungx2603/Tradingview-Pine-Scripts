@@ -246,13 +246,20 @@ if barstate.isconfirmed
         array.clear(sess_profile.sells)
     f_merge_into_profile(sess_profile, dbg_rows, dbg_buy, dbg_sell)
 
-    // SMC state machine (Last HL — TASK 6): nếu sang phiên mới thì reset về trạng thái
-    // trống rồi seed lại ngay theo seed_mode (đúng pattern f_seed_pivot/f_seed_session của
-    // smc_market_structure_mtf.pine/smc_strategy.pine); nếu KHÔNG phải bar reseed, chạy tiếp
-    // state machine qua f_process_bar. of_smc_state.hl_bar/hh_bar/... có thể còn na cho tới
-    // khi seed xong trong phiên hiện tại — nơi dùng (Task sau) phải tự kiểm tra na.
+    // SMC state machine (Last HL — TASK 6, sửa sau review): nếu sang phiên mới thì reset về
+    // trạng thái trống (seeded=false). Sau đó, RETRY seed MỖI BAR cho tới khi seed xong (đúng
+    // pattern smc_market_structure.pine/smc_strategy.pine — field seeded dùng để retry, không
+    // phải seed-1-lần-rồi-bỏ). Bản đầu Task 6 chỉ seed đúng 1 lần tại bar reseed (is_new_session)
+    // khiến Pivot Seed gần như không bao giờ thành công (cần ph+pl cùng confirm đúng bar đó) —
+    // review đo được 0/19 phiên. Sửa: tách reset và seed thành 2 bước độc lập, seed lặp lại mỗi
+    // bar (dùng smc_ph/smc_pl đã tính vô điều kiện mỗi bar ở trên) cho tới khi
+    // of_smc_state.seeded == true, sau đó mới chuyển sang f_process_bar. of_smc_state.hl_bar/
+    // hh_bar/... có thể còn na trong vài bar đầu phiên (trước khi seed xong) — nơi dùng (Task
+    // sau) phải tự kiểm tra na.
     if is_new_session
         of_smc_state := smc.f_init_state()
+
+    if not of_smc_state.seeded
         if seed_mode == "Pivot Seed"
             of_smc_state := smc.f_seed_pivot(of_smc_state, smc_ph, smc_pl, pivot_length)
         else if seed_mode == "Session Seed"
