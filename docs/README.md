@@ -27,15 +27,23 @@
 | Tên | File Script | Version | Tài Liệu |
 |---|---|---|---|
 | SMC Core Library | [libraries/smc_core.pine](../libraries/smc_core.pine) | 1.0 | [smc-core.md](smc-core.md) |
+| Market Profile Core Library | [libraries/market_profile_core.pine](../libraries/market_profile_core.pine) | 1.1 | [market-profile-core.md](market-profile-core.md) |
 
 ## Không Tài Liệu Hóa (Có Chủ Đích)
 
 | File | Lý Do |
 |---|---|
 | `indicators/temp/tmp.pine` | Code tham khảo bên thứ 3 (LuxAlgo "Imbalance Detector", license CC BY-NC-SA 4.0), nằm trong `temp/` — không phải sản phẩm của dự án. |
-| `indicators/hist/*.pine`, `strategies/hist/*.pine` | Bản backup phiên bản cũ theo quy tắc versioning — tài liệu con chỉ mô tả bản hiện hành (tham chiếu file mới nhất), không viết riêng cho từng bản backup. |
+| `indicators/hist/*.pine`, `strategies/hist/*.pine`, `libraries/hist/*.pine` | Bản backup phiên bản cũ theo quy tắc versioning — tài liệu con chỉ mô tả bản hiện hành (tham chiếu file mới nhất), không viết riêng cho từng bản backup. |
+
+## Báo Cáo Backtest & Thống Kê
+
+| Báo Cáo | Mô Tả | Script Backtest |
+|---|---|---|
+| [reports/va-rule-vn30f1m.md](reports/va-rule-vn30f1m.md) | Tỉ lệ thành công thực tế của 80% VA Rule (ý tưởng #2) trên dữ liệu thật VN30F1M 1m + khuyến nghị tham số cải tiến | [backtests/va_rule/va_rule_backtest.py](../backtests/va_rule/va_rule_backtest.py) |
 
 ## Tài Liệu Tham Khảo Khác
 
 - [ghi-chu-pine-script.md](ghi-chu-pine-script.md) — Ghi chú nhanh hàm/cú pháp Pine Script v6 thường dùng (không phải tài liệu indicator).
+- [market-profile-strategy-ideas.md](market-profile-strategy-ideas.md) — Brainstorm 31 ý tưởng strategy dựa trên Market Profile + combo SMC/VPA (ý tưởng #2 đã có backtest thật, xem bảng "Báo Cáo Backtest & Thống Kê" trên).
 - `docs/superpowers/` — Plan/spec nội bộ khi dùng skill brainstorming/writing-plans, không thuộc phạm vi tài liệu indicator này.

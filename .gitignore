@@ -12,6 +12,12 @@ desktop.ini
 
 # Claude
 .claude/plans/
+.claude/worktrees/
+
+# Python (python/ dashboard app)
+python/.venv/
+python/**/__pycache__/
+*.pyc
 
 # Backup
 *.bak

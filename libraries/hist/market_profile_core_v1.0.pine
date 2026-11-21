@@ -1,0 +1,440 @@
+//@version=6
+// ─── Market Profile Core Library — TPO/POC/VA Engine + Day/Open Type + Patterns ───
+// Tác giả: TV Pine
+// Ngày tạo: 2026-11-15
+// Phiên bản: 1.0
+// Mô tả: Library chứa UDT SessionProfile (state thuần, không có object vẽ) và các pure
+//        function cho động cơ Market Profile/TPO: lưới TPO incremental, Point of Control,
+//        Value Area, TPO Count, Rotation Factor theo TPO Period, phân loại Day Type/Open
+//        Type, 80% Value Area Rule, phát hiện Tails/Single Prints/Ledge/Late Spike.
+// Nguồn gốc: Tách ra từ indicators/market_profile.pine v2.3 (động cơ TPO incremental v2.0)
+//        để dùng chung cho market_profile.pine, order_flow_profile_panel.pine và các
+//        strategy Market Profile trong tương lai — tránh lặp lại ~400 dòng tính toán mỗi
+//        file (order_flow_profile_panel.pine trước đó tự viết lại 1 bản TPO/POC/VA kém hiệu
+//        năng hơn, kiểu O(số nến trong phiên × grid_rows) mỗi bar).
+//        Tất cả hàm đều pure (không var/varip giữ trạng thái xuyên bar bên trong hàm, không
+//        request.*, không plot/line/box/label) — caller tự giữ toàn bộ state (array, UDT)
+//        và truyền vào qua tham số, cùng quy ước với libraries/smc_core.pine.
+library(title="market_profile_core", overlay=false)
+
+// ╔══════════════════════════════════════════╗
+// ║   UDT — SESSION PROFILE (STATE THUẦN)    ║
+// ╚══════════════════════════════════════════╝
+// Chỉ chứa số/bool/string — không có line/box/label. Phần vẽ do từng indicator tự quản lý
+// riêng (nhu cầu hiển thị khác nhau giữa market_profile.pine và order_flow_profile_panel.pine).
+// Các cờ chống lặp cảnh báo (alerted_*) KHÔNG đưa vào đây — đó là state riêng của từng
+// indicator, không thuộc về "động cơ" chung.
+export type SessionProfile
+    int    start_bar       = na
+    float  start_time      = na
+    float  open_price      = na
+    float  close_price     = na
+    float  sess_high       = na
+    float  sess_low        = na
+
+    // Khối Dữ liệu Phiên trước & Testing Status
+    float  prev_vah        = na
+    float  prev_val        = na
+    float  prev_poc        = na
+    int    prev_end_bar    = na
+    bool   p_vah_tested    = false
+    bool   p_val_tested    = false
+    bool   p_poc_tested    = false
+
+    // Khối Initial Balance (IB)
+    float  ib_high         = na
+    float  ib_low          = na
+    bool   ib_locked       = false
+    int    periods_in_sess = 0     // Số TPO Period đã trôi qua trong phiên
+    bool   ext_up_first    = false
+    bool   ext_dn_first    = false
+
+    // Khối theo dõi TPO Period hiện tại/trước đó (Rotation Factor & Late Spike)
+    int    last_period_id   = na
+    float  cur_period_high  = na
+    float  cur_period_low   = na
+    float  prev_period_high = na
+    float  prev_period_low  = na
+
+    // Khối Value Area & Point of Control
+    float  poc        = na
+    float  vah        = na
+    float  val        = na
+    float  tick_step  = na
+
+    // Khối Rotation Factor & TPO Count
+    int    rf_score       = 0
+    int    tpo_above_poc  = 0
+    int    tpo_below_poc  = 0
+    int    total_tpo      = 0
+
+    // Khối Phân loại & Mô hình đặc biệt
+    string day_type       = "Đang hình thành..."
+    string open_type      = "Đang xác định..."
+    float  buying_tail_h  = na
+    float  selling_tail_l = na
+    bool   has_poor_high  = false
+    bool   has_poor_low   = false
+    string rule_80_status = "Đang quan sát..."
+    bool   has_sp_mid     = false
+    float  sp_mid_top     = na
+    float  sp_mid_bot     = na
+    float  ledge_price    = na
+    bool   has_late_spike = false
+    float  spike_base     = na
+
+// ╔══════════════════════════════════════════╗
+// ║   1. ĐỘNG CƠ TPO INCREMENTAL              ║
+// ╚══════════════════════════════════════════╝
+
+// Cộng TPO của 1 nến vào lưới counts (bước row_step), chỉ cộng nếu hàng đó CHƯA tính cho
+// period_id hiện tại (last_period) — tránh 1 Period bị đếm nhiều lần qua nhiều nến chart.
+// Dùng chung cho cả lưới mịn (POC/VAH/VAL) và lưới thô (TPO Count/Tail/Poor/SP/Ledge);
+// track_total chỉ nên true ở lưới mịn để p.total_tpo (dùng tính VA%) không bị cộng trùng.
+// Trả về base_row mới — hàm không tự gán lại được biến ngoài scope của caller.
+export f_add_bar_tpo(array<int> counts, array<int> last_period, SessionProfile p, int cur_base_row, int period_id, float b_high, float b_low, float row_step, bool track_total) =>
+    int row_lo = int(math.floor(b_low / row_step))
+    int row_hi = int(math.floor(b_high / row_step))
+    int new_base_row = cur_base_row
+
+    if array.size(counts) == 0
+        new_base_row := row_lo
+        for k = 1 to (row_hi - row_lo + 1)
+            array.push(counts, 0)
+            array.push(last_period, -1)
+    else
+        int add_lo = new_base_row - row_lo
+        if add_lo >= 1
+            for k = 1 to add_lo
+                array.unshift(counts, 0)
+                array.unshift(last_period, -1)
+            new_base_row := row_lo
+        int top_row = new_base_row + array.size(counts) - 1
+        int add_hi = row_hi - top_row
+        if add_hi >= 1
+            for k = 1 to add_hi
+                array.push(counts, 0)
+                array.push(last_period, -1)
+
+    for idx = row_lo to row_hi
+        int pos = idx - new_base_row
+        if array.get(last_period, pos) != period_id
+            array.set(counts, pos, array.get(counts, pos) + 1)
+            array.set(last_period, pos, period_id)
+            if track_total
+                p.total_tpo += 1
+
+    new_base_row
+
+// Cập nhật periods_in_sess + Rotation Factor khi 1 Period đóng (không phải mỗi nến chart);
+// theo dõi high/low gộp của Period hiện tại/trước (dùng cho Late Spike). Trả về true nếu
+// bar này mở ra 1 Period mới.
+export f_process_bar_period(SessionProfile p, int this_period_id, float b_high, float b_low) =>
+    bool is_new_period = na(p.last_period_id) or this_period_id != p.last_period_id
+
+    if is_new_period
+        if not na(p.last_period_id)
+            int period_rf = 0
+            if not na(p.prev_period_high)
+                period_rf += p.cur_period_high > p.prev_period_high ? 1 : p.cur_period_high < p.prev_period_high ? -1 : 0
+                period_rf += p.cur_period_low  > p.prev_period_low  ? 1 : p.cur_period_low  < p.prev_period_low  ? -1 : 0
+            p.rf_score += period_rf
+            p.prev_period_high := p.cur_period_high
+            p.prev_period_low  := p.cur_period_low
+
+        p.cur_period_high  := b_high
+        p.cur_period_low   := b_low
+        p.periods_in_sess  += 1
+        p.last_period_id   := this_period_id
+    else
+        p.cur_period_high := math.max(p.cur_period_high, b_high)
+        p.cur_period_low  := math.min(p.cur_period_low, b_low)
+
+    is_new_period
+
+// ╔══════════════════════════════════════════╗
+// ║   2. POINT OF CONTROL & VALUE AREA        ║
+// ╚══════════════════════════════════════════╝
+
+// Point of Control — hàng có TPO Count cao nhất; tie-break ưu tiên hàng gần giá GIỮA PHIÊN
+// THỰC (không phải giữa mảng theo index, vì mảng phình không đối xứng do unshift/push).
+// Trả về [poc_price, poc_row].
+export f_calc_poc(array<int> counts, float grid_low, float step, float sess_high, float sess_low) =>
+    int n_rows = array.size(counts)
+    float mid_price = (sess_high + sess_low) / 2.0
+    float mid_row = (mid_price - grid_low) / step - 0.5
+    int max_tpo = -1
+    int poc_row = 0
+
+    for r = 0 to n_rows - 1
+        int cnt = array.get(counts, r)
+        if cnt > max_tpo
+            max_tpo := cnt
+            poc_row := r
+        else if cnt == max_tpo
+            if math.abs(r - mid_row) < math.abs(poc_row - mid_row)
+                poc_row := r
+
+    float poc_price = grid_low + (poc_row + 0.5) * step
+    [poc_price, poc_row]
+
+// Value Area (VAH & VAL) — mở rộng từ POC ra 2 phía theo tổng TPO, ưu tiên bên nhiều TPO hơn
+// ở mỗi bước. va_pct truyền vào dạng tỷ lệ 0-1 (caller tự chia 100 nếu input dạng %).
+// Trả về [vah, val].
+export f_calc_value_area(array<int> counts, int poc_row, float grid_low, float step, int total_tpo, float va_pct) =>
+    int n_rows = array.size(counts)
+    int target_va_tpo = math.round(total_tpo * va_pct)
+    int current_va_tpo = array.get(counts, poc_row)
+    int up_idx = poc_row
+    int dn_idx = poc_row
+
+    while current_va_tpo < target_va_tpo and (up_idx < n_rows - 1 or dn_idx > 0)
+        int up_tpo = up_idx < n_rows - 1 ? array.get(counts, up_idx + 1) : -1
+        int dn_tpo = dn_idx > 0 ? array.get(counts, dn_idx - 1) : -1
+
+        if up_tpo >= dn_tpo and up_idx < n_rows - 1
+            up_idx += 1
+            current_va_tpo += up_tpo
+        else if dn_idx > 0
+            dn_idx -= 1
+            current_va_tpo += dn_tpo
+
+    float vah = grid_low + (up_idx + 1.0) * step
+    float val = grid_low + dn_idx * step
+    [vah, val]
+
+// TPO Count phía trên/dưới POC (dùng lưới thô hoặc mịn tùy caller truyền vào).
+// Trả về [above_cnt, below_cnt].
+export f_calc_tpo_above_below(array<int> counts, int poc_row) =>
+    int n_rows = array.size(counts)
+    int above_cnt = 0
+    int below_cnt = 0
+    for r = 0 to n_rows - 1
+        if r > poc_row
+            above_cnt += array.get(counts, r)
+        else if r < poc_row
+            below_cnt += array.get(counts, r)
+    [above_cnt, below_cnt]
+
+// ╔══════════════════════════════════════════╗
+// ║   3. TAILS / SINGLE PRINTS / LEDGE / SPIKE (lưới thô) ║
+// ╚══════════════════════════════════════════╝
+
+// Buying Tail: đuôi đơn (TPO=1) liên tục từ đáy lưới lên tới poc_row_c.
+// Trả về buying_tail_h (giá đỉnh đuôi) hoặc na nếu đuôi ngắn hơn min_tail_tpo.
+export f_detect_buying_tail(array<int> counts_c, int poc_row_c, float grid_low_c, float step_c, int min_tail_tpo) =>
+    int buy_tail_rows = 0
+    if poc_row_c > 0
+        for r = 0 to poc_row_c - 1
+            if array.get(counts_c, r) == 1
+                buy_tail_rows += 1
+            else
+                break
+    float result = buy_tail_rows >= min_tail_tpo ? (grid_low_c + buy_tail_rows * step_c) : na
+    result
+
+// Selling Tail: đuôi đơn liên tục từ đỉnh lưới xuống tới poc_row_c.
+export f_detect_selling_tail(array<int> counts_c, int poc_row_c, float grid_low_c, float step_c, int min_tail_tpo) =>
+    int n_rows_c = array.size(counts_c)
+    int sell_tail_rows = 0
+    if poc_row_c < n_rows_c - 1
+        for r = n_rows_c - 1 to poc_row_c + 1
+            if array.get(counts_c, r) == 1
+                sell_tail_rows += 1
+            else
+                break
+    float result = sell_tail_rows >= min_tail_tpo ? (grid_low_c + (n_rows_c - sell_tail_rows) * step_c) : na
+    result
+
+// Số hàng đuôi (dùng độc lập cho f_detect_single_prints) — tách riêng khỏi hàm detect ở trên
+// vì giá trị đuôi (na/không na) không đủ, cần CHÍNH SỐ HÀNG để tính biên quét Single Prints.
+export f_count_tail_rows(array<int> counts_c, int poc_row_c, bool from_bottom) =>
+    int n_rows_c = array.size(counts_c)
+    int rows = 0
+    if from_bottom
+        if poc_row_c > 0
+            for r = 0 to poc_row_c - 1
+                if array.get(counts_c, r) == 1
+                    rows += 1
+                else
+                    break
+    else
+        if poc_row_c < n_rows_c - 1
+            for r = n_rows_c - 1 to poc_row_c + 1
+                if array.get(counts_c, r) == 1
+                    rows += 1
+                else
+                    break
+    rows
+
+// Poor High/Low: đỉnh/đáy có từ 2 TPO trở lên nhưng KHÔNG có đuôi đơn từ chối (buying/selling
+// tail = na) — thị trường "không hoàn tất" quá trình đảo chiều tại biên đó.
+// Trả về [has_poor_low, has_poor_high].
+export f_detect_poor_hl(array<int> counts_c, float buying_tail_h, float selling_tail_l) =>
+    int n_rows_c = array.size(counts_c)
+    int bottom_tpo_cnt = array.get(counts_c, 0)
+    int top_tpo_cnt    = array.get(counts_c, n_rows_c - 1)
+    bool has_poor_low  = bottom_tpo_cnt >= 2 and na(buying_tail_h)
+    bool has_poor_high = top_tpo_cnt >= 2 and na(selling_tail_l)
+    [has_poor_low, has_poor_high]
+
+// Single Prints giữa phiên: dải TPO=1 liên tục nằm giữa 2 đuôi, đủ dài >= min_tail_tpo —
+// dấu hiệu Trend Day/Double-Distribution. buy_tail_rows/sell_tail_rows lấy từ
+// f_count_tail_rows(). Trả về [has_sp_mid, sp_mid_bot, sp_mid_top].
+export f_detect_single_prints(array<int> counts_c, int buy_tail_rows, int sell_tail_rows, int min_tail_tpo, float grid_low_c, float step_c) =>
+    int n_rows_c = array.size(counts_c)
+    int sp_start_row = -1
+    int sp_end_row   = -1
+    int low_bound    = math.max(buy_tail_rows + 2, int(n_rows_c * 0.2))
+    int high_bound   = math.min(n_rows_c - 1 - sell_tail_rows - 2, int(n_rows_c * 0.8))
+
+    if high_bound > low_bound
+        for r = low_bound to high_bound
+            if array.get(counts_c, r) == 1
+                if sp_start_row == -1
+                    sp_start_row := r
+                sp_end_row := r
+            else if sp_start_row != -1
+                if (sp_end_row - sp_start_row + 1) >= min_tail_tpo
+                    break
+                else
+                    sp_start_row := -1
+                    sp_end_row   := -1
+
+    bool  has_sp_mid = sp_start_row != -1 and (sp_end_row - sp_start_row + 1) >= min_tail_tpo
+    float sp_mid_bot = has_sp_mid ? grid_low_c + sp_start_row * step_c : na
+    float sp_mid_top = has_sp_mid ? grid_low_c + (sp_end_row + 1) * step_c : na
+    [has_sp_mid, sp_mid_bot, sp_mid_top]
+
+// Ledge: 2 hàng liên tiếp có TPO Count bằng nhau và >=3, với hàng kề 1 bên (trên hoặc dưới)
+// tụt xuống <=1 — dấu hiệu 1 mức giá "support/resistance" rõ trong phiên.
+export f_detect_ledge(array<int> counts_c, float grid_low_c, float step_c) =>
+    int n_rows_c = array.size(counts_c)
+    float found_ledge = na
+    if n_rows_c >= 5
+        for r = 2 to n_rows_c - 3
+            int c1 = array.get(counts_c, r)
+            int c2 = array.get(counts_c, r + 1)
+            int c_next = array.get(counts_c, r + 2)
+            int c_prev = array.get(counts_c, r - 1)
+            if c1 >= 3 and c1 == c2 and (c_next <= 1 or c_prev <= 1)
+                found_ledge := grid_low_c + (r + 1) * step_c
+                break
+    found_ledge
+
+// Late Spike: 2 Period cuối cùng tạo sess_high/sess_low mới, vượt xa VAH/VAL hiện tại (>2
+// step) — dấu hiệu "spike" cuối phiên chưa được Value Area hấp thụ.
+// Trả về [has_late_spike, spike_base].
+export f_detect_late_spike(SessionProfile p, int ib_periods_cnt, float step) =>
+    bool  has_late_spike = false
+    float spike_base     = na
+    if p.periods_in_sess >= ib_periods_cnt + 3 and not na(p.prev_period_high)
+        float last_2_h = math.max(p.cur_period_high, p.prev_period_high)
+        float last_2_l = math.min(p.cur_period_low, p.prev_period_low)
+        if last_2_h >= p.sess_high and p.sess_high > p.vah + step * 2
+            has_late_spike := true
+            spike_base     := p.vah
+        else if last_2_l <= p.sess_low and p.sess_low < p.val - step * 2
+            has_late_spike := true
+            spike_base     := p.val
+    [has_late_spike, spike_base]
+
+// ╔══════════════════════════════════════════╗
+// ║   4. PHÂN LOẠI DAY TYPE & OPEN TYPE        ║
+// ╚══════════════════════════════════════════╝
+// Thuần tính toán từ IB range, độ mở rộng 2 phía, Rotation Factor, vị trí close — không phụ
+// thuộc gì tới việc vẽ. Strategy có thể dùng trực tiếp string trả về làm điều kiện vào lệnh
+// (vd chỉ trade khi day_type == "Trend Day").
+export f_classify_day_type(SessionProfile p, int ib_periods_cnt) =>
+    float s_range = p.sess_high - p.sess_low
+    float ib_rng  = math.max(1e-10, p.ib_high - p.ib_low)
+    float ext_up  = math.max(0.0, p.sess_high - p.ib_high)
+    float ext_dn  = math.max(0.0, p.ib_low - p.sess_low)
+    float total_ratio = s_range / ib_rng
+
+    bool is_ext_up = ext_up > ib_rng * 0.10
+    bool is_ext_dn = ext_dn > ib_rng * 0.10
+
+    string result = "Normal Day"
+    if is_ext_up and is_ext_dn
+        bool close_near_mid = math.abs(p.close_price - (p.sess_high + p.sess_low) / 2.0) <= s_range * 0.25
+        result := close_near_mid ? "Neutral Day (Center)" : "Neutral Day (Extreme)"
+    else if p.has_sp_mid and total_ratio >= 1.5
+        result := "Double-Distribution Trend Day"
+    else if total_ratio >= 2.0 and math.abs(p.rf_score) >= 3
+        result := "Trend Day"
+    else if total_ratio < 1.15 and p.periods_in_sess > ib_periods_cnt and math.abs(p.rf_score) <= 2
+        result := "Nontrend Day"
+    else if total_ratio >= 1.25 and (is_ext_up or is_ext_dn)
+        result := "Normal Variation Day"
+    result
+
+// Open Type theo vị trí mở cửa trong IB + hướng mở rộng đầu tiên. Strategy có thể lọc theo
+// "Open-Drive (OD)" để bắt các phiên có xu hướng mạnh ngay từ đầu.
+export f_classify_open_type(SessionProfile p) =>
+    float ib_rng = math.max(1e-10, p.ib_high - p.ib_low)
+    float ext_up = math.max(0.0, p.sess_high - p.ib_high)
+    float ext_dn = math.max(0.0, p.ib_low - p.sess_low)
+    bool is_ext_up = ext_up > ib_rng * 0.10
+    bool is_ext_dn = ext_dn > ib_rng * 0.10
+
+    float open_pos_in_ib = (p.open_price - p.ib_low) / ib_rng
+    bool open_out_of_va  = not na(p.prev_vah) and (p.open_price > p.prev_vah or p.open_price < p.prev_val)
+
+    string result = "Open-Auction In Range (OAIR)"
+    if open_pos_in_ib <= 0.12 or open_pos_in_ib >= 0.88
+        result := "Open-Drive (OD)"
+    else if (open_pos_in_ib <= 0.30 and is_ext_up and not is_ext_dn) or (open_pos_in_ib >= 0.70 and is_ext_dn and not is_ext_up)
+        result := "Open-Test-Drive (OTD)"
+    else if (p.ext_up_first and p.close_price < (p.ib_high + p.ib_low) / 2.0) or (p.ext_dn_first and p.close_price > (p.ib_high + p.ib_low) / 2.0)
+        result := "Open-Rejection-Reverse (ORR)"
+    else if open_out_of_va
+        result := "Open-Auction Out of Range (OAOR)"
+    result
+
+// Màu theo Day Type — dùng cho dải màu/dashboard của mọi indicator hiển thị Day Type. Nhận
+// màu từ caller (không hardcode) để mỗi indicator tự giữ bảng màu riêng.
+export f_get_daytype_color(string dt, color c_trend, color c_dd, color c_neutral, color c_nontrend, color c_normal) =>
+    color res = c_normal
+    if str.contains(dt, "Double-Distribution")
+        res := c_dd
+    else if str.contains(dt, "Trend Day") and not str.contains(dt, "Nontrend")
+        res := c_trend
+    else if str.contains(dt, "Neutral")
+        res := c_neutral
+    else if str.contains(dt, "Nontrend")
+        res := c_nontrend
+    res
+
+// ╔══════════════════════════════════════════╗
+// ║   5. 80% VALUE AREA RULE                   ║
+// ╚══════════════════════════════════════════╝
+// Mở cửa ngoài VAH/VAL phiên trước, sau đó có >=2 nến liên tiếp chấp nhận giá bên trong
+// VAH/VAL phiên trước → dự đoán giá sẽ tiếp tục xuyên qua Value Area phiên trước.
+// bars_inside_prev_va là biến đếm xuyên-phiên, caller giữ bằng `var` và truyền vào/nhận lại
+// (reset về 0 ở đầu phiên mới do caller tự làm). Trả về [status, trig, new_bars_inside].
+export f_check_80_rule(SessionProfile p, float bar_high, float bar_low, int bars_inside_prev_va) =>
+    bool opened_above_va   = not na(p.prev_vah) and p.open_price > p.prev_vah
+    bool opened_below_va   = not na(p.prev_val) and p.open_price < p.prev_val
+    bool is_inside_prev_va = not na(p.prev_vah) and bar_high >= p.prev_val and bar_low <= p.prev_vah
+
+    string status = "N/A (mở trong VA)"
+    bool   trig   = false
+    int    new_bars_inside = bars_inside_prev_va
+
+    if opened_above_va or opened_below_va
+        if is_inside_prev_va
+            new_bars_inside += 1
+
+        if opened_above_va and new_bars_inside >= 2
+            status := "Active → pVAL"
+            trig   := true
+        else if opened_below_va and new_bars_inside >= 2
+            status := "Active → pVAH"
+            trig   := true
+        else if new_bars_inside == 1
+            status := "Chờ xác nhận (1/2)"
+        else
+            status := "Chưa chấp nhận"
+
+    [status, trig, new_bars_inside]

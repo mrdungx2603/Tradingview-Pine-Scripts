@@ -26,7 +26,8 @@ tv_pine/
 │       ├── pine-create.md    # /pine-create
 │       ├── pine-review.md    # /pine-review
 │       ├── pine-backtest.md  # /pine-backtest
-│       └── pine-convert.md   # /pine-convert
+│       ├── pine-convert.md   # /pine-convert
+│       └── pine-research.md  # /pine-research
 ├── indicators/               # Indicator
 ├── strategies/               # Strategy (có backtest)
 ├── libraries/                # Thư viện dùng chung
@@ -211,3 +212,4 @@ Dự án có 1 tài liệu tổng (`docs/README.md`) liệt kê toàn bộ indic
 | `/pine-review` | Review code Pine Script: lỗi, hiệu năng, best practices |
 | `/pine-backtest` | Hỗ trợ thiết kế & phân tích backtest |
 | `/pine-convert` | Chuyển đổi Pine Script giữa các phiên bản (v1→v6) |
+| `/pine-research` | Research định lượng dựa trên dữ liệu thật trong MySQL (tỉ lệ thành công của rule, tham số cải tiến) — xem `backtests/README.md` |

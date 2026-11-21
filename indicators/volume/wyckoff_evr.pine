@@ -1,0 +1,421 @@
+//@version=6
+// ─── Wyckoff Effort vs Result — Phân tích định lượng mối quan hệ Nỗ lực (Volume) và Kết quả (Price Spread) ───
+// Tác giả: TV Pine
+// Ngày tạo: 2026-07-10
+// Phiên bản: 1.0
+// Mô tả: Phát hiện 4 trạng thái Wyckoff (Harmony, Effort-without-Result,
+//        Result-without-Effort, Low Interest) và 5 tín hiệu (Stopping Volume,
+//        No Demand, Pushing Through, Pseudo Breakout, Climax).
+//        Indicator hiển thị volume histogram phân loại theo màu, đường WER,
+//        label tín hiệu, nền phân kỳ và bảng thống kê tích lũy.
+indicator(
+    title="Wyckoff Effort vs Result",
+    shorttitle="WYCKOFF_EVR",
+    overlay=false,
+    max_labels_count=500,
+    max_boxes_count=200
+)
+
+// ╔══════════════════════════════════════════╗
+// ║              INPUTS                      ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Dữ Liệu ───
+src_high = input.source(title="Nguồn Giá Cao", defval=high, group="Dữ Liệu")
+src_low  = input.source(title="Nguồn Giá Thấp", defval=low, group="Dữ Liệu")
+atr_period = input.int(title="Chu Kỳ ATR", defval=14, minval=1, maxval=200, group="Dữ Liệu")
+vol_ma_length = input.int(title="Chu Kỳ Volume MA", defval=20, minval=1, maxval=500, group="Dữ Liệu")
+wer_smooth = input.int(title="Chu Kỳ Làm Mịn WER", defval=5, minval=1, maxval=100, group="Dữ Liệu")
+
+// ─── Ngưỡng ───
+vol_high = input.float(title="Ngưỡng Volume Cao", defval=1.5, minval=1.0, maxval=5.0, step=0.1, group="Ngưỡng")
+vol_low  = input.float(title="Ngưỡng Volume Thấp", defval=0.5, minval=0.1, maxval=1.0, step=0.1, group="Ngưỡng")
+spread_high = input.float(title="Ngưỡng Spread Cao", defval=1.3, minval=1.0, maxval=5.0, step=0.1, group="Ngưỡng")
+spread_low  = input.float(title="Ngưỡng Spread Thấp", defval=0.7, minval=0.1, maxval=1.0, step=0.1, group="Ngưỡng")
+climax_threshold = input.float(title="Ngưỡng Climax", defval=2.0, minval=1.5, maxval=5.0, step=0.1, group="Ngưỡng")
+
+// ─── Hiển Thị ───
+show_hist = input.bool(title="Hiển Thị Volume Histogram", defval=true, group="Hiển Thị")
+show_wer = input.bool(title="Hiển Thị Đường WER", defval=true, group="Hiển Thị")
+show_wer_ma = input.bool(title="Hiển Thị WER MA", defval=true, group="Hiển Thị")
+show_signals = input.bool(title="Hiển Thị Tín Hiệu (SV/ND/PT/PB/CLX)", defval=true, group="Hiển Thị")
+show_bg = input.bool(title="Hiển Thị Nền Phân Kỳ", defval=true, group="Hiển Thị")
+show_table = input.bool(title="Hiển Thị Bảng Thống Kê", defval=true, group="Hiển Thị")
+table_pos = input.string(title="Vị Trí Bảng", defval="Top Right", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group="Hiển Thị")
+wer_ma_length = input.int(title="Chu Kỳ WER MA", defval=10, minval=1, maxval=200, group="Hiển Thị")
+
+// ─── Màu Sắc ───
+harmony_color     = input.color(title="Màu Harmony", defval=#089981, group="Màu Sắc")
+stopping_color    = input.color(title="Màu Effort w/o Result", defval=#f23645, group="Màu Sắc")
+pseudo_color      = input.color(title="Màu Result w/o Effort", defval=#ff9800, group="Màu Sắc")
+low_interest_color = input.color(title="Màu Low Interest", defval=#787b86, group="Màu Sắc")
+climax_color      = input.color(title="Màu Climax", defval=#e040fb, group="Màu Sắc")
+wer_line_color    = input.color(title="Màu Đường WER", defval=#2196f3, group="Màu Sắc")
+wer_ma_color      = input.color(title="Màu WER MA", defval=#ffeb3b, group="Màu Sắc")
+
+// ╔══════════════════════════════════════════╗
+// ║          HELPER FUNCTIONS                ║
+// ╚══════════════════════════════════════════╝
+
+// Chuyển đổi vị trí bảng từ string sang position constant
+get_table_pos(string pos_name) =>
+    switch pos_name
+        "Top Right"     => position.top_right
+        "Top Left"      => position.top_left
+        "Bottom Right"  => position.bottom_right
+        "Bottom Left"   => position.bottom_left
+        => position.top_right
+
+// ╔══════════════════════════════════════════╗
+// ║          TÍNH TOÁN CƠ BẢN               ║
+// ╚══════════════════════════════════════════╝
+
+// 1. Spread = |high - low| — khoảng giá mỗi nến
+float spread = math.abs(src_high - src_low)
+
+// 2. ATR Spread — chuẩn hóa theo biến động
+float atr_spread = ta.atr(atr_period)
+
+// 3. Spread Ratio = Spread / ATR Spread — spread tương đối so với biến động bình thường
+float spread_ratio = atr_spread > 0 ? spread / atr_spread : 0.0
+
+// 4. Volume MA — trung bình volume
+float vol_ma = ta.sma(volume, vol_ma_length)
+
+// 5. Volume Ratio = Volume / Volume MA — volume tương đối so với trung bình
+float vol_ratio = vol_ma > 0 ? volume / vol_ma : 1.0
+
+// 6. WER (Wyckoff Efficiency Ratio) = Spread Ratio / Volume Ratio
+//    WER > 1: giá dịch chuyển hiệu quả so với nỗ lực (xu hướng khỏe)
+//    WER < 1: nỗ lực nhiều hơn kết quả (có thể là dấu hiệu yếu)
+float wer_raw = vol_ratio > 0 ? spread_ratio / vol_ratio : 0.0
+
+// 7. WER SMA — làm mịn đường WER để giảm nhiễu
+float wer_line = ta.sma(wer_raw, wer_smooth)
+
+// 8. WER MA — đường trung bình dài hạn của WER
+float wer_sma = ta.sma(wer_line, wer_ma_length)
+
+// ╔══════════════════════════════════════════╗
+// ║          PHÂN LOẠI TRẠNG THÁI            ║
+// ║  (theo thứ tự ưu tiên, if/else if)      ║
+// ╚══════════════════════════════════════════╝
+
+// Khai báo biến trạng thái ở scope cha (quy tắc Pine v6)
+bool is_stopping   = false
+bool is_pseudo     = false
+bool is_low_interest = false
+bool is_harmony    = false
+
+// Phân loại theo thứ tự ưu tiên: Stopping → Pseudo → Low Interest → Harmony (fallback)
+if vol_ratio > vol_high and spread_ratio < spread_low
+    // Effort without Result: Volume cao + Spread thấp → dấu hiệu đảo chiều (stopping volume)
+    is_stopping := true
+else if vol_ratio < vol_low and spread_ratio > spread_high
+    // Result without Effort: Spread cao + Volume thấp → breakout giả (pseudo breakout)
+    is_pseudo := true
+else if vol_ratio < 1.0 and spread_ratio < 1.0
+    // Low Interest: Cả Volume và Spread đều dưới trung bình → thị trường trầm lắng
+    is_low_interest := true
+else
+    // Harmony (fallback): Cả Volume và Spread đều trên trung bình → xu hướng khỏe mạnh
+    is_harmony := true
+
+// Xác định màu volume theo phân loại
+color vol_color = is_stopping ? stopping_color :
+                   is_pseudo ? pseudo_color :
+                   is_low_interest ? low_interest_color :
+                   harmony_color
+
+// ╔══════════════════════════════════════════╗
+// ║          TÍN HIỆU WYCKOFF                ║
+// ╚══════════════════════════════════════════╝
+
+// SV — Stopping Volume: Volume rất cao nhưng Spread rất thấp
+//      → Dòng tiền lớn nhưng giá không dịch chuyển → sắp đảo chiều
+bool sig_sv = vol_ratio > 1.5 and spread_ratio < 0.7
+
+// ND — No Demand: Volume thấp + Spread thấp + nến tăng (close > open)
+//      → Không có lực cầu trong uptrend → xu hướng tăng sắp kết thúc
+bool sig_nd = vol_ratio < 0.5 and spread_ratio < 0.7 and close > open
+
+// NS — No Supply: Volume thấp + Spread thấp + nến giảm (close < open)
+//      → Không có lực cung trong downtrend → xu hướng giảm sắp kết thúc
+bool sig_ns = vol_ratio < 0.5 and spread_ratio < 0.7 and close < open
+
+// PT — Pushing Through: Volume cao + Spread cao
+//      → Phá vỡ thật sự với sức mạnh, xu hướng được xác nhận
+bool sig_pt = vol_ratio > 1.5 and spread_ratio > 1.3
+
+// PB — Pseudo Breakout: Spread cao + Volume thấp
+//      → Phá vỡ giả, không có lực đỡ → bẫy breakout
+bool sig_pb = vol_ratio < 0.5 and spread_ratio > 1.3
+
+// CLX — Climax: Volume cực đoan
+//      → Đỉnh/đáy quan trọng, thường đánh dấu kết thúc xu hướng
+bool sig_clx = vol_ratio > climax_threshold
+
+// ╔══════════════════════════════════════════╗
+// ║          VOLUME HISTOGRAM                ║
+// ╚══════════════════════════════════════════╝
+
+// Vẽ volume histogram với màu phân loại Wyckoff
+plot(
+    show_hist ? volume : na,
+    title="Volume",
+    style=plot.style_columns,
+    color=vol_color,
+    histbase=0
+)
+
+// ╔══════════════════════════════════════════╗
+// ║          ĐƯỜNG WER                       ║
+// ╚══════════════════════════════════════════╝
+
+// Đường WER — Wyckoff Efficiency Ratio (đã làm mịn)
+plot(
+    show_wer ? wer_line : na,
+    title="WER",
+    color=wer_line_color,
+    linewidth=2
+)
+
+// Đường WER MA — trung bình dài hạn của WER
+plot(
+    show_wer_ma ? wer_sma : na,
+    title="WER MA",
+    color=wer_ma_color,
+    linewidth=1
+)
+
+// Đường tham chiếu 1.0 — phân cách Harmony (WER~1) vs Divergence
+hline(1.0, "Tham Chiếu 1.0", color=color.gray, linestyle=hline.style_dashed)
+
+// ╔══════════════════════════════════════════╗
+// ║          NỀN PHÂN KỲ                     ║
+// ╚══════════════════════════════════════════╝
+
+// Nền Effort w/o Result — vùng stopping volume (nguy cơ đảo chiều)
+bgcolor(
+    show_bg and is_stopping ? color.new(stopping_color, 90) : na,
+    title="Effort w/o Result"
+)
+
+// Nền Result w/o Effort — vùng pseudo breakout (bẫy breakout)
+bgcolor(
+    show_bg and is_pseudo ? color.new(pseudo_color, 90) : na,
+    title="Result w/o Effort"
+)
+
+// ╔══════════════════════════════════════════╗
+// ║          LABEL TÍN HIỆU                  ║
+// ╚══════════════════════════════════════════╝
+
+// SV — Stopping Volume → label trên đỉnh nến (báo hiệu đảo chiều từ đỉnh)
+if show_signals and sig_sv
+    label.new(
+        bar_index, high, "SV",
+        color=stopping_color,
+        textcolor=color.white,
+        style=label.style_label_down,
+        size=size.small
+    )
+
+// ND — No Demand → label trên đỉnh nến tăng (cầu yếu)
+if show_signals and sig_nd
+    label.new(
+        bar_index, high, "ND",
+        color=color.gray,
+        textcolor=color.white,
+        style=label.style_label_down,
+        size=size.small
+    )
+
+// NS — No Supply → label dưới đáy nến giảm (cung yếu)
+if show_signals and sig_ns
+    label.new(
+        bar_index, low, "NS",
+        color=color.gray,
+        textcolor=color.white,
+        style=label.style_label_up,
+        size=size.small
+    )
+
+// PT — Pushing Through → label dưới đáy (bull đẩy qua kháng cự)
+//      hoặc label trên đỉnh (bear đẩy qua hỗ trợ)
+if show_signals and sig_pt
+    label.new(
+        bar_index, close > open ? low : high, "PT",
+        color=harmony_color,
+        textcolor=color.white,
+        style=close > open ? label.style_label_up : label.style_label_down,
+        size=size.small
+    )
+
+// PB — Pseudo Breakout → label trên đỉnh hoặc dưới đáy (bẫy breakout)
+if show_signals and sig_pb
+    label.new(
+        bar_index, close > open ? high : low, "PB",
+        color=pseudo_color,
+        textcolor=color.white,
+        style=close > open ? label.style_label_down : label.style_label_up,
+        size=size.small
+    )
+
+// CLX — Climax → label tại đỉnh/đáy nến, màu nổi bật
+if show_signals and sig_clx
+    label.new(
+        bar_index, close > open ? high : low, "CLX",
+        color=climax_color,
+        textcolor=color.white,
+        style=close > open ? label.style_label_down : label.style_label_up,
+        size=size.small
+    )
+
+// ╔══════════════════════════════════════════╗
+// ║          BẢNG THỐNG KÊ                   ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Bộ đếm tích lũy ───
+var int harmony_count   = 0
+var int stopping_count  = 0
+var int pseudo_count    = 0
+var int low_interest_count = 0
+var int sv_count        = 0
+var int nd_count        = 0
+var int ns_count        = 0
+var int pt_count        = 0
+var int pb_count        = 0
+var int clx_count       = 0
+
+// Cập nhật bộ đếm mỗi bar
+if is_harmony
+    harmony_count += 1
+if is_stopping
+    stopping_count += 1
+if is_pseudo
+    pseudo_count += 1
+if is_low_interest
+    low_interest_count += 1
+if sig_sv
+    sv_count += 1
+if sig_nd
+    nd_count += 1
+if sig_ns
+    ns_count += 1
+if sig_pt
+    pt_count += 1
+if sig_pb
+    pb_count += 1
+if sig_clx
+    clx_count += 1
+
+// Tổng số bar đã phân tích
+int total_bars = harmony_count + stopping_count + pseudo_count + low_interest_count
+
+// ─── Bảng thống kê ───
+var table evr_table = table.new(
+    get_table_pos(table_pos),
+    columns=2,
+    rows=12,
+    bgcolor=#1e222d,
+    border_width=1,
+    border_color=#5b5f6b
+)
+
+// Khai báo biến phần trăm ở scope cha (quy tắc Pine v6)
+float harmony_pct   = 0.0
+float stopping_pct  = 0.0
+float pseudo_pct    = 0.0
+float low_interest_pct = 0.0
+
+if barstate.islast and show_table
+    // ─── Hàng tiêu đề ───
+    table.cell(evr_table, 0, 0, "WYCKOFF EVR",
+        text_color=color.white, text_size=size.small, bgcolor=#3d4252)
+    table.cell(evr_table, 1, 0, "ĐẾM / %",
+        text_color=color.white, text_size=size.small, bgcolor=#3d4252)
+
+    // ─── Tính phần trăm mỗi trạng thái ───
+    harmony_pct   := total_bars > 0 ? harmony_count * 100.0 / total_bars : 0.0
+    stopping_pct  := total_bars > 0 ? stopping_count * 100.0 / total_bars : 0.0
+    pseudo_pct    := total_bars > 0 ? pseudo_count * 100.0 / total_bars : 0.0
+    low_interest_pct := total_bars > 0 ? low_interest_count * 100.0 / total_bars : 0.0
+
+    // ─── Hàng trạng thái (1-4) ───
+    table.cell(evr_table, 0, 1, "Harmony",
+        text_color=harmony_color, text_size=size.small)
+    table.cell(evr_table, 1, 1,
+        str.tostring(harmony_count) + " (" + str.tostring(harmony_pct, "#.0") + "%)",
+        text_color=harmony_color, text_size=size.small)
+
+    table.cell(evr_table, 0, 2, "Effort w/o Result",
+        text_color=stopping_color, text_size=size.small)
+    table.cell(evr_table, 1, 2,
+        str.tostring(stopping_count) + " (" + str.tostring(stopping_pct, "#.0") + "%)",
+        text_color=stopping_color, text_size=size.small)
+
+    table.cell(evr_table, 0, 3, "Result w/o Effort",
+        text_color=pseudo_color, text_size=size.small)
+    table.cell(evr_table, 1, 3,
+        str.tostring(pseudo_count) + " (" + str.tostring(pseudo_pct, "#.0") + "%)",
+        text_color=pseudo_color, text_size=size.small)
+
+    table.cell(evr_table, 0, 4, "Low Interest",
+        text_color=low_interest_color, text_size=size.small)
+    table.cell(evr_table, 1, 4,
+        str.tostring(low_interest_count) + " (" + str.tostring(low_interest_pct, "#.0") + "%)",
+        text_color=low_interest_color, text_size=size.small)
+
+    // ─── Hàng phân cách ───
+    table.cell(evr_table, 0, 5, "─ Tín Hiệu ─",
+        text_color=color.white, text_size=size.small, bgcolor=#3d4252)
+    table.cell(evr_table, 1, 5, "ĐẾM",
+        text_color=color.white, text_size=size.small, bgcolor=#3d4252)
+
+    // ─── Hàng tín hiệu (6-11) ───
+    table.cell(evr_table, 0, 6, "SV (Stopping Vol)",
+        text_color=stopping_color, text_size=size.small)
+    table.cell(evr_table, 1, 6, str.tostring(sv_count),
+        text_color=stopping_color, text_size=size.small)
+
+    table.cell(evr_table, 0, 7, "ND (No Demand)",
+        text_color=color.gray, text_size=size.small)
+    table.cell(evr_table, 1, 7, str.tostring(nd_count),
+        text_color=color.gray, text_size=size.small)
+
+    table.cell(evr_table, 0, 8, "NS (No Supply)",
+        text_color=color.gray, text_size=size.small)
+    table.cell(evr_table, 1, 8, str.tostring(ns_count),
+        text_color=color.gray, text_size=size.small)
+
+    table.cell(evr_table, 0, 9, "PT (Pushing Thru)",
+        text_color=harmony_color, text_size=size.small)
+    table.cell(evr_table, 1, 9, str.tostring(pt_count),
+        text_color=harmony_color, text_size=size.small)
+
+    table.cell(evr_table, 0, 10, "PB (Pseudo Brk)",
+        text_color=pseudo_color, text_size=size.small)
+    table.cell(evr_table, 1, 10, str.tostring(pb_count),
+        text_color=pseudo_color, text_size=size.small)
+
+    table.cell(evr_table, 0, 11, "CLX (Climax)",
+        text_color=climax_color, text_size=size.small)
+    table.cell(evr_table, 1, 11, str.tostring(clx_count),
+        text_color=climax_color, text_size=size.small)
+
+// ╔══════════════════════════════════════════╗
+// ║              ALERTS                      ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Tín hiệu Wyckoff ───
+alertcondition(sig_sv, "SV — Stopping Volume", "Wyckoff: Stopping Volume — Volume cao + Spread thấp → dấu hiệu đảo chiều")
+alertcondition(sig_nd, "ND — No Demand", "Wyckoff: No Demand — Lực mua yếu trong uptrend")
+alertcondition(sig_ns, "NS — No Supply", "Wyckoff: No Supply — Lực bán yếu trong downtrend")
+alertcondition(sig_pt, "PT — Pushing Through", "Wyckoff: Pushing Through — Breakout thật với Volume mạnh")
+alertcondition(sig_pb, "PB — Pseudo Breakout", "Wyckoff: Pseudo Breakout — Breakout giả, thiếu Volume")
+alertcondition(sig_clx, "CLX — Climax", "Wyckoff: Climax Volume — Volume cực đoan, đỉnh/đáy quan trọng")
+
+// ─── Trạng thái phân kỳ ───
+alertcondition(is_stopping, "Effort w/o Result", "Wyckoff: Nỗ lực không kết quả — Volume cao nhưng Spread thấp")
+alertcondition(is_pseudo, "Result w/o Effort", "Wyckoff: Kết quả không nỗ lực — Spread cao nhưng Volume thấp")
