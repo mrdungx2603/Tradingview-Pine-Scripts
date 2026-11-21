@@ -42,6 +42,9 @@
 | Báo Cáo | Mô Tả | Script Backtest |
 |---|---|---|
 | [reports/va-rule-vn30f1m.md](reports/va-rule-vn30f1m.md) | Tỉ lệ thành công thực tế của 80% VA Rule (ý tưởng #2) trên dữ liệu thật VN30F1M 1m + khuyến nghị tham số cải tiến | [backtests/va_rule/va_rule_backtest.py](../backtests/va_rule/va_rule_backtest.py) |
+| [reports/us30-streak-vnindex.md](reports/us30-streak-vnindex.md) | US30 giảm 5 phiên liên tiếp: phiên 6 xanh 56,8%, VNINDEX phiên đầu giảm trung bình -0,54% (p = 0,002). Báo cáo HTML: [backtests/us30_streak/report.html](../backtests/us30_streak/report.html) | [backtests/us30_streak/us30_streak_backtest.mjs](../backtests/us30_streak/us30_streak_backtest.mjs) |
+
+Hướng dẫn lấy dữ liệu lịch sử TradingView để làm báo cáo: [tradingview-api-guide.md](tradingview-api-guide.md).
 
 ## Tài Liệu Tham Khảo Khác
 

@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>US30 Streak và VNINDEX</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Bố cục: một cột đọc, biểu đồ đặt trong khối riêng, bảng chi tiết cuộn ngang khi hẹp.
+   Bảng màu: nền giấy xám ấm, chữ mực, đỏ đất cho số âm, xanh rêu cho số dương, vàng đồng cho điểm nhấn. */
+:root {
+  --bg: #f5f4f0; --fg: #1d1f1c; --muted: #6b6e66; --line: #d9d7cf; --panel: #ffffff;
+  --neg: #b4472f; --pos: #3d7a4f; --accent: #9a6b1f; --neutral: #a9ab9f; --grid: #e6e4dc;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161815; --fg: #ecebe4; --muted: #9a9d93; --line: #33362f; --panel: #1f221e;
+    --neg: #e0765c; --pos: #7fb88b; --accent: #d9a84e; --neutral: #5d6158; --grid: #2a2d28;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #161815; --fg: #ecebe4; --muted: #9a9d93; --line: #33362f; --panel: #1f221e;
+  --neg: #e0765c; --pos: #7fb88b; --accent: #d9a84e; --neutral: #5d6158; --grid: #2a2d28;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 15px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 56px;
+}
+main { max-width: 860px; margin: 0 auto; min-width: 0; }
+h1 { font-size: 28px; line-height: 1.2; margin: 0 0 6px; text-wrap: balance; letter-spacing: -0.01em; }
+h2 { font-size: 20px; margin: 44px 0 10px; padding-top: 18px; border-top: 1px solid var(--line); text-wrap: balance; }
+h3 { font-size: 15px; margin: 22px 0 6px; }
+p { margin: 0 0 12px; max-width: 68ch; }
+.meta { color: var(--muted); font-size: 13px; margin-bottom: 22px; }
+.verdict { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 16px 18px; margin: 18px 0 8px; }
+.verdict p:last-child { margin-bottom: 0; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 16px 0 4px; }
+.kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; min-width: 0; }
+.kpi .k { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.kpi .v { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.kpi .s { font-size: 12px; color: var(--muted); }
+.neg { color: var(--neg); } .pos { color: var(--pos); }
+.figure { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 12px 10px; margin: 14px 0; min-width: 0; }
+.figure figcaption { font-size: 13px; color: var(--muted); margin: 0 4px 8px; }
+.figure svg { width: 100%; height: auto; display: block; }
+svg text { font-family: "JetBrains Mono", ui-monospace, monospace; }
+svg .axis { fill: var(--muted); font-size: 11px; }
+svg .sub { font-size: 10px; }
+svg .val { fill: var(--fg); font-size: 12px; font-weight: 600; }
+svg .grid { stroke: var(--grid); stroke-width: 1; }
+svg .zero { stroke: var(--muted); stroke-width: 1; }
+svg .bar { }
+svg .bar.neg { fill: var(--neg); } svg .bar.pos { fill: var(--pos); } svg .bar.neutral { fill: var(--neutral); }
+svg .line { stroke: var(--neg); stroke-width: 2.25; }
+svg .dot.neg { fill: var(--neg); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: "JetBrains Mono", ui-monospace, monospace; }
+.neg-t { color: var(--neg); } .pos-t { color: var(--pos); }
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); min-width: 0; }
+.twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-width: 0; }
+.twocol > * { min-width: 0; }
+@media (max-width: 560px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 24px; } }
+ul { padding-left: 20px; margin: 0 0 12px; max-width: 68ch; }
+li { margin-bottom: 6px; }
+code { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 13px; background: var(--grid); padding: 1px 5px; border-radius: 4px; }
+.note { font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+<h1>US30 có 5 phiên giảm liên tiếp: VNINDEX phản ứng thế nào?</h1>
+<div class="meta">Dữ liệu D1 từ TradingView (DJ:DJI, HOSE:VNINDEX), tính đến 20/11/2026. US30 có 9.291 phiên, VNINDEX có 6.412 phiên. Có 74 lần US30 giảm đúng 5 phiên liên tiếp trong khoảng VNINDEX có dữ liệu.</div>
+
+<section class="verdict">
+<p><strong>Kết luận chính.</strong> Phiên VNINDEX đầu tiên sau một chuỗi 5 phiên giảm của US30 yếu hơn hẳn nền lịch sử: trung bình -0,53% so với +0,05%, chỉ 33,8% phiên xanh so với 53,1%. Khác biệt này có ý nghĩa thống kê (p ≈ 0,002).</p>
+<p>Hiệu ứng không kéo dài. Sau 5 và 10 phiên, mức chênh so với nền không đủ chắc để kết luận. Phiên 6 của US30 xanh 56,8%, cao hơn nền 53,2% nhưng không đáng kể (p ≈ 0,539).</p>
+<p>Đây là kết quả thống kê trên dữ liệu quá khứ, chưa phải tín hiệu giao dịch. Mục 5 liệt kê các điều kiện chưa kiểm tra.</p>
+</section>
+
+<div class="kpis">
+<div class="kpi"><div class="k">Số episode</div><div class="v">74</div><div class="s">chuỗi 5 phiên giảm US30</div></div>
+<div class="kpi"><div class="k">US phiên 6 xanh</div><div class="v">56,8%</div><div class="s">nền 53,2%, p ≈ 0,539</div></div>
+<div class="kpi"><div class="k">VN phiên 1 (TB)</div><div class="v neg">-0,53%</div><div class="s">nền +0,05%, p ≈ 0,002</div></div>
+<div class="kpi"><div class="k">VN phiên 1 xanh</div><div class="v neg">33,8%</div><div class="s">nền 53,1%</div></div>
+</div>
+
+<h2>1. Phiên thứ 6 của US30</h2>
+<p>Phiên thứ 6 là phiên US ngay sau chuỗi 5 phiên giảm. Trong 74 episode có đủ dữ liệu, 42 phiên xanh, tức 56,8%. US30 nói chung xanh 53,2% số phiên, nên tỉ lệ sau chuỗi giảm chỉ cao hơn nền khoảng 3,6 điểm phần trăm.</p>
+<p>Với z = 0,61 và p ≈ 0,539, chênh lệch này nằm trong biến động ngẫu nhiên của 74 mẫu. Kết luận: <strong>không có bằng chứng US30 đảo chiều mạnh sau 5 phiên giảm.</strong></p>
+<p class="note">Phiên 6 của US30 diễn ra sau phiên VN đầu tiên, nên không dùng được làm tín hiệu cho VN phiên đầu. Chỉ số này mô tả US, không dự báo.</p>
+
+<h2>2. VNINDEX sau tín hiệu</h2>
+<p>Phiên VN đầu tiên là phiên đầu có ngày sau ngày US30 giảm phiên thứ 5. Lợi nhuận đo theo close, nên đã bao gồm cả khoảng gap mở cửa phản ứng với US.</p>
+
+<figure class="figure">
+<figcaption>Lợi nhuận trung bình VNINDEX theo khoảng thời gian, episode và nền lịch sử</figcaption>
+<svg viewBox="0 0 560 240" role="img" aria-label="1 phiên -0,53, 5 phiên -0,28, 10 phiên -0,12"><line class="grid" x1="44" x2="548" y1="194" y2="194"/><text class="axis" x="38" y="198" text-anchor="end">-1%</text><line class="grid" x1="44" x2="548" y1="105" y2="105"/><text class="axis" x="38" y="109" text-anchor="end">0%</text><line class="grid" x1="44" x2="548" y1="16" y2="16"/><text class="axis" x="38" y="20" text-anchor="end">1%</text><line class="zero" x1="44" x2="548" y1="105" y2="105"/><rect class="bar neg" x="81.8" y="105" width="92.4" height="47.57848431984928" rx="2"/><text class="val" x="128" y="166.57848431984928" text-anchor="middle">-0,53%</text><text class="axis" x="128" y="218" text-anchor="middle">1 phiên</text><text class="axis sub" x="128" y="232" text-anchor="middle">nền +0,05%</text><rect class="bar neg" x="249.8" y="105" width="92.4" height="25.263630052441727" rx="2"/><text class="val" x="296" y="144.26363005244173" text-anchor="middle">-0,28%</text><text class="axis" x="296" y="218" text-anchor="middle">5 phiên</text><text class="axis sub" x="296" y="232" text-anchor="middle">nền +0,29%</text><rect class="bar neg" x="417.8" y="105" width="92.4" height="10.49876914246714" rx="2"/><text class="val" x="464" y="129.49876914246715" text-anchor="middle">-0,12%</text><text class="axis" x="464" y="218" text-anchor="middle">10 phiên</text><text class="axis sub" x="464" y="232" text-anchor="middle">nền +0,61%</text></svg>
+</figure>
+
+<div class="tablewrap" style="margin:12px 0">
+<table>
+<thead><tr><th>Chỉ số</th><th class="num">Episode (n=74)</th><th class="num">Nền</th><th class="num">Chênh lệch</th><th class="num">p (xấp xỉ)</th><th class="num">KTC 95% của TB</th></tr></thead>
+<tbody>
+<tr><td>VN 1 phiên: trung bình</td><td class="num neg-t">-0,53%</td><td class="num">+0,05%</td><td class="num">-0,59%</td><td class="num">0,002</td><td class="num">[-0,92, -0,16]</td></tr>
+<tr><td>VN 1 phiên: trung vị</td><td class="num">-0,28%</td><td class="num">+0,06%</td><td class="num"></td><td class="num"></td><td class="num"></td></tr>
+<tr><td>VN 1 phiên: tỉ lệ xanh</td><td class="num neg-t">33,8%</td><td class="num">53,1%</td><td class="num"></td><td class="num"></td><td class="num"></td></tr>
+<tr><td>VN 5 phiên: trung bình</td><td class="num">-0,28%</td><td class="num">+0,29%</td><td class="num">-0,58%</td><td class="num">0,188</td><td class="num">[-1,10, +0,55]</td></tr>
+<tr><td>VN 5 phiên: tỉ lệ xanh</td><td class="num">44,6%</td><td class="num">54,3%</td><td class="num"></td><td class="num"></td><td class="num"></td></tr>
+<tr><td>VN 10 phiên: trung bình</td><td class="num">-0,12%</td><td class="num">+0,61%</td><td class="num">-0,73%</td><td class="num">0,249</td><td class="num">[-1,33, +1,11]</td></tr>
+</tbody>
+</table>
+</div>
+<p class="note">Nền là mọi phiên VNINDEX trong cùng khoảng 2000–2026. p là kiểm định Welch so với nền, dùng phân phối chuẩn xấp xỉ. KTC là khoảng tin cậy bootstrap 95%, 5 000 lần lặp.</p>
+
+<h3>Lợi nhuận tích lũy 10 phiên đầu</h3>
+<figure class="figure">
+<figcaption>Trung bình lợi nhuận tích lũy của VNINDEX kể từ phiên VN đầu tiên (74 episode)</figcaption>
+<svg viewBox="0 0 600 260" role="img" aria-label="Lợi nhuận tích lũy trung bình VNINDEX 10 phiên sau tín hiệu"><line class="grid" x1="44" x2="586" y1="226" y2="226"/><text class="axis" x="38" y="230" text-anchor="end">-1,2%</text><line class="grid" x1="44" x2="586" y1="190.66666666666669" y2="190.66666666666669"/><text class="axis" x="38" y="194.66666666666669" text-anchor="end">-0,8%</text><line class="grid" x1="44" x2="586" y1="155.33333333333331" y2="155.33333333333331"/><text class="axis" x="38" y="159.33333333333331" text-anchor="end">-0,4%</text><line class="grid" x1="44" x2="586" y1="119.99999999999997" y2="119.99999999999997"/><text class="axis" x="38" y="123.99999999999997" text-anchor="end">0,0%</text><line class="grid" x1="44" x2="586" y1="84.66666666666666" y2="84.66666666666666"/><text class="axis" x="38" y="88.66666666666666" text-anchor="end">0,4%</text><line class="grid" x1="44" x2="586" y1="49.33333333333332" y2="49.33333333333332"/><text class="axis" x="38" y="53.33333333333332" text-anchor="end">0,8%</text><line class="grid" x1="44" x2="586" y1="13.99999999999998" y2="13.99999999999998"/><text class="axis" x="38" y="17.99999999999998" text-anchor="end">1,2%</text><line class="zero" x1="44" x2="586" y1="120" y2="120"/><text class="axis" x="44" y="248" text-anchor="middle">1</text><text class="axis" x="104.22222222222223" y="248" text-anchor="middle">2</text><text class="axis" x="164.44444444444446" y="248" text-anchor="middle">3</text><text class="axis" x="224.66666666666666" y="248" text-anchor="middle">4</text><text class="axis" x="284.8888888888889" y="248" text-anchor="middle">5</text><text class="axis" x="345.1111111111111" y="248" text-anchor="middle">6</text><text class="axis" x="405.3333333333333" y="248" text-anchor="middle">7</text><text class="axis" x="465.55555555555554" y="248" text-anchor="middle">8</text><text class="axis" x="525.7777777777778" y="248" text-anchor="middle">9</text><text class="axis" x="586" y="248" text-anchor="middle">10</text><polyline class="line neg-line" points="44,167.2220911788766 104.22222222222223,166.22972730822934 164.44444444444446,162.1098597911931 224.66666666666666,149.2800100486789 284.8888888888889,145.07438937789163 345.1111111111111,144.3528729805252 405.3333333333333,148.18606445673174 465.55555555555554,165.84013082047784 525.7777777777778,151.90336634007832 586,130.4201266769805" fill="none"/><circle class="dot neg" cx="44" cy="167.2220911788766" r="3.5"/><circle class="dot neg" cx="104.22222222222223" cy="166.22972730822934" r="3.5"/><circle class="dot neg" cx="164.44444444444446" cy="162.1098597911931" r="3.5"/><circle class="dot neg" cx="224.66666666666666" cy="149.2800100486789" r="3.5"/><circle class="dot neg" cx="284.8888888888889" cy="145.07438937789163" r="3.5"/><circle class="dot neg" cx="345.1111111111111" cy="144.3528729805252" r="3.5"/><circle class="dot neg" cx="405.3333333333333" cy="148.18606445673174" r="3.5"/><circle class="dot neg" cx="465.55555555555554" cy="165.84013082047784" r="3.5"/><circle class="dot neg" cx="525.7777777777778" cy="151.90336634007832" r="3.5"/><circle class="dot neg" cx="586" cy="130.4201266769805" r="3.5"/><text class="axis" x="50" y="159.2220911788766">-0,53%</text><text class="axis" x="582" y="122.42012667698049" text-anchor="end">-0,12%</text><text class="axis" x="46" y="18">Ngày giao dịch VN sau tín hiệu</text></svg>
+</figure>
+<p>Đường cong xuống ở phiên 1, nhích lên ở phiên 4–6, rồi chạm mức thấp ở phiên 8 trước khi phục hồi nhẹ ở phiên 10. Các dao động này nhỏ so với độ lệch chuẩn 1,65% của mỗi phiên, nên không nên đọc chi tiết từng điểm.</p>
+
+<h3>Phân phối phiên đầu tiên</h3>
+<figure class="figure">
+<figcaption>Tỉ lệ phiên VN theo khoảng lợi nhuận, episode so với nền (%)</figcaption>
+<svg viewBox="0 0 600 260" role="img" aria-label="Phân phối lợi nhuận phiên VN đầu tiên"><line class="grid" x1="44" x2="586" y1="220" y2="220"/><text class="axis" x="38" y="224" text-anchor="end">0%</text><line class="grid" x1="44" x2="586" y1="174.22222222222223" y2="174.22222222222223"/><text class="axis" x="38" y="178.22222222222223" text-anchor="end">10%</text><line class="grid" x1="44" x2="586" y1="128.44444444444446" y2="128.44444444444446"/><text class="axis" x="38" y="132.44444444444446" text-anchor="end">20%</text><line class="grid" x1="44" x2="586" y1="82.66666666666666" y2="82.66666666666666"/><text class="axis" x="38" y="86.66666666666666" text-anchor="end">30%</text><line class="grid" x1="44" x2="586" y1="36.888888888888886" y2="36.888888888888886"/><text class="axis" x="38" y="40.888888888888886" text-anchor="end">40%</text><rect class="bar neutral" x="49.42" y="218.42908889235517" width="20.596" height="1.5709111076448323" rx="2"/><rect class="bar neg" x="72.184" y="213.8138138138138" width="20.596" height="6.186186186186205" rx="2"/><text class="axis" x="71.1" y="238" text-anchor="middle">−8</text><rect class="bar neutral" x="103.62" y="215.0016464756755" width="20.596" height="4.9983535243245" rx="2"/><rect class="bar neg" x="126.384" y="207.62762762762765" width="20.596" height="12.372372372372354" rx="2"/><text class="axis" x="125.30000000000001" y="238" text-anchor="middle">−6</text><rect class="bar neutral" x="157.82" y="198.79270004679458" width="20.596" height="21.20729995320542" rx="2"/><rect class="bar neg" x="180.584" y="170.51051051051053" width="20.596" height="49.48948948948947" rx="2"/><text class="axis" x="179.5" y="238" text-anchor="middle">−4</text><rect class="bar neutral" x="212.02" y="174.9434132307319" width="20.596" height="45.05658676926811" rx="2"/><rect class="bar neg" x="234.78400000000002" y="176.69669669669668" width="20.596" height="43.30330330330332" rx="2"/><text class="axis" x="233.70000000000002" y="238" text-anchor="middle">−2</text><rect class="bar neutral" x="266.22" y="78.83221546300628" width="20.596" height="141.16778453699374" rx="2"/><rect class="bar neg" x="288.98400000000004" y="28.228228228228218" width="20.596" height="191.7717717717718" rx="2"/><text class="axis" x="287.90000000000003" y="238" text-anchor="middle">−1</text><rect class="bar neutral" x="320.42" y="62.55186398377788" width="20.596" height="157.44813601622212" rx="2"/><rect class="bar neg" x="343.184" y="121.02102102102103" width="20.596" height="98.97897897897897" rx="2"/><text class="axis" x="342.1" y="238" text-anchor="middle">0</text><rect class="bar neutral" x="374.62000000000006" y="160.5195930605383" width="20.596" height="59.48040693946169" rx="2"/><rect class="bar neg" x="397.38400000000007" y="182.88288288288288" width="20.596" height="37.11711711711712" rx="2"/><text class="axis" x="396.30000000000007" y="238" text-anchor="middle">1</text><rect class="bar neutral" x="428.82000000000005" y="198.22145964401463" width="20.596" height="21.77854035598537" rx="2"/><rect class="bar neg" x="451.58400000000006" y="201.4414414414414" width="20.596" height="18.558558558558587" rx="2"/><text class="axis" x="450.50000000000006" y="238" text-anchor="middle">2</text><rect class="bar neutral" x="483.02000000000004" y="215.7871020294979" width="20.596" height="4.212897970502098" rx="2"/><rect class="bar neg" x="505.78400000000005" y="220" width="20.596" height="0" rx="2"/><text class="axis" x="504.70000000000005" y="238" text-anchor="middle">4</text><rect class="bar neutral" x="537.2199999999999" y="219.14313939583008" width="20.596" height="0.856860604169924" rx="2"/><rect class="bar neg" x="559.9839999999999" y="220" width="20.596" height="0" rx="2"/><text class="axis" x="558.9" y="238" text-anchor="middle">6</text><text class="axis" x="315" y="256" text-anchor="middle">Lợi nhuận phiên VN đầu tiên (%), biên trái của khoảng</text><rect class="bar neutral" x="430" y="14" width="10" height="10" rx="2"/><text class="axis" x="445" y="23">Nền (mọi phiên)</text><rect class="bar neg" x="430" y="30" width="10" height="10" rx="2"/><text class="axis" x="445" y="39">Sau 5 phiên giảm US30</text></svg>
+</figure>
+<p>Episode có nhiều phiên giảm dưới −2% hơn nền, và ít phiên tăng hơn. Mẫu 74 phiên làm các ô hiếm (dưới −6% hoặc trên +4%) chỉ có vài lần xuất hiện, nên tỉ lệ ở các ô đó không ổn định.</p>
+
+<h3>Theo độ sâu của đợt giảm US30</h3>
+<figure class="figure">
+<figcaption>Lợi nhuận trung bình VN phiên 1, chia theo mức giảm US30 trong 5 phiên</figcaption>
+<svg viewBox="0 0 560 240" role="img" aria-label="Giảm nhẹ -0,41, Giảm vừa -0,48, Giảm mạnh -0,83"><line class="grid" x1="44" x2="548" y1="171.74999999999997" y2="171.74999999999997"/><text class="axis" x="38" y="175.74999999999997" text-anchor="end">-1%</text><line class="grid" x1="44" x2="548" y1="60.5" y2="60.5"/><text class="axis" x="38" y="64.5" text-anchor="end">0%</text><line class="zero" x1="44" x2="548" y1="60.5" y2="60.5"/><rect class="bar neg" x="81.8" y="60.5" width="92.4" height="45.39847579663373" rx="2"/><text class="val" x="128" y="119.89847579663373" text-anchor="middle">-0,41%</text><text class="axis" x="128" y="218" text-anchor="middle">Giảm nhẹ</text><text class="axis sub" x="128" y="232" text-anchor="middle">n=35, xanh 37,1%</text><rect class="bar neg" x="249.8" y="60.5" width="92.4" height="52.88722072283663" rx="2"/><text class="val" x="296" y="127.38722072283663" text-anchor="middle">-0,48%</text><text class="axis" x="296" y="218" text-anchor="middle">Giảm vừa</text><text class="axis sub" x="296" y="232" text-anchor="middle">n=20, xanh 25,0%</text><rect class="bar neg" x="417.8" y="60.5" width="92.4" height="92.33256485511285" rx="2"/><text class="val" x="464" y="166.83256485511285" text-anchor="middle">-0,83%</text><text class="axis" x="464" y="218" text-anchor="middle">Giảm mạnh</text><text class="axis sub" x="464" y="232" text-anchor="middle">n=19, xanh 36,8%</text></svg>
+</figure>
+<p>Giảm mạnh (dưới −5%) cho kết quả xấu nhất: trung bình -0,83% phiên 1 và -1,41% sau 5 phiên. Đợt giảm nhẹ (dưới 3%) gần như không tạo phản ứng xấu rõ rệt ở phiên 1. Mỗi nhóm chỉ có 19–35 episode, nên đây là xu hướng gợi ý chứ không phải kết luận.</p>
+
+<h3>Theo giai đoạn</h3>
+<figure class="figure">
+<figcaption>Lợi nhuận trung bình VN phiên 1 theo giai đoạn</figcaption>
+<svg viewBox="0 0 560 240" role="img" aria-label="2000–2007 -0,04, 2008–2012 -0,46, 2013–2019 -0,58, 2020–2026 -0,98"><line class="grid" x1="44" x2="548" y1="171.74999999999997" y2="171.74999999999997"/><text class="axis" x="38" y="175.74999999999997" text-anchor="end">-1%</text><line class="grid" x1="44" x2="548" y1="60.5" y2="60.5"/><text class="axis" x="38" y="64.5" text-anchor="end">0%</text><line class="zero" x1="44" x2="548" y1="60.5" y2="60.5"/><rect class="bar neg" x="72.35" y="60.5" width="69.30000000000001" height="4.577271329193849" rx="2"/><text class="val" x="107" y="79.07727132919385" text-anchor="middle">-0,04%</text><text class="axis" x="107" y="218" text-anchor="middle">2000–2007</text><text class="axis sub" x="107" y="232" text-anchor="middle">n=19, xanh 42,1%</text><rect class="bar neg" x="198.35" y="60.5" width="69.30000000000001" height="51.71184384128121" rx="2"/><text class="val" x="233" y="126.21184384128121" text-anchor="middle">-0,46%</text><text class="axis" x="233" y="218" text-anchor="middle">2008–2012</text><text class="axis sub" x="233" y="232" text-anchor="middle">n=14, xanh 42,9%</text><rect class="bar neg" x="324.35" y="60.5" width="69.30000000000001" height="65.03119303080142" rx="2"/><text class="val" x="359" y="139.53119303080143" text-anchor="middle">-0,58%</text><text class="axis" x="359" y="218" text-anchor="middle">2013–2019</text><text class="axis sub" x="359" y="232" text-anchor="middle">n=20, xanh 25,0%</text><rect class="bar neg" x="450.35" y="60.5" width="69.30000000000001" height="109.02152237797179" rx="2"/><text class="val" x="485" y="183.5215223779718" text-anchor="middle">-0,98%</text><text class="axis" x="485" y="218" text-anchor="middle">2020–2026</text><text class="axis sub" x="485" y="232" text-anchor="middle">n=21, xanh 28,6%</text></svg>
+</figure>
+<p>Phản ứng yếu dần qua các giai đoạn: từ gần trung tính (2000–2007) đến -0,98% trong 2020–2026, khi chỉ 28,6% phiên xanh. Mỗi giai đoạn có 14–21 episode, và các giai đoạn này không tách biệt hoàn toàn về chu kỳ thị trường, nên chưa thể kết luận quan hệ đang thay đổi.</p>
+
+<h3>So với các phiên US giảm khác</h3>
+<div class="tablewrap" style="margin:12px 0">
+<table>
+<thead><tr><th>Nhóm tín hiệu</th><th class="num">n</th><th class="num">VN phiên 1 TB</th><th class="num">VN phiên 1 xanh</th></tr></thead>
+<tbody>
+<tr><td>Sau chuỗi 5 phiên giảm (episode)</td><td class="num">74</td><td class="num neg-t">-0,53%</td><td class="num">33,8%</td></tr>
+<tr><td>Sau mỗi phiên US giảm (không chọn lọc chuỗi)</td><td class="num">3089</td><td class="num">-0,11%</td><td class="num">47,8%</td></tr>
+<tr><td>Sau mỗi phiên US tăng</td><td class="num">3526</td><td class="num pos-t">+0,24%</td><td class="num">58,2%</td></tr>
+</tbody>
+</table>
+</div>
+<p>Phản ứng của VN sau mọi phiên US giảm (-0,11%) đã yếu hơn sau phiên US tăng (+0,24%). Phản ứng sau chuỗi 5 phiên giảm còn yếu hơn phản ứng sau một phiên US giảm bất kỳ, với p ≈ 0,028 (chưa hiệu chỉnh). So sánh này có tính chất mẫu chồng lấp nên chỉ nên xem là gợi ý.</p>
+
+<h2>3. Kết luận từng câu hỏi</h2>
+<ul>
+<li><strong>Phiên 6 của US30:</strong> xanh 56,8% (42/74). Không khác nền có ý nghĩa thống kê.</li>
+<li><strong>VNINDEX phiên đầu tiên:</strong> giảm trung bình -0,53%, chỉ 33,8% phiên xanh. Đây là hiệu ứng có ý nghĩa thống kê rõ nhất trong nghiên cứu này.</li>
+<li><strong>VNINDEX 5–10 phiên:</strong> vẫn âm nhẹ nhưng p 0,19–0,25, KTC đều chứa 0. Không đủ bằng chứng để nói VN tiếp tục giảm.</li>
+<li><strong>Điều chỉnh theo giai đoạn và độ sâu:</strong> phản ứng yếu hơn ở giai đoạn gần đây và khi US giảm sâu. Mẫu nhỏ, nên đây là hướng cần kiểm tra thêm.</li>
+</ul>
+
+<h2>4. Phương pháp</h2>
+<ul>
+<li>Dữ liệu: DJ:DJI và HOSE:VNINDEX, khung D1, lấy từ TradingView qua thư viện <code>@mathieuc/tradingview</code>. Giá là giá chỉ số, chưa gồm cổ tức.</li>
+<li>Episode: US30 đóng cửa giảm đúng 5 phiên liên tiếp. Chuỗi kéo dài hơn 5 phiên chỉ tính một lần ở mốc thứ 5.</li>
+<li>Phiên VN đầu tiên: phiên có ngày lớn hơn ngày US30 đóng cửa phiên thứ 5.</li>
+<li>Kiểm định: Welch t-test so với nền bằng phân phối chuẩn xấp xỉ. KTC bootstrap 5 000 lần lặp, hạt giống cố định.</li>
+</ul>
+
+<h2>5. Hạn chế</h2>
+<ul>
+<li><strong>Mẫu chồng lấp và tụ theo thời gian.</strong> 74 episode không độc lập: nhiều đợt tập trung vào cùng một cuộc khủng hoảng (2008, 2020, 2022). Số mẫu hiệu dụng nhỏ hơn 74, nên p-value thực tế cao hơn con số trên.</li>
+<li><strong>Thời điểm vào lệnh.</strong> Hiệu ứng đo từ close đến close, nên bao gồm gap mở cửa phản ứng với US. Một lệnh vào ở giá mở cửa VN sẽ không hưởng phần gap này. Chưa tính giá mở cửa phiên VN, nên chưa biết phần còn lại là bao nhiêu.</li>
+<li><strong>Chi phí và thanh khoản.</strong> Chưa tính phí, thuế, trượt giá, và chưa xét giới hạn biên độ HOSE 7%.</li>
+<li><strong>Chỉ số không phải hợp đồng giao dịch.</strong> DJI và VNINDEX là chỉ số, không phải tài sản bạn có thể mua trực tiếp. Hợp đồng VN30F1M có giá và lịch khác.</li>
+<li><strong>Nhiều phép so sánh.</strong> Báo cáo có nhiều kiểm định. Trong năm kiểm định so với nền ở bảng phần 2, chỉ phiên 1 còn có ý nghĩa sau hiệu chỉnh Bonferroni (p ≈ 0,011). Phiên 5 và 10 có p hiệu chỉnh gần 1.</li>
+<li><strong>Không có mẫu ngoài kỳ.</strong> Toàn bộ số liệu là in-sample. Chưa chia giai đoạn huấn luyện và kiểm tra.</li>
+</ul>
+
+<h2>Phụ lục: 74 episode</h2>
+<p class="note">Cột "US phiên 6" là phiên US kế tiếp sau episode. VN 1 phiên là close phiên VN đầu tiên so với close trước đó. VN 5 phiên là close phiên thứ 5 so với close trước phiên đầu.</p>
+<div class="tablewrap">
+<table>
+<thead><tr><th>US giai đoạn 5 phiên</th><th class="num">US giảm</th><th>US phiên 6</th><th>VN phiên đầu</th><th class="num">VN 1 phiên</th><th class="num">VN 5 phiên</th></tr></thead>
+<tbody>
+<tr><td>2000-09-13 → 2000-09-19</td><td class="num">-3,95%</td><td>Đỏ</td><td>2000-09-20</td><td class="num pos-t">+0,02%</td><td class="num pos-t">+2,13%</td></tr>
+<tr><td>2000-10-05 → 2000-10-11</td><td class="num">-3,44%</td><td>Đỏ</td><td>2000-10-13</td><td class="num pos-t">+1,68%</td><td class="num pos-t">+7,99%</td></tr>
+<tr><td>2000-11-07 → 2000-11-13</td><td class="num">-4,19%</td><td>Xanh</td><td>2000-11-15</td><td class="num pos-t">+1,76%</td><td class="num pos-t">+5,95%</td></tr>
+<tr><td>2001-09-06 → 2001-09-18</td><td class="num">-11,26%</td><td>Đỏ</td><td>2001-09-19</td><td class="num pos-t">+2,74%</td><td class="num neg-t">-8,13%</td></tr>
+<tr><td>2002-01-07 → 2002-01-11</td><td class="num">-2,65%</td><td>Đỏ</td><td>2002-01-14</td><td class="num neg-t">-2,31%</td><td class="num neg-t">-6,03%</td></tr>
+<tr><td>2002-02-01 → 2002-02-07</td><td class="num">-2,97%</td><td>Xanh</td><td>2002-02-08</td><td class="num neg-t">-0,08%</td><td class="num neg-t">-4,28%</td></tr>
+<tr><td>2002-07-08 → 2002-07-12</td><td class="num">-7,41%</td><td>Đỏ</td><td>2002-07-15</td><td class="num neg-t">-0,40%</td><td class="num neg-t">-3,49%</td></tr>
+<tr><td>2002-08-27 → 2002-09-03</td><td class="num">-6,85%</td><td>Xanh</td><td>2002-09-04</td><td class="num neg-t">-0,44%</td><td class="num neg-t">-0,82%</td></tr>
+<tr><td>2002-11-29 → 2002-12-05</td><td class="num">-3,45%</td><td>Xanh</td><td>2002-12-06</td><td class="num neg-t">-1,22%</td><td class="num neg-t">-1,68%</td></tr>
+<tr><td>2003-01-15 → 2003-01-22</td><td class="num">-5,92%</td><td>Xanh</td><td>2003-01-23</td><td class="num pos-t">+0,87%</td><td class="num pos-t">+1,07%</td></tr>
+<tr><td>2004-02-18 → 2004-02-24</td><td class="num">-1,39%</td><td>Xanh</td><td>2004-02-25</td><td class="num pos-t">+0,04%</td><td class="num pos-t">+7,23%</td></tr>
+<tr><td>2004-03-18 → 2004-03-24</td><td class="num">-2,45%</td><td>Xanh</td><td>2004-03-25</td><td class="num pos-t">+2,95%</td><td class="num pos-t">+7,81%</td></tr>
+<tr><td>2004-10-19 → 2004-10-25</td><td class="num">-2,07%</td><td>Xanh</td><td>2004-10-26</td><td class="num pos-t">+0,00%</td><td class="num neg-t">-0,54%</td></tr>
+<tr><td>2004-12-29 → 2005-01-04</td><td class="num">-2,06%</td><td>Đỏ</td><td>2005-01-05</td><td class="num neg-t">-0,21%</td><td class="num neg-t">-1,06%</td></tr>
+<tr><td>2005-06-20 → 2005-06-24</td><td class="num">-3,06%</td><td>Đỏ</td><td>2005-06-27</td><td class="num neg-t">-0,32%</td><td class="num neg-t">-0,11%</td></tr>
+<tr><td>2006-10-27 → 2006-11-02</td><td class="num">-1,19%</td><td>Đỏ</td><td>2006-11-03</td><td class="num neg-t">-0,62%</td><td class="num pos-t">+2,85%</td></tr>
+<tr><td>2007-02-21 → 2007-02-27</td><td class="num">-4,46%</td><td>Xanh</td><td>2007-02-28</td><td class="num neg-t">-2,54%</td><td class="num neg-t">-2,92%</td></tr>
+<tr><td>2007-08-09 → 2007-08-15</td><td class="num">-5,83%</td><td>Đỏ</td><td>2007-08-16</td><td class="num neg-t">-1,65%</td><td class="num neg-t">-2,54%</td></tr>
+<tr><td>2007-10-15 → 2007-10-19</td><td class="num">-4,05%</td><td>Xanh</td><td>2007-10-22</td><td class="num neg-t">-1,03%</td><td class="num neg-t">-0,42%</td></tr>
+<tr><td>2008-01-15 → 2008-01-22</td><td class="num">-6,32%</td><td>Xanh</td><td>2008-01-23</td><td class="num neg-t">-3,85%</td><td class="num pos-t">+0,48%</td></tr>
+<tr><td>2008-10-01 → 2008-10-07</td><td class="num">-12,94%</td><td>Đỏ</td><td>2008-10-08</td><td class="num neg-t">-3,12%</td><td class="num neg-t">-6,01%</td></tr>
+<tr><td>2008-12-17 → 2008-12-23</td><td class="num">-5,65%</td><td>Xanh</td><td>2008-12-24</td><td class="num pos-t">+0,04%</td><td class="num pos-t">+4,08%</td></tr>
+<tr><td>2009-01-07 → 2009-01-13</td><td class="num">-6,28%</td><td>Đỏ</td><td>2009-01-14</td><td class="num pos-t">+0,28%</td><td class="num neg-t">-1,39%</td></tr>
+<tr><td>2009-02-25 → 2009-03-03</td><td class="num">-8,50%</td><td>Xanh</td><td>2009-03-04</td><td class="num pos-t">+1,20%</td><td class="num pos-t">+4,32%</td></tr>
+<tr><td>2010-06-24 → 2010-06-30</td><td class="num">-5,09%</td><td>Đỏ</td><td>2010-07-01</td><td class="num neg-t">-0,62%</td><td class="num neg-t">-2,02%</td></tr>
+<tr><td>2010-08-10 → 2010-08-16</td><td class="num">-3,71%</td><td>Xanh</td><td>2010-08-17</td><td class="num neg-t">-0,27%</td><td class="num neg-t">-3,62%</td></tr>
+<tr><td>2011-06-01 → 2011-06-07</td><td class="num">-3,97%</td><td>Đỏ</td><td>2011-06-08</td><td class="num neg-t">-0,93%</td><td class="num neg-t">-0,48%</td></tr>
+<tr><td>2011-07-22 → 2011-07-28</td><td class="num">-3,81%</td><td>Đỏ</td><td>2011-07-29</td><td class="num neg-t">-0,66%</td><td class="num neg-t">-3,02%</td></tr>
+<tr><td>2012-04-03 → 2012-04-10</td><td class="num">-4,14%</td><td>Xanh</td><td>2012-04-11</td><td class="num pos-t">+1,75%</td><td class="num pos-t">+4,88%</td></tr>
+<tr><td>2012-05-02 → 2012-05-08</td><td class="num">-2,61%</td><td>Đỏ</td><td>2012-05-09</td><td class="num neg-t">-0,09%</td><td class="num neg-t">-6,64%</td></tr>
+<tr><td>2012-05-11 → 2012-05-17</td><td class="num">-3,21%</td><td>Đỏ</td><td>2012-05-18</td><td class="num neg-t">-1,72%</td><td class="num neg-t">-3,54%</td></tr>
+<tr><td>2012-07-05 → 2012-07-11</td><td class="num">-2,62%</td><td>Đỏ</td><td>2012-07-12</td><td class="num pos-t">+0,35%</td><td class="num pos-t">+2,84%</td></tr>
+<tr><td>2012-12-21 → 2012-12-28</td><td class="num">-2,81%</td><td>Xanh</td><td>2013-01-02</td><td class="num pos-t">+1,12%</td><td class="num pos-t">+8,08%</td></tr>
+<tr><td>2013-08-14 → 2013-08-20</td><td class="num">-2,90%</td><td>Đỏ</td><td>2013-08-21</td><td class="num neg-t">-0,42%</td><td class="num neg-t">-3,81%</td></tr>
+<tr><td>2013-09-19 → 2013-09-25</td><td class="num">-2,57%</td><td>Xanh</td><td>2013-09-26</td><td class="num neg-t">-0,23%</td><td class="num pos-t">+1,68%</td></tr>
+<tr><td>2013-11-29 → 2013-12-05</td><td class="num">-1,71%</td><td>Xanh</td><td>2013-12-06</td><td class="num pos-t">+0,02%</td><td class="num neg-t">-0,61%</td></tr>
+<tr><td>2014-01-21 → 2014-01-27</td><td class="num">-3,77%</td><td>Xanh</td><td>2014-02-06</td><td class="num neg-t">-0,33%</td><td class="num pos-t">+1,39%</td></tr>
+<tr><td>2014-03-10 → 2014-03-14</td><td class="num">-2,35%</td><td>Xanh</td><td>2014-03-17</td><td class="num pos-t">+0,59%</td><td class="num pos-t">+0,82%</td></tr>
+<tr><td>2014-10-09 → 2014-10-15</td><td class="num">-5,02%</td><td>Đỏ</td><td>2014-10-16</td><td class="num neg-t">-2,83%</td><td class="num neg-t">-0,45%</td></tr>
+<tr><td>2015-01-09 → 2015-01-15</td><td class="num">-3,28%</td><td>Xanh</td><td>2015-01-16</td><td class="num neg-t">-0,51%</td><td class="num neg-t">-0,55%</td></tr>
+<tr><td>2015-07-21 → 2015-07-27</td><td class="num">-3,65%</td><td>Xanh</td><td>2015-07-28</td><td class="num neg-t">-0,63%</td><td class="num neg-t">-4,09%</td></tr>
+<tr><td>2015-07-30 → 2015-08-05</td><td class="num">-1,19%</td><td>Đỏ</td><td>2015-08-06</td><td class="num neg-t">-0,99%</td><td class="num neg-t">-0,47%</td></tr>
+<tr><td>2015-08-18 → 2015-08-24</td><td class="num">-9,54%</td><td>Đỏ</td><td>2015-08-25</td><td class="num pos-t">+0,58%</td><td class="num pos-t">+7,18%</td></tr>
+<tr><td>2016-02-05 → 2016-02-11</td><td class="num">-4,61%</td><td>Xanh</td><td>2016-02-15</td><td class="num neg-t">-0,18%</td><td class="num pos-t">+1,70%</td></tr>
+<tr><td>2016-06-09 → 2016-06-15</td><td class="num">-2,03%</td><td>Xanh</td><td>2016-06-16</td><td class="num neg-t">-0,30%</td><td class="num neg-t">-0,10%</td></tr>
+<tr><td>2016-07-25 → 2016-07-29</td><td class="num">-0,75%</td><td>Đỏ</td><td>2016-08-01</td><td class="num neg-t">-0,59%</td><td class="num neg-t">-3,81%</td></tr>
+<tr><td>2016-10-27 → 2016-11-02</td><td class="num">-1,32%</td><td>Đỏ</td><td>2016-11-03</td><td class="num neg-t">-0,56%</td><td class="num neg-t">-0,17%</td></tr>
+<tr><td>2017-01-12 → 2017-01-19</td><td class="num">-1,11%</td><td>Xanh</td><td>2017-01-20</td><td class="num pos-t">+0,58%</td><td class="num pos-t">+3,06%</td></tr>
+<tr><td>2017-03-16 → 2017-03-22</td><td class="num">-1,38%</td><td>Đỏ</td><td>2017-03-23</td><td class="num pos-t">+0,93%</td><td class="num pos-t">+1,06%</td></tr>
+<tr><td>2018-04-18 → 2018-04-24</td><td class="num">-3,08%</td><td>Xanh</td><td>2018-04-26</td><td class="num neg-t">-3,32%</td><td class="num neg-t">-4,99%</td></tr>
+<tr><td>2018-06-12 → 2018-06-18</td><td class="num">-1,32%</td><td>Đỏ</td><td>2018-06-19</td><td class="num neg-t">-2,55%</td><td class="num pos-t">+0,32%</td></tr>
+<tr><td>2019-03-04 → 2019-03-08</td><td class="num">-2,21%</td><td>Xanh</td><td>2019-03-11</td><td class="num neg-t">-0,07%</td><td class="num pos-t">+1,92%</td></tr>
+<tr><td>2019-07-30 → 2019-08-05</td><td class="num">-5,52%</td><td>Xanh</td><td>2019-08-06</td><td class="num neg-t">-0,88%</td><td class="num pos-t">+0,22%</td></tr>
+<tr><td>2020-01-21 → 2020-01-27</td><td class="num">-2,77%</td><td>Xanh</td><td>2020-01-30</td><td class="num neg-t">-3,22%</td><td class="num neg-t">-6,61%</td></tr>
+<tr><td>2020-02-20 → 2020-02-26</td><td class="num">-8,15%</td><td>Đỏ</td><td>2020-02-27</td><td class="num pos-t">+0,28%</td><td class="num neg-t">-0,74%</td></tr>
+<tr><td>2021-01-21 → 2021-01-27</td><td class="num">-2,84%</td><td>Xanh</td><td>2021-01-28</td><td class="num neg-t">-6,67%</td><td class="num pos-t">+1,29%</td></tr>
+<tr><td>2021-06-14 → 2021-06-18</td><td class="num">-3,45%</td><td>Xanh</td><td>2021-06-21</td><td class="num neg-t">-0,37%</td><td class="num pos-t">+0,90%</td></tr>
+<tr><td>2021-09-03 → 2021-09-10</td><td class="num">-2,36%</td><td>Xanh</td><td>2021-09-13</td><td class="num neg-t">-0,29%</td><td class="num pos-t">+0,54%</td></tr>
+<tr><td>2022-01-13 → 2022-01-20</td><td class="num">-4,34%</td><td>Đỏ</td><td>2022-01-21</td><td class="num pos-t">+0,52%</td><td class="num pos-t">+0,37%</td></tr>
+<tr><td>2022-02-16 → 2022-02-23</td><td class="num">-5,31%</td><td>Xanh</td><td>2022-02-24</td><td class="num neg-t">-1,15%</td><td class="num neg-t">-1,77%</td></tr>
+<tr><td>2022-05-05 → 2022-05-11</td><td class="num">-6,54%</td><td>Đỏ</td><td>2022-05-12</td><td class="num neg-t">-4,82%</td><td class="num neg-t">-4,67%</td></tr>
+<tr><td>2022-06-08 → 2022-06-14</td><td class="num">-8,48%</td><td>Xanh</td><td>2022-06-15</td><td class="num neg-t">-1,33%</td><td class="num neg-t">-4,70%</td></tr>
+<tr><td>2022-07-08 → 2022-07-14</td><td class="num">-2,40%</td><td>Xanh</td><td>2022-07-15</td><td class="num neg-t">-0,25%</td><td class="num pos-t">+1,38%</td></tr>
+<tr><td>2022-09-20 → 2022-09-26</td><td class="num">-5,67%</td><td>Đỏ</td><td>2022-09-27</td><td class="num neg-t">-0,67%</td><td class="num neg-t">-7,49%</td></tr>
+<tr><td>2023-03-07 → 2023-03-13</td><td class="num">-4,82%</td><td>Xanh</td><td>2023-03-14</td><td class="num neg-t">-1,20%</td><td class="num neg-t">-2,82%</td></tr>
+<tr><td>2023-05-08 → 2023-05-12</td><td class="num">-1,11%</td><td>Xanh</td><td>2023-05-15</td><td class="num neg-t">-0,11%</td><td class="num pos-t">+0,02%</td></tr>
+<tr><td>2023-05-19 → 2023-05-25</td><td class="num">-2,30%</td><td>Xanh</td><td>2023-05-26</td><td class="num neg-t">-0,08%</td><td class="num pos-t">+1,29%</td></tr>
+<tr><td>2023-06-16 → 2023-06-23</td><td class="num">-1,98%</td><td>Đỏ</td><td>2023-06-26</td><td class="num pos-t">+0,23%</td><td class="num neg-t">-0,81%</td></tr>
+<tr><td>2024-04-08 → 2024-04-12</td><td class="num">-2,37%</td><td>Đỏ</td><td>2024-04-15</td><td class="num neg-t">-4,70%</td><td class="num neg-t">-6,77%</td></tr>
+<tr><td>2024-10-21 → 2024-10-25</td><td class="num">-2,68%</td><td>Xanh</td><td>2024-10-28</td><td class="num pos-t">+0,16%</td><td class="num pos-t">+0,17%</td></tr>
+<tr><td>2024-12-05 → 2024-12-11</td><td class="num">-1,92%</td><td>Đỏ</td><td>2024-12-12</td><td class="num neg-t">-0,12%</td><td class="num neg-t">-0,23%</td></tr>
+<tr><td>2025-07-28 → 2025-08-01</td><td class="num">-2,92%</td><td>Xanh</td><td>2025-08-04</td><td class="num pos-t">+2,21%</td><td class="num pos-t">+6,00%</td></tr>
+<tr><td>2025-10-06 → 2025-10-10</td><td class="num">-2,73%</td><td>Xanh</td><td>2025-10-13</td><td class="num pos-t">+1,01%</td><td class="num neg-t">-0,94%</td></tr>
+<tr><td>2026-04-23 → 2026-04-29</td><td class="num">-1,27%</td><td>Xanh</td><td>2026-05-04</td><td class="num neg-t">-0,00%</td><td class="num pos-t">+3,30%</td></tr>
+</tbody>
+</table>
+</div>
+</main>
+</body>
+</html>
