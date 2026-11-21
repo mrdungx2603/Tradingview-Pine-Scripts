@@ -1,0 +1,113 @@
+//@version=6
+// Order Flow Bar — Phân Tích Lưu Lượng Khối Lượng Giao Dịch
+// Hiển Thị Cơ Cấu Order Flow (Buyer/Seller Volume) qua các thanh giá,
+// kết hợp Market Profile (VAH/POC/VAL), Wyckoff & SMC để nhận diện quyết tâm giao dịch.
+//
+// Phiên bản: 1.0
+
+indicator(
+    title="Order Flow Tổng",
+    shorttitle="OF_BAR",
+    overlay=true,
+    max_lines_count=500,
+    max_labels_count=500,
+    max_boxes_count=500
+)
+
+// ===== PHẠM VI TÍNH =====
+mode_calc = input.string(
+    defval="Visible Chart",
+    title="Chế độ Phạm Vi",
+    options=["Visible Chart", "Session", "Last HL"],
+    group="Phạm Vi Tính"
+)
+
+price_step = input.float(
+    defval=1.0,
+    title="Bước Giá (Price Step)",
+    minval=0.01,
+    group="Phạm Vi Tính"
+)
+
+vis_bars_n = input.int(
+    defval=100,
+    title="Số Bar Nhìn Thấy",
+    minval=10,
+    group="Phạm Vi Tính"
+)
+
+max_lookback_bars = input.int(
+    defval=500,
+    title="Max Lookback Bars",
+    minval=1,
+    group="Phạm Vi Tính"
+)
+
+// ===== SMC (Last HL) =====
+pivot_length = input.int(
+    defval=10,
+    title="Pivot Length",
+    minval=1,
+    group="SMC (Last HL)"
+)
+
+seed_mode = input.string(
+    defval="Pivot Seed",
+    title="Seed Mode",
+    options=["Pivot Seed", "Session Seed"],
+    group="SMC (Last HL)"
+)
+
+// ===== HIỂN THỊ =====
+anchor_offset_bars = input.int(
+    defval=0,
+    title="Offset Bar Gốc",
+    minval=0,
+    group="Hiển Thị"
+)
+
+wing_max_bars = input.int(
+    defval=20,
+    title="Max Độ Rộng Cánh (Bars)",
+    minval=1,
+    group="Hiển Thị"
+)
+
+buyer_color = input.color(
+    defval=color.new(color.green, 50),
+    title="Màu Buyer",
+    group="Hiển Thị"
+)
+
+seller_color = input.color(
+    defval=color.new(color.red, 50),
+    title="Màu Seller",
+    group="Hiển Thị"
+)
+
+poc_color = input.color(
+    defval=color.blue,
+    title="Màu POC",
+    group="Hiển Thị"
+)
+
+peak_buy_color = input.color(
+    defval=color.new(color.lime, 50),
+    title="Màu Peak Buy",
+    group="Hiển Thị"
+)
+
+peak_sell_color = input.color(
+    defval=color.new(color.orange, 50),
+    title="Màu Peak Sell",
+    group="Hiển Thị"
+)
+
+show_value_labels = input.bool(
+    defval=true,
+    title="Hiển Thị Nhãn Giá Trị",
+    group="Hiển Thị"
+)
+
+// ===== PLACEHOLDER PLOT =====
+plot(na)
