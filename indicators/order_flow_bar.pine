@@ -172,6 +172,42 @@ f_push_bar_buffer(array<BarRowVol> buf, int bar_idx, array<int> row_ids, array<f
     if array.size(buf) > cap
         array.shift(buf)
 
+// ===== SESSION ACCUMULATOR — CỘNG DỒN 1 CHIỀU, RESET MỖI NGÀY (TASK 5) =====
+// RowProfile là cấu trúc dùng chung cho mọi mode từ đây (Task 7/8 đọc field này để
+// dựng VAH/POC/VAL). Session chỉ cộng tiến trong ngày hiện tại, không cần buffer Task 4
+// (không có nhu cầu "nhớ lại" quá khứ ngoài phiên).
+type RowProfile
+    array<int>   row_ids
+    array<float> buys
+    array<float> sells
+
+var RowProfile sess_profile = RowProfile.new(array.new<int>(), array.new<float>(), array.new<float>())
+
+// Gộp 1 cặp row_ids/buys/sells bất kỳ vào `profile` (mutate trực tiếp mảng bên trong
+// profile — Pine truyền UDT theo tham chiếu). Logic gộp giống f_bucket_bar_rows ở trên
+// nhưng tổng quát cho input bất kỳ (không gắn cứng với footprint/bar hiện tại) để Task 7
+// tái dùng khi dựng lại profile từ of_buffer.
+f_merge_into_profile(RowProfile profile, array<int> row_ids, array<float> buys, array<float> sells) =>
+    int n_rows = array.size(row_ids)
+    if n_rows > 0
+        for i = 0 to n_rows - 1
+            int   row_id      = array.get(row_ids, i)
+            float row_buy     = array.get(buys, i)
+            float row_sell    = array.get(sells, i)
+            int   existing_idx = array.indexof(profile.row_ids, row_id)
+            if existing_idx >= 0
+                array.set(profile.buys, existing_idx, array.get(profile.buys, existing_idx) + row_buy)
+                array.set(profile.sells, existing_idx, array.get(profile.sells, existing_idx) + row_sell)
+            else
+                array.push(profile.row_ids, row_id)
+                array.push(profile.buys, row_buy)
+                array.push(profile.sells, row_sell)
+
+// Gọi timeframe.change() vô điều kiện mỗi bar (không đặt trong `if`) — built-in này so
+// sánh thời điểm bar hiện tại với bar trước đó, gọi có điều kiện có thể làm lệch trạng
+// thái theo dõi nội bộ. Hành động reset/gộp mới bị gate theo barstate.isconfirmed.
+bool is_new_session = timeframe.change("D")
+
 // ===== DEBUG TẠM (Task 3) — sẽ xoá ở Task 11 =====
 [dbg_rows, dbg_buy, dbg_sell] = f_bucket_bar_rows(fp, price_step)
 
@@ -181,11 +217,22 @@ f_push_bar_buffer(array<BarRowVol> buf, int bar_idx, array<int> row_ids, array<f
 if barstate.isconfirmed
     f_push_bar_buffer(of_buffer, bar_index, dbg_rows, dbg_buy, dbg_sell, max_lookback_bars)
 
+    // Session accumulator: nếu sang ngày mới thì reset sess_profile về rỗng TRƯỚC khi
+    // gộp dữ liệu của bar này — nếu gộp trước rồi mới reset, bar đầu phiên mới sẽ mất
+    // dữ liệu của chính nó (bị clear ngay sau khi vừa gộp xong).
+    if is_new_session
+        array.clear(sess_profile.row_ids)
+        array.clear(sess_profile.buys)
+        array.clear(sess_profile.sells)
+    f_merge_into_profile(sess_profile, dbg_rows, dbg_buy, dbg_sell)
+
 // ===== PLACEHOLDER PLOT =====
 plot(na)
 plot(has_footprint_data ? 1 : 0, title="DEBUG_has_fp")
 plot(array.sum(dbg_buy) - array.sum(dbg_sell), title="DEBUG_bucket_delta")
 plot(array.size(of_buffer), title="DEBUG_buffer_size")
+plot(array.size(sess_profile.row_ids), title="DEBUG_sess_rows")
+plot(array.sum(sess_profile.buys) + array.sum(sess_profile.sells), title="DEBUG_sess_total_vol")
 // Lưu ý: fp.delta() cũng raise runtime error "cannot be na" nếu gọi trực tiếp khi fp còn na
 // (vd bar 0 / chưa có dữ liệu) — giống fp.rows(). Thêm guard not na(fp) để script chạy được
 // trên toàn bộ các bar thay vì crash ngay từ bar đầu (lệch nhẹ so với literal brief Step 2,
