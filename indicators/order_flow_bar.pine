@@ -214,6 +214,24 @@ f_merge_into_profile(RowProfile profile, array<int> row_ids, array<float> buys, 
                 array.push(profile.buys, row_buy)
                 array.push(profile.sells, row_sell)
 
+// ===== REBUILD PROFILE TỪ BUFFER CHO LAST HL & VISIBLE CHART (TASK 7) =====
+// Duyệt tuyến tính of_buffer (Task 4), gộp các phần tử có bar_idx nằm trong [left_bar,
+// right_bar] (bao gồm 2 đầu) vào 1 RowProfile mới (khởi tạo rỗng) bằng f_merge_into_profile
+// (Task 5). Nếu left_bar hoặc right_bar là na (vd trend == 0 hoặc SMC state chưa seed xong ở
+// Task 6), trả rỗng ngay, không duyệt — không quét/so sánh với na gây sai lệch logic. Việc
+// "clip" tự nhiên khi left_bar nằm ngoài phạm vi buffer còn lưu (bị shift ra do
+// max_lookback_bars) không cần xử lý riêng — phần tử đó đơn giản không còn trong buf.
+f_build_profile_from_buffer(array<BarRowVol> buf, int left_bar, int right_bar) =>
+    RowProfile result = RowProfile.new(array.new<int>(), array.new<float>(), array.new<float>())
+    if not na(left_bar) and not na(right_bar)
+        int n = array.size(buf)
+        if n > 0
+            for i = 0 to n - 1
+                BarRowVol item = array.get(buf, i)
+                if item.bar_idx >= left_bar and item.bar_idx <= right_bar
+                    f_merge_into_profile(result, item.row_ids, item.buys, item.sells)
+    result
+
 // Gọi timeframe.change() vô điều kiện mỗi bar (không đặt trong `if`) — built-in này so
 // sánh thời điểm bar hiện tại với bar trước đó, gọi có điều kiện có thể làm lệch trạng
 // thái theo dõi nội bộ. Hành động reset/gộp mới bị gate theo barstate.isconfirmed.
@@ -267,6 +285,19 @@ if barstate.isconfirmed
     else
         of_smc_state := smc.f_process_bar(of_smc_state)
 
+// Biên "Last HL": leg Last HL đã HOÀN THÀNH kết thúc tại hh_bar (uptrend)/ll_bar (downtrend) —
+// KHÔNG dùng bar_index làm biên phải, vì phần sau hh_bar/ll_bar là đoạn candidate đang dò tìm
+// pivot mới (chưa xác nhận), phải loại trừ theo đúng spec (đây là lỗi đã từng xảy ra ở bản plan
+// đầu tiên, đã được sửa trước khi giao task). trend == 0 hoặc bất kỳ biên nào na (vd of_smc_state
+// chưa seed xong, vài bar đầu phiên) -> ternary tự ra na cho left_bar/right_bar liên quan, và
+// f_build_profile_from_buffer đã guard not na(left_bar) and not na(right_bar) -> trả rỗng.
+int lasthl_left_bar  = of_smc_state.trend == 1 ? of_smc_state.hl_bar : of_smc_state.trend == -1 ? of_smc_state.lh_bar : na
+int lasthl_right_bar = of_smc_state.trend == 1 ? of_smc_state.hh_bar : of_smc_state.trend == -1 ? of_smc_state.ll_bar : na
+RowProfile last_hl_profile = f_build_profile_from_buffer(of_buffer, lasthl_left_bar, lasthl_right_bar)
+
+// Biên "Visible Chart": N bar gần nhất tính tới bar hiện tại (N = input vis_bars_n).
+RowProfile vis_profile = f_build_profile_from_buffer(of_buffer, bar_index - vis_bars_n + 1, bar_index)
+
 // ===== PLACEHOLDER PLOT =====
 plot(na)
 plot(has_footprint_data ? 1 : 0, title="DEBUG_has_fp")
@@ -281,3 +312,5 @@ plot(array.sum(sess_profile.buys) + array.sum(sess_profile.sells), title="DEBUG_
 plot(not na(fp) and not na(fp.delta()) ? fp.delta() : na, title="DEBUG_fp_delta")
 plot(of_smc_state.trend, title="DEBUG_smc_trend")
 plot(na(of_smc_state.hl_bar) ? -1 : of_smc_state.hl_bar, title="DEBUG_hl_bar")
+plot(array.size(last_hl_profile.row_ids), title="DEBUG_lasthl_rows")
+plot(array.size(vis_profile.row_ids), title="DEBUG_vis_rows")
