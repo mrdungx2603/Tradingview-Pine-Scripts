@@ -35,28 +35,25 @@ class CandleDB:
 
     def _create_pool(self):
         """Tạo connection pool MySQL."""
-        db_url = os.getenv(
-            "MARKET_DATA_DB_URL",
-            "mysql+aiomysql://market_data:market_data_pass@localhost:3306/market_data",
-        )
+        db_url = os.getenv("MARKET_DATA_DB_URL")
+        if not db_url:
+            raise RuntimeError(
+                "Thiếu biến môi trường MARKET_DATA_DB_URL. Set trước khi chạy, ví dụ:\n"
+                "  export MARKET_DATA_DB_URL='mysql+aiomysql://<user>:<password>@localhost:3306/market_data'\n"
+                "(không commit giá trị thật của biến này vào git)"
+            )
         # Parse URL: mysql+aiomysql://user:pass@host:port/db
         # Hoặc format: mysql://user:pass@host:port/db
         url = db_url
         if "://" in url:
             url = url.split("://", 1)[1]  # Bỏ scheme
-        if "@" in url:
-            auth, host_db = url.split("@", 1)
-            user, pwd = auth.split(":", 1)
-            host_port, db_name = host_db.split("/", 1)
-            if ":" in host_port:
-                host, port = host_port.split(":", 1)
-            else:
-                host, port = host_port, "3306"
+        auth, host_db = url.split("@", 1)
+        user, pwd = auth.split(":", 1)
+        host_port, db_name = host_db.split("/", 1)
+        if ":" in host_port:
+            host, port = host_port.split(":", 1)
         else:
-            # Fallback
-            user, pwd = "market_data", "market_data_pass"
-            host, port = "localhost", "3306"
-            db_name = "market_data"
+            host, port = host_port, "3306"
 
         self._pool = pooling.MySQLConnectionPool(
             pool_name="smc_pool",

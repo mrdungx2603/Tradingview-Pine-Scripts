@@ -13,8 +13,14 @@
 - Dùng **`python3` hệ thống** (không phải `python/.venv` — venv đó dành riêng cho dashboard
   `python/app.py`, không có pip/đang thiếu dependency). `python3` hệ thống đã có sẵn `pandas`,
   `numpy`, `mysql-connector-python`.
-- Kết nối DB qua biến môi trường `MARKET_DATA_DB_URL` (giống `python/db.py`), mặc định
-  `mysql+aiomysql://market_data:market_data_pass@localhost:3306/market_data` nếu không set.
+- **Bắt buộc set biến môi trường `MARKET_DATA_DB_URL`** trước khi chạy bất kỳ script nào trong
+  `backtests/` (giống `python/db.py`) — không có giá trị mặc định hardcode trong code (tránh
+  commit credential thật vào git). Ví dụ:
+  ```bash
+  export MARKET_DATA_DB_URL='mysql+aiomysql://<user>:<password>@localhost:3306/market_data'
+  ```
+  Nên thêm dòng này vào `~/.bashrc`/`~/.zshrc` hoặc 1 file `.env` cục bộ (không commit) để khỏi
+  phải set lại mỗi lần — xem `.env.example` ở thư mục gốc.
 - Schema bảng nến: `ohlc_candles(symbol, timeframe, bar_time, open, high, low, close, volume)`.
 
 ## Cấu Trúc Thư Mục

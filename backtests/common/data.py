@@ -18,11 +18,14 @@ import pandas as pd
 
 
 def _db_config() -> dict:
-    """Đọc cấu hình DB từ MARKET_DATA_DB_URL (giống python/db.py), có fallback mặc định."""
-    url = os.getenv(
-        "MARKET_DATA_DB_URL",
-        "mysql+aiomysql://market_data:market_data_pass@localhost:3306/market_data",
-    )
+    """Đọc cấu hình DB từ biến môi trường MARKET_DATA_DB_URL (giống python/db.py)."""
+    url = os.getenv("MARKET_DATA_DB_URL")
+    if not url:
+        raise RuntimeError(
+            "Thiếu biến môi trường MARKET_DATA_DB_URL. Set trước khi chạy, ví dụ:\n"
+            "  export MARKET_DATA_DB_URL='mysql+aiomysql://<user>:<password>@localhost:3306/market_data'\n"
+            "(không commit giá trị thật của biến này vào git)"
+        )
     if "://" in url:
         url = url.split("://", 1)[1]
     auth, host_db = url.split("@", 1)

@@ -19,6 +19,9 @@ python/.venv/
 python/**/__pycache__/
 *.pyc
 
+# Secrets cục bộ (không commit — xem .env.example)
+.env
+
 # Backup
 *.bak
 *.backup
