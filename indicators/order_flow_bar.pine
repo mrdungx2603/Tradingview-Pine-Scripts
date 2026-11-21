@@ -350,6 +350,61 @@ f_calc_poc_peak(RowProfile profile) =>
 
 [poc_row_id, peak_buy_row_id, peak_sell_row_id] = f_calc_poc_peak(active_profile)
 
+// ===== VẼ THANH BUYER/SELLER (TASK 9 — chưa highlight POC/Peak, để Task 10) =====
+// of_boxes thu thập toàn bộ box của "thanh order flow" hiện tại, để xoá sạch trước mỗi lần
+// vẽ lại. Khác với of_buffer/sess_profile (accumulator Task 4/5 chỉ cộng dữ liệu KHI nến đã
+// đóng), thanh ở đây phải vẽ lại MỖI TICK để luôn bám theo active_profile/bar_index mới nhất
+// — kể cả khi nến hiện tại đang hình thành (chưa isconfirmed).
+var array<box> of_boxes = array.new<box>()
+
+// Xoá toàn bộ box cũ trong `boxes` (box.delete từng phần tử) rồi array.clear. Dùng chung cho
+// mọi lần vẽ lại, gọi đầu f_draw_wings.
+f_clear_boxes(array<box> boxes) =>
+    int n_boxes = array.size(boxes)
+    if n_boxes > 0
+        for i = 0 to n_boxes - 1
+            box.delete(array.get(boxes, i))
+    array.clear(boxes)
+
+// f_draw_wings: với mỗi hàng trong `profile`, vẽ 1 box buyer kéo sang PHẢI từ `anchor_bar` và
+// 1 box seller kéo sang TRÁI từ `anchor_bar`, độ rộng (số bar) tỷ lệ buys[i]/sells[i] so với
+// max_total = giá trị buy+sell lớn nhất trên toàn `profile` (hàng "đậm" nhất có cánh dài nhất
+// ở phía tương ứng), tối đa `max_wing_bars` bar mỗi phía.
+// Quy ước giá từ row_id (số nguyên tuyệt đối, Task 3): mỗi hàng cao đúng 1 price_step,
+// top = row_id * price_step, bottom = (row_id - 1) * price_step — nhất quán với cách
+// DEBUG_poc_price/DEBUG_peak_*_price ở dưới đang dùng row_id * price_step làm giá trị giá.
+// Không highlight riêng hàng POC/Peak ở đây — để Task 10 xử lý (tô màu/độ đậm khác).
+f_draw_wings(RowProfile profile, int anchor_bar, int max_wing_bars, color buy_color, color sell_color) =>
+    f_clear_boxes(of_boxes)
+    int n_rows = array.size(profile.row_ids)
+    if has_footprint_data and n_rows > 0
+        float max_total = 0.0
+        for i = 0 to n_rows - 1
+            float row_total = array.get(profile.buys, i) + array.get(profile.sells, i)
+            if row_total > max_total
+                max_total := row_total
+        for i = 0 to n_rows - 1
+            int   row_id     = array.get(profile.row_ids, i)
+            float row_top    = row_id * price_step
+            float row_bot    = (row_id - 1) * price_step
+            float buy_v      = array.get(profile.buys, i)
+            float sell_v     = array.get(profile.sells, i)
+            float buy_ratio  = max_total > 0 ? buy_v / max_total : 0.0
+            float sell_ratio = max_total > 0 ? sell_v / max_total : 0.0
+            int   buy_bars   = int(math.round(buy_ratio * max_wing_bars))
+            int   sell_bars  = int(math.round(sell_ratio * max_wing_bars))
+            box   buy_box    = box.new(left=anchor_bar, top=row_top, right=anchor_bar + buy_bars, bottom=row_bot,
+                 border_color=na, bgcolor=buy_color, xloc=xloc.bar_index)
+            box   sell_box   = box.new(left=anchor_bar - sell_bars, top=row_top, right=anchor_bar, bottom=row_bot,
+                 border_color=na, bgcolor=sell_color, xloc=xloc.bar_index)
+            array.push(of_boxes, buy_box)
+            array.push(of_boxes, sell_box)
+
+// Gọi mỗi bar/mỗi tick (KHÔNG bọc barstate.isconfirmed) — khác các accumulator Task 4/5 chỉ
+// cộng dữ liệu khi nến đã đóng; thanh order flow phải vẽ lại ngay để luôn hiện đúng vị trí
+// (bar_index + anchor_offset_bars) và dữ liệu (active_profile) mới nhất ở mọi tick.
+f_draw_wings(active_profile, bar_index + anchor_offset_bars, wing_max_bars, buyer_color, seller_color)
+
 // ===== PLACEHOLDER PLOT =====
 plot(na)
 plot(has_footprint_data ? 1 : 0, title="DEBUG_has_fp")
