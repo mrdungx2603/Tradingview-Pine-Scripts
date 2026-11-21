@@ -118,6 +118,48 @@ footprint fp = request.footprint(ticks_per_row=1, va_percent=70, imbalance_perce
 // tick data -> fp/fp.rows() sẽ na). Không raise lỗi, chỉ coi như "chưa có dữ liệu".
 bool has_footprint_data = not na(fp) and not na(fp.rows()) and array.size(fp.rows()) > 0
 
+// ===== BUCKET VOLUME THEO PRICE_STEP (TẦNG 2) =====
+// Gộp các row footprint (mỗi row = 1 tick, do ticks_per_row=1 ở trên) vào từng hàng
+// price_step. row_id = số nguyên tuyệt đối của bậc giá (không tương đối theo base động)
+// để Task 4/5 dùng lại được trực tiếp, không cần biết base hiện tại.
+// Field volume_row dùng: up_price()/buy_volume()/sell_volume() — đã xác nhận thực nghiệm
+// qua mcp-tv-validate-pine-script (xem task-3-report.md), vì reference manual chính thức
+// là SPA không fetch được nội dung chi tiết qua WebFetch.
+f_bucket_bar_rows(footprint fp_, float step) =>
+    array<int>   row_ids = array.new<int>()
+    array<float> buys    = array.new<float>()
+    array<float> sells   = array.new<float>()
+    // Không gọi fp_.rows() khi fp_ còn na (vd bar 0 / chưa có dữ liệu) — gọi thẳng sẽ
+    // gây runtime error "cannot be na". Dùng `and` short-circuit để chặn trước.
+    if not na(fp_) and not na(fp_.rows())
+        array<volume_row> rows_arr = fp_.rows()
+        int n_rows = array.size(rows_arr)
+        if n_rows > 0
+            for i = 0 to n_rows - 1
+                volume_row row          = array.get(rows_arr, i)
+                float      row_price    = row.up_price()
+                int        row_id       = int(math.floor(row_price / step))
+                float      row_buy      = row.buy_volume()
+                float      row_sell     = row.sell_volume()
+                int        existing_idx = array.indexof(row_ids, row_id)
+                if existing_idx >= 0
+                    array.set(buys, existing_idx, array.get(buys, existing_idx) + row_buy)
+                    array.set(sells, existing_idx, array.get(sells, existing_idx) + row_sell)
+                else
+                    array.push(row_ids, row_id)
+                    array.push(buys, row_buy)
+                    array.push(sells, row_sell)
+    [row_ids, buys, sells]
+
+// ===== DEBUG TẠM (Task 3) — sẽ xoá ở Task 11 =====
+[dbg_rows, dbg_buy, dbg_sell] = f_bucket_bar_rows(fp, price_step)
+
 // ===== PLACEHOLDER PLOT =====
 plot(na)
 plot(has_footprint_data ? 1 : 0, title="DEBUG_has_fp")
+plot(array.sum(dbg_buy) - array.sum(dbg_sell), title="DEBUG_bucket_delta")
+// Lưu ý: fp.delta() cũng raise runtime error "cannot be na" nếu gọi trực tiếp khi fp còn na
+// (vd bar 0 / chưa có dữ liệu) — giống fp.rows(). Thêm guard not na(fp) để script chạy được
+// trên toàn bộ các bar thay vì crash ngay từ bar đầu (lệch nhẹ so với literal brief Step 2,
+// ghi rõ trong task-3-report.md).
+plot(not na(fp) and not na(fp.delta()) ? fp.delta() : na, title="DEBUG_fp_delta")
