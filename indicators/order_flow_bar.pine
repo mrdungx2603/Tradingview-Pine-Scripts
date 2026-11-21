@@ -274,16 +274,22 @@ if barstate.isconfirmed
     // of_smc_state.seeded == true, sau đó mới chuyển sang f_process_bar. of_smc_state.hl_bar/
     // hh_bar/... có thể còn na trong vài bar đầu phiên (trước khi seed xong) — nơi dùng (Task
     // sau) phải tự kiểm tra na.
-    if is_new_session
-        of_smc_state := smc.f_init_state()
+    //
+    // GATE (TASK 8): toàn bộ state machine SMC chỉ cần cho mode "Last HL" — bỏ qua hoàn toàn
+    // (không reset, không seed, không process_bar) khi mode_calc là 1 trong 2 giá trị khác, để
+    // nhẹ gánh tính toán. Session accumulator (sess_profile, Task 5) KHÔNG bị gate ở đây —
+    // luôn chạy mỗi bar đã xác nhận, đúng ruling đã chốt khi viết plan.
+    if mode_calc == "Last HL"
+        if is_new_session
+            of_smc_state := smc.f_init_state()
 
-    if not of_smc_state.seeded
-        if seed_mode == "Pivot Seed"
-            of_smc_state := smc.f_seed_pivot(of_smc_state, smc_ph, smc_pl, pivot_length)
-        else if seed_mode == "Session Seed"
-            of_smc_state := smc.f_seed_session(of_smc_state)
-    else
-        of_smc_state := smc.f_process_bar(of_smc_state)
+        if not of_smc_state.seeded
+            if seed_mode == "Pivot Seed"
+                of_smc_state := smc.f_seed_pivot(of_smc_state, smc_ph, smc_pl, pivot_length)
+            else if seed_mode == "Session Seed"
+                of_smc_state := smc.f_seed_session(of_smc_state)
+        else
+            of_smc_state := smc.f_process_bar(of_smc_state)
 
 // Biên "Last HL": leg Last HL đã HOÀN THÀNH kết thúc tại hh_bar (uptrend)/ll_bar (downtrend) —
 // KHÔNG dùng bar_index làm biên phải, vì phần sau hh_bar/ll_bar là đoạn candidate đang dò tìm
@@ -293,10 +299,56 @@ if barstate.isconfirmed
 // f_build_profile_from_buffer đã guard not na(left_bar) and not na(right_bar) -> trả rỗng.
 int lasthl_left_bar  = of_smc_state.trend == 1 ? of_smc_state.hl_bar : of_smc_state.trend == -1 ? of_smc_state.lh_bar : na
 int lasthl_right_bar = of_smc_state.trend == 1 ? of_smc_state.hh_bar : of_smc_state.trend == -1 ? of_smc_state.ll_bar : na
-RowProfile last_hl_profile = f_build_profile_from_buffer(of_buffer, lasthl_left_bar, lasthl_right_bar)
+// GATE (TASK 8): last_hl_profile chỉ cần dựng lại khi mode_calc == "Last HL" — khai báo +
+// khởi tạo rỗng ở scope cha (đúng QUY TẮC SCOPE CLAUDE.md), chỉ gán lại (:=) bên trong `if`.
+RowProfile last_hl_profile = RowProfile.new(array.new<int>(), array.new<float>(), array.new<float>())
+if mode_calc == "Last HL"
+    last_hl_profile := f_build_profile_from_buffer(of_buffer, lasthl_left_bar, lasthl_right_bar)
 
 // Biên "Visible Chart": N bar gần nhất tính tới bar hiện tại (N = input vis_bars_n).
-RowProfile vis_profile = f_build_profile_from_buffer(of_buffer, bar_index - vis_bars_n + 1, bar_index)
+// GATE (TASK 8): vis_profile chỉ cần dựng lại khi mode_calc == "Visible Chart".
+RowProfile vis_profile = RowProfile.new(array.new<int>(), array.new<float>(), array.new<float>())
+if mode_calc == "Visible Chart"
+    vis_profile := f_build_profile_from_buffer(of_buffer, bar_index - vis_bars_n + 1, bar_index)
+
+// ===== CHỌN ACTIVE PROFILE THEO MODE + TÍNH POC/PEAK BUY/PEAK SELL (TASK 8) =====
+RowProfile active_profile = mode_calc == "Visible Chart" ? vis_profile : mode_calc == "Session" ? sess_profile : last_hl_profile
+
+// f_calc_poc_peak: pure, na-safe. profile rỗng (array.size(row_ids) == 0) -> trả na cho cả 3.
+// poc_row = row_id ứng với argmax(buy[i] + sell[i]); peak_buy_row = argmax(buy[i]);
+// peak_sell_row = argmax(sell[i]). Trả về row_id (giá trị tuyệt đối, Task 3), không phải index.
+f_calc_poc_peak(RowProfile profile) =>
+    int   n             = array.size(profile.row_ids)
+    int   poc_row       = na
+    int   peak_buy_row  = na
+    int   peak_sell_row = na
+    if n > 0
+        int   best_poc_idx  = 0
+        int   best_buy_idx  = 0
+        int   best_sell_idx = 0
+        float best_poc_val  = array.get(profile.buys, 0) + array.get(profile.sells, 0)
+        float best_buy_val  = array.get(profile.buys, 0)
+        float best_sell_val = array.get(profile.sells, 0)
+        if n > 1
+            for i = 1 to n - 1
+                float buy_v = array.get(profile.buys, i)
+                float sell_v = array.get(profile.sells, i)
+                float tot_v = buy_v + sell_v
+                if tot_v > best_poc_val
+                    best_poc_val := tot_v
+                    best_poc_idx := i
+                if buy_v > best_buy_val
+                    best_buy_val := buy_v
+                    best_buy_idx := i
+                if sell_v > best_sell_val
+                    best_sell_val := sell_v
+                    best_sell_idx := i
+        poc_row := array.get(profile.row_ids, best_poc_idx)
+        peak_buy_row := array.get(profile.row_ids, best_buy_idx)
+        peak_sell_row := array.get(profile.row_ids, best_sell_idx)
+    [poc_row, peak_buy_row, peak_sell_row]
+
+[poc_row_id, peak_buy_row_id, peak_sell_row_id] = f_calc_poc_peak(active_profile)
 
 // ===== PLACEHOLDER PLOT =====
 plot(na)
@@ -314,3 +366,6 @@ plot(of_smc_state.trend, title="DEBUG_smc_trend")
 plot(na(of_smc_state.hl_bar) ? -1 : of_smc_state.hl_bar, title="DEBUG_hl_bar")
 plot(array.size(last_hl_profile.row_ids), title="DEBUG_lasthl_rows")
 plot(array.size(vis_profile.row_ids), title="DEBUG_vis_rows")
+plot(na(poc_row_id) ? -999999.0 : float(poc_row_id) * price_step, title="DEBUG_poc_price")
+plot(na(peak_buy_row_id) ? -999999.0 : float(peak_buy_row_id) * price_step, title="DEBUG_peak_buy_price")
+plot(na(peak_sell_row_id) ? -999999.0 : float(peak_sell_row_id) * price_step, title="DEBUG_peak_sell_price")
