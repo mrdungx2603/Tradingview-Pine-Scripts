@@ -373,7 +373,8 @@ f_clear_boxes(array<box> boxes) =>
 // Quy ước giá từ row_id (số nguyên tuyệt đối, Task 3): mỗi hàng cao đúng 1 price_step,
 // top = row_id * price_step, bottom = (row_id - 1) * price_step — nhất quán với cách
 // DEBUG_poc_price/DEBUG_peak_*_price ở dưới đang dùng row_id * price_step làm giá trị giá.
-// Không highlight riêng hàng POC/Peak ở đây — để Task 10 xử lý (tô màu/độ đậm khác).
+// Highlight hàng POC/Peak Buy/Peak Sell (TASK 10): xem khối is_poc/is_peak_buy/is_peak_sell
+// trong vòng `for` bên dưới — đổi border_color/bgcolor riêng cho box tương ứng.
 f_draw_wings(RowProfile profile, int anchor_bar, int max_wing_bars, color buy_color, color sell_color) =>
     f_clear_boxes(of_boxes)
     int n_rows = array.size(profile.row_ids)
@@ -384,19 +385,30 @@ f_draw_wings(RowProfile profile, int anchor_bar, int max_wing_bars, color buy_co
             if row_total > max_total
                 max_total := row_total
         for i = 0 to n_rows - 1
-            int   row_id     = array.get(profile.row_ids, i)
-            float row_top    = row_id * price_step
-            float row_bot    = (row_id - 1) * price_step
-            float buy_v      = array.get(profile.buys, i)
-            float sell_v     = array.get(profile.sells, i)
-            float buy_ratio  = max_total > 0 ? buy_v / max_total : 0.0
-            float sell_ratio = max_total > 0 ? sell_v / max_total : 0.0
-            int   buy_bars   = int(math.round(buy_ratio * max_wing_bars))
-            int   sell_bars  = int(math.round(sell_ratio * max_wing_bars))
-            box   buy_box    = box.new(left=anchor_bar, top=row_top, right=anchor_bar + buy_bars, bottom=row_bot,
-                 border_color=na, bgcolor=buy_color, xloc=xloc.bar_index)
-            box   sell_box   = box.new(left=anchor_bar - sell_bars, top=row_top, right=anchor_bar, bottom=row_bot,
-                 border_color=na, bgcolor=sell_color, xloc=xloc.bar_index)
+            int   row_id       = array.get(profile.row_ids, i)
+            float row_top      = row_id * price_step
+            float row_bot      = (row_id - 1) * price_step
+            float buy_v        = array.get(profile.buys, i)
+            float sell_v       = array.get(profile.sells, i)
+            float buy_ratio    = max_total > 0 ? buy_v / max_total : 0.0
+            float sell_ratio   = max_total > 0 ? sell_v / max_total : 0.0
+            int   buy_bars     = int(math.round(buy_ratio * max_wing_bars))
+            int   sell_bars    = int(math.round(sell_ratio * max_wing_bars))
+            // TASK 10: highlight hàng POC/Peak Buy/Peak Sell. Ưu tiên kiểm tra theo thứ tự
+            // POC > Peak Buy > Peak Sell (else-if, không phải 3 điều kiện độc lập) — nếu 1
+            // hàng trùng nhiều mức, chỉ highlight đúng theo thứ tự ưu tiên này (vd hàng vừa
+            // là POC vừa là Peak Buy -> chỉ lên màu POC cho CẢ 2 box, không lên màu Peak Buy).
+            bool  is_poc       = row_id == poc_row_id
+            bool  is_peak_buy  = not is_poc and row_id == peak_buy_row_id
+            bool  is_peak_sell = not is_poc and not is_peak_buy and row_id == peak_sell_row_id
+            color buy_border   = is_poc ? poc_color : is_peak_buy ? peak_buy_color : na
+            color sell_border  = is_poc ? poc_color : is_peak_sell ? peak_sell_color : na
+            color buy_bg       = is_poc ? poc_color : is_peak_buy ? peak_buy_color : buy_color
+            color sell_bg      = is_poc ? poc_color : is_peak_sell ? peak_sell_color : sell_color
+            box   buy_box      = box.new(left=anchor_bar, top=row_top, right=anchor_bar + buy_bars, bottom=row_bot,
+                 border_color=buy_border, bgcolor=buy_bg, xloc=xloc.bar_index)
+            box   sell_box     = box.new(left=anchor_bar - sell_bars, top=row_top, right=anchor_bar, bottom=row_bot,
+                 border_color=sell_border, bgcolor=sell_bg, xloc=xloc.bar_index)
             array.push(of_boxes, buy_box)
             array.push(of_boxes, sell_box)
 
@@ -404,6 +416,57 @@ f_draw_wings(RowProfile profile, int anchor_bar, int max_wing_bars, color buy_co
 // cộng dữ liệu khi nến đã đóng; thanh order flow phải vẽ lại ngay để luôn hiện đúng vị trí
 // (bar_index + anchor_offset_bars) và dữ liệu (active_profile) mới nhất ở mọi tick.
 f_draw_wings(active_profile, bar_index + anchor_offset_bars, wing_max_bars, buyer_color, seller_color)
+
+// ===== NHÃN GIÁ TRỊ TẠI POC/PEAK BUY/PEAK SELL (TASK 10) =====
+// of_labels thu thập label của lần vẽ hiện tại, xoá sạch trước mỗi lần vẽ lại — cùng
+// pattern với of_boxes/f_clear_boxes ở trên, tối đa 3 label/lần vẽ (không tích lũy).
+var array<label> of_labels = array.new<label>()
+
+// Xoá toàn bộ label cũ trong `labels` (label.delete từng phần tử) rồi array.clear.
+f_clear_labels(array<label> labels) =>
+    int n_labels = array.size(labels)
+    if n_labels > 0
+        for i = 0 to n_labels - 1
+            label.delete(array.get(labels, i))
+    array.clear(labels)
+
+// f_draw_level_labels: viết riêng (không sửa vào f_draw_wings, theo đúng Step 3 brief Task
+// 10), gọi ngay sau f_draw_wings. Chỉ vẽ khi show_value_labels == true và có dữ liệu
+// footprint; mỗi mức (POC/Peak Buy/Peak Sell) chỉ vẽ nếu row_id tương ứng không na VÀ còn
+// tồn tại trong `profile` (array.indexof >= 0). Text = giá (format.mintick) + volume
+// (format.volume) — POC dùng tổng buy+sell tại hàng đó, Peak Buy dùng buy_volume, Peak
+// Sell dùng sell_volume.
+f_draw_level_labels(RowProfile profile, int anchor_bar) =>
+    f_clear_labels(of_labels)
+    if show_value_labels and has_footprint_data
+        // Tránh gọi array.indexof() với giá trị tìm kiếm là na (row_id na khi profile rỗng) —
+        // ternary chặn trước, trả -1 luôn, không phụ thuộc hành vi indexof với na.
+        int poc_idx       = na(poc_row_id) ? -1 : array.indexof(profile.row_ids, poc_row_id)
+        int peak_buy_idx  = na(peak_buy_row_id) ? -1 : array.indexof(profile.row_ids, peak_buy_row_id)
+        int peak_sell_idx = na(peak_sell_row_id) ? -1 : array.indexof(profile.row_ids, peak_sell_row_id)
+        if not na(poc_row_id) and poc_idx >= 0
+            float poc_price = poc_row_id * price_step
+            float poc_vol   = array.get(profile.buys, poc_idx) + array.get(profile.sells, poc_idx)
+            label poc_label = label.new(x=anchor_bar, y=poc_price, xloc=xloc.bar_index,
+                 text="POC " + str.tostring(poc_price, format.mintick) + " " + str.tostring(poc_vol, format.volume),
+                 style=label.style_label_left, color=poc_color, textcolor=color.white)
+            array.push(of_labels, poc_label)
+        if not na(peak_buy_row_id) and peak_buy_idx >= 0
+            float peak_buy_price = peak_buy_row_id * price_step
+            float peak_buy_vol   = array.get(profile.buys, peak_buy_idx)
+            label peak_buy_label = label.new(x=anchor_bar, y=peak_buy_price, xloc=xloc.bar_index,
+                 text="Peak Buy " + str.tostring(peak_buy_price, format.mintick) + " " + str.tostring(peak_buy_vol, format.volume),
+                 style=label.style_label_left, color=peak_buy_color, textcolor=color.white)
+            array.push(of_labels, peak_buy_label)
+        if not na(peak_sell_row_id) and peak_sell_idx >= 0
+            float peak_sell_price = peak_sell_row_id * price_step
+            float peak_sell_vol   = array.get(profile.sells, peak_sell_idx)
+            label peak_sell_label = label.new(x=anchor_bar, y=peak_sell_price, xloc=xloc.bar_index,
+                 text="Peak Sell " + str.tostring(peak_sell_price, format.mintick) + " " + str.tostring(peak_sell_vol, format.volume),
+                 style=label.style_label_left, color=peak_sell_color, textcolor=color.white)
+            array.push(of_labels, peak_sell_label)
+
+f_draw_level_labels(active_profile, bar_index + anchor_offset_bars)
 
 // ===== PLACEHOLDER PLOT =====
 plot(na)
