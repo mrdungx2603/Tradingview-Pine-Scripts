@@ -6,8 +6,7 @@
 // (volume bán), độ dài box tỷ lệ với volume của hàng đó so với hàng lớn nhất trong phạm vi
 // tính. Dữ liệu buy/sell volume theo từng hàng giá lấy từ request.footprint() Tầng 1
 // (ticks_per_row=1) — bucket lại theo price_step, lưu vào buffer theo bar, rồi gộp
-// (merge) lại thành 1 "profile" theo 1 trong 3 phạm vi tính (mode_calc):
-//   - Visible Chart: N bar gần nhất (vis_bars_n) tính tới bar hiện tại.
+// (merge) lại thành 1 "profile" theo 1 trong 2 phạm vi tính (mode_calc):
 //   - Session: cộng dồn từ đầu phiên giao dịch hiện tại (reset mỗi ngày mới).
 //   - Last HL: từ leg Higher Low/Lower High gần nhất đã xác nhận (dùng state machine SMC
 //     của library smc_core để xác định biên leg, reseed lại mỗi phiên).
@@ -25,7 +24,7 @@
 // flow (box + nhãn) sẽ KHÔNG được vẽ (ẩn hoàn toàn, không ước lượng thay thế).
 //
 // Ngày tạo: 2026-11-21
-// Phiên bản: 1.7
+// Phiên bản: 1.8
 
 // ⚠️ Cần library này đã được Publish (không chỉ lưu "My Scripts") trên TradingView, nếu không
 // toàn bộ script sẽ lỗi compile ở dòng import này.
@@ -41,10 +40,12 @@ indicator(
 )
 
 // ===== PHẠM VI TÍNH =====
+// Theo yêu cầu người dùng: bỏ mode "Visible Chart" (cùng input vis_bars_n riêng của nó) —
+// chỉ còn Session/Last HL.
 mode_calc = input.string(
-    defval="Visible Chart",
+    defval="Session",
     title="Chế độ Phạm Vi",
-    options=["Visible Chart", "Session", "Last HL"],
+    options=["Session", "Last HL"],
     group="Phạm Vi Tính"
 )
 
@@ -52,13 +53,6 @@ price_step = input.float(
     defval=1.0,
     title="Bước Giá (Price Step)",
     minval=0.01,
-    group="Phạm Vi Tính"
-)
-
-vis_bars_n = input.int(
-    defval=100,
-    title="Số Bar Nhìn Thấy",
-    minval=10,
     group="Phạm Vi Tính"
 )
 
@@ -305,7 +299,7 @@ f_merge_into_profile(RowProfile profile, array<int> row_ids, array<float> buys, 
                 array.push(profile.buys, row_buy)
                 array.push(profile.sells, row_sell)
 
-// ===== REBUILD PROFILE TỪ BUFFER CHO LAST HL & VISIBLE CHART (TASK 7) =====
+// ===== REBUILD PROFILE TỪ BUFFER CHO LAST HL (TASK 7) =====
 // Duyệt tuyến tính of_buffer (Task 4), gộp các phần tử có bar_idx nằm trong [left_bar,
 // right_bar] (bao gồm 2 đầu) vào 1 RowProfile mới (khởi tạo rỗng) bằng f_merge_into_profile
 // (Task 5). Nếu left_bar hoặc right_bar là na (vd trend == 0 hoặc SMC state chưa seed xong ở
@@ -400,16 +394,9 @@ RowProfile last_hl_profile = RowProfile.new(array.new<int>(), array.new<float>()
 if mode_calc == "Last HL" and barstate.islast
     last_hl_profile := f_build_profile_from_buffer(of_buffer, lasthl_left_bar, lasthl_right_bar)
 
-// Biên "Visible Chart": N bar gần nhất tính tới bar hiện tại (N = input vis_bars_n).
-// GATE (TASK 8): vis_profile chỉ cần dựng lại khi mode_calc == "Visible Chart".
-// GATE (FIX review cuối, hiệu năng): thêm `and barstate.islast`, cùng lý do như last_hl_profile
-// ở trên.
-RowProfile vis_profile = RowProfile.new(array.new<int>(), array.new<float>(), array.new<float>())
-if mode_calc == "Visible Chart" and barstate.islast
-    vis_profile := f_build_profile_from_buffer(of_buffer, bar_index - vis_bars_n + 1, bar_index)
-
 // ===== CHỌN ACTIVE PROFILE THEO MODE + TÍNH POC/PEAK BUY/PEAK SELL (TASK 8) =====
-RowProfile active_profile = mode_calc == "Visible Chart" ? vis_profile : mode_calc == "Session" ? sess_profile : last_hl_profile
+// Theo yêu cầu người dùng: bỏ mode "Visible Chart" — chỉ còn Session/Last HL.
+RowProfile active_profile = mode_calc == "Session" ? sess_profile : last_hl_profile
 
 // f_calc_poc_peak: pure, na-safe. profile rỗng (array.size(row_ids) == 0) -> trả na cho cả 3.
 // poc_row = row_id ứng với argmax(buy[i] + sell[i]); peak_buy_row = argmax(buy[i]);
@@ -446,7 +433,7 @@ f_calc_poc_peak(RowProfile profile) =>
     [poc_row, peak_buy_row, peak_sell_row]
 
 // GATE (FIX review cuối, hiệu năng): f_calc_poc_peak chỉ cần tính ở bar cuối cùng, cùng lý do
-// như last_hl_profile/vis_profile ở trên (f_draw_wings/f_draw_level_labels xoá-vẽ-lại toàn bộ
+// như last_hl_profile ở trên (f_draw_wings/f_draw_level_labels xoá-vẽ-lại toàn bộ
 // mỗi lần, chạy mọi bar lịch sử chỉ lãng phí). Khai báo + khởi tạo na ở scope cha (đúng QUY TẮC
 // SCOPE CLAUDE.md), chỉ gán lại (:=) bên trong `if barstate.islast`.
 int poc_row_id       = na
