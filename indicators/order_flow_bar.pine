@@ -14,17 +14,19 @@
 // box (không có nhãn text riêng cho 3 mức này): POC (hàng có tổng buy+sell lớn nhất — đổi cả
 // viền+nền sang poc_color), Peak Buy (hàng có buy volume lớn nhất — chỉ đổi viền, nền đậm
 // hơn), Peak Sell (hàng có sell volume lớn nhất — tương tự Peak Buy). Mọi hàng đều có viền
-// riêng (wing_border_color) để phân biệt ranh giới giữa các hàng. Ở giữa thanh còn có 1
-// "cột giá" riêng (nhãn nền đặc, cách đều mỗi N hàng) và 1 nhãn nổi bật ghi giá khớp HIỆN
-// TẠI, nối bằng 1 đường kẻ ngang (nét đứt) tới đúng nến hiện tại (cùng y=close) để xác nhận
-// bằng mắt nhãn đó đang đúng độ cao thật so với nến, không cần nhìn sang trục giá gốc của chart.
+// riêng (wing_border_color) để phân biệt ranh giới giữa các hàng. Giữa 2 cánh buyer/seller có
+// 1 khoảng trống (delta_col_width bar) dành cho "cột giữa": mỗi hàng có dữ liệu hiện 1 nhãn
+// giá + delta (buy - sell tại hàng đó, màu theo dấu), và 1 nhãn nổi bật riêng ghi giá khớp
+// HIỆN TẠI, nối bằng 1 đường kẻ ngang (nét đứt) tới đúng nến hiện tại (cùng y=close) để xác
+// nhận bằng mắt nhãn đó đang đúng độ cao thật so với nến, không cần nhìn sang trục giá gốc
+// của chart.
 // Lưu ý quan trọng: chỉ dùng dữ liệu footprint Tầng 1 (request.footprint() mặc định của Pine,
 // KHÔNG dùng request.security_lower_tf hay ước lượng OHLCV) — symbol/tài khoản không có
 // Premium hoặc sàn không hỗ trợ dữ liệu tick sẽ không có footprint, khi đó toàn bộ thanh order
 // flow (box + nhãn) sẽ KHÔNG được vẽ (ẩn hoàn toàn, không ước lượng thay thế).
 //
 // Ngày tạo: 2026-11-21
-// Phiên bản: 1.8
+// Phiên bản: 1.9
 
 // ⚠️ Cần library này đã được Publish (không chỉ lưu "My Scripts") trên TradingView, nếu không
 // toàn bộ script sẽ lỗi compile ở dòng import này.
@@ -96,6 +98,19 @@ wing_max_bars = input.int(
     group="Hiển Thị"
 )
 
+// Khoảng trống (số bar) chừa ra ở GIỮA 2 cánh buyer/seller — theo yêu cầu người dùng, cần 1
+// "cột" riêng ở giữa để hiện thông tin delta mỗi hàng giá, không bị box che. Trước đây
+// buy_box/sell_box chạm sát nhau tại đúng anchor_bar (không có khoảng trống), nhãn ở giữa
+// phải vẽ đè lên viền box. Giờ buy_box dời sang phải thêm delta_col_width, sell_box dời sang
+// trái thêm delta_col_width — chừa khoảng trống rộng 2×delta_col_width ở giữa, canh đúng tâm
+// anchor_bar, để vẽ nhãn delta/giá mà không chồng box.
+delta_col_width = input.int(
+    defval=3,
+    title="Độ Rộng Cột Giữa (Bars)",
+    minval=0,
+    group="Hiển Thị"
+)
+
 buyer_color = input.color(
     defval=color.new(color.green, 50),
     title="Màu Buyer",
@@ -156,19 +171,27 @@ show_value_labels = input.bool(
     group="Hiển Thị"
 )
 
-// "Cột giá" tham khảo ở giữa thanh (tại anchor_bar) — nhãn giá nền đặc (không trong suốt),
-// cách đều mỗi N hàng price_step, đọc nhanh giá của từng vùng mà không cần nhìn sang trục
-// giá bên phải xa (thanh neo nổi, không nằm sát trục giá gốc của chart).
-price_ruler_step_rows = input.int(
-    defval=5,
-    title="Cột Giá: Mỗi N Hàng",
-    minval=1,
+// Cột giữa (tại anchor_bar, trong khoảng trống delta_col_width): MỖI hàng có dữ liệu trong
+// active_profile được hiện 1 nhãn "giá  Δdelta" (delta = buy - sell tại đúng hàng đó), màu
+// chữ theo dấu delta (xanh = dư mua, đỏ = dư bán) — theo yêu cầu người dùng ("thêm thông tin
+// delta tại giá đó"). Thay cho "cột giá" chỉ hiện giá cách đều cũ (không còn input riêng
+// price_ruler_step_rows — giờ hiện đủ mọi hàng vì delta cần đúng từng hàng, không chỉ tham
+// khảo cách đều).
+price_column_color = input.color(
+    defval=color.new(color.gray, 15),
+    title="Màu Nền Cột Giữa",
     group="Hiển Thị"
 )
 
-price_column_color = input.color(
-    defval=color.new(color.gray, 15),
-    title="Màu Nền Cột Giá",
+delta_pos_color = input.color(
+    defval=color.lime,
+    title="Màu Delta Dương (Dư Mua)",
+    group="Hiển Thị"
+)
+
+delta_neg_color = input.color(
+    defval=color.red,
+    title="Màu Delta Âm (Dư Bán)",
     group="Hiển Thị"
 )
 
@@ -517,9 +540,11 @@ f_draw_wings(RowProfile profile, int anchor_bar, int max_wing_bars, color buy_co
             color sell_border  = is_poc ? poc_color : is_peak_sell ? peak_sell_color : wing_border_color
             color buy_bg       = is_poc ? poc_color : is_peak_buy ? buy_bg_peak : buy_color
             color sell_bg      = is_poc ? poc_color : is_peak_sell ? sell_bg_peak : sell_color
-            box   buy_box      = box.new(left=anchor_bar, top=row_top, right=anchor_bar + buy_bars, bottom=row_bot,
+            // Dời buy_box sang phải / sell_box sang trái thêm delta_col_width — chừa khoảng
+            // trống ở giữa (canh tâm anchor_bar) cho cột delta (xem f_draw_level_labels).
+            box   buy_box      = box.new(left=anchor_bar + delta_col_width, top=row_top, right=anchor_bar + delta_col_width + buy_bars, bottom=row_bot,
                  border_color=buy_border, bgcolor=buy_bg, xloc=xloc.bar_index)
-            box   sell_box     = box.new(left=anchor_bar - sell_bars, top=row_top, right=anchor_bar, bottom=row_bot,
+            box   sell_box     = box.new(left=anchor_bar - delta_col_width - sell_bars, top=row_top, right=anchor_bar - delta_col_width, bottom=row_bot,
                  border_color=sell_border, bgcolor=sell_bg, xloc=xloc.bar_index)
             array.push(of_boxes, buy_box)
             array.push(of_boxes, sell_box)
@@ -557,44 +582,34 @@ f_clear_labels(array<label> labels) =>
 // KHÔNG còn vẽ nhãn text cho POC/Peak Buy/Peak Sell — 3 mức này chỉ thể hiện qua highlight
 // màu viền/nền của box trong f_draw_wings (xem is_poc/is_peak_buy/is_peak_sell ở đó). Hàm
 // này giờ chỉ vẽ khi show_value_labels == true và có dữ liệu footprint (`has_fp_ever`):
-//   - 1 "cột giá" tham khảo: nhãn giá nền đặc (price_column_color), cách đều mỗi
-//     price_ruler_step_rows hàng, để đọc nhanh giá tại bất kỳ vùng nào của thanh mà không
-//     cần nhìn sang trục giá gốc của chart (xa vị trí neo nổi).
+//   - 1 "cột giữa" (trong khoảng trống delta_col_width giữa 2 cánh): MỖI hàng có dữ liệu
+//     trong `profile` được 1 nhãn "giá  Δdelta" (delta = buy - sell tại đúng hàng đó), màu
+//     chữ theo dấu delta — theo yêu cầu người dùng ("thêm thông tin delta tại giá đó").
 //   - 1 nhãn riêng ghi giá khớp HIỆN TẠI (`close`, màu current_price_color, nổi bật nhất) —
-//     khác cột giá tham khảo (giá trị liên tục, không bó theo lưới price_step).
+//     giá trị liên tục, không bó theo lưới price_step, khác cột giữa ở trên.
 f_draw_level_labels(RowProfile profile, int anchor_bar) =>
     f_clear_labels(of_labels)
     if show_value_labels and has_fp_ever
-        // Cột giá tham khảo (theo yêu cầu người dùng — không biết giá của từng hàng khi nhìn
-        // thanh neo nổi, xa trục giá gốc của chart): nhãn giá nhỏ tại tâm mỗi
-        // price_ruler_step_rows hàng, tính theo row_id nhỏ nhất/lớn nhất đang có trong
-        // `profile` — PHẢI dùng min/max row_id thực tế, không phải vị trí trong mảng, vì
-        // row_ids không được sắp xếp theo giá (thứ tự chèn = thứ tự chạm giá qua các bar).
-        int n_rows_ruler = array.size(profile.row_ids)
-        if n_rows_ruler > 0
-            int min_row_id = array.get(profile.row_ids, 0)
-            int max_row_id = array.get(profile.row_ids, 0)
-            if n_rows_ruler > 1
-                for i = 1 to n_rows_ruler - 1
-                    int cur_row_id = array.get(profile.row_ids, i)
-                    if cur_row_id < min_row_id
-                        min_row_id := cur_row_id
-                    if cur_row_id > max_row_id
-                        max_row_id := cur_row_id
-            for r = min_row_id to max_row_id
-                // QUY TẮC SCOPE CLAUDE.md: biến có kiểu (`ruler_price`) khai báo ngay đầu scope
-                // `for`, TRƯỚC `if` con — if con chỉ gọi `array.push(..., label.new(...))` như 1
-                // statement, không khai báo biến mới nào bên trong (tránh lỗi "end of line
-                // without line continuation").
-                float ruler_price = (r + 0.5) * price_step
-                if (r - min_row_id) % price_ruler_step_rows == 0
-                    // Nhãn nền ĐẶC (price_column_color, không trong suốt) + style_label_center —
-                    // tạo thành 1 cột riêng dễ đọc ở giữa thanh, không bị lẫn vào màu box buyer/
-                    // seller phía sau (khác bản cũ dùng style_none/trong suốt, khó nhìn).
-                    array.push(of_labels, label.new(x=anchor_bar, y=ruler_price, xloc=xloc.bar_index,
-                         text=str.tostring(ruler_price, format.mintick),
-                         style=label.style_label_center, color=price_column_color,
-                         textcolor=color.white, size=size.small))
+        // Cột giữa: lặp qua ĐÚNG các hàng có dữ liệu trong `profile` (giống cách f_draw_wings
+        // lặp, KHÔNG quét toàn khoảng min->max row_id như bản ruler cũ) — vì delta chỉ có ý
+        // nghĩa tại hàng thực sự có buy/sell, không phải mọi mức giá lý thuyết.
+        int n_rows_delta = array.size(profile.row_ids)
+        if n_rows_delta > 0
+            for i = 0 to n_rows_delta - 1
+                int   row_id_d  = array.get(profile.row_ids, i)
+                float row_mid   = (row_id_d + 0.5) * price_step
+                float buy_v_d   = array.get(profile.buys, i)
+                float sell_v_d  = array.get(profile.sells, i)
+                float delta_v   = buy_v_d - sell_v_d
+                // Màu chữ theo dấu delta: dương (dư mua) = delta_pos_color, âm (dư bán) =
+                // delta_neg_color, bằng 0 = xám trung tính. Dùng ternary, không if/else, để
+                // không vi phạm QUY TẮC SCOPE (không khai báo biến mới trong if lồng trong for).
+                color delta_text_color = delta_v > 0 ? delta_pos_color : delta_v < 0 ? delta_neg_color : color.gray
+                string delta_sign_str  = delta_v > 0 ? "+" : ""
+                array.push(of_labels, label.new(x=anchor_bar, y=row_mid, xloc=xloc.bar_index,
+                     text=str.tostring(row_mid, format.mintick) + "  " + delta_sign_str + str.tostring(delta_v, format.volume),
+                     style=label.style_label_center, color=price_column_color,
+                     textcolor=delta_text_color, size=size.small))
 
         // Nhãn giá khớp HIỆN TẠI (close) — tách biệt khỏi cột giá tham khảo ở trên: giá trị
         // liên tục (không bó theo lưới price_step), màu riêng (current_price_color) để nổi bật
