@@ -1,0 +1,111 @@
+//@version=6
+// ─── Global Markets Table — Bảng Giá Chỉ Số Thế Giới ───
+// Tác giả: TV Pine
+// Ngày tạo: 2026-11-18
+// Phiên bản: 1.1
+// Mô tả: Overlay bảng giá real-time của các chỉ số/tài sản quan trọng trên
+//        thế giới (US30, US30 Future, USTECH, NIKKEI, HANG SENG, KOSPI, OIL,
+//        XAUUSD, BTC) ngay trên chart. Mỗi dòng gồm: Tên, Giá hiện tại, Thay đổi
+//        tuyệt đối, % thay đổi (so với giá đóng cửa phiên ngày trước),
+//        tô màu xanh/đỏ theo chiều tăng/giảm. Mã symbol của từng dòng là
+//        input (input.symbol) nên có thể đổi sang nguồn dữ liệu khác nếu
+//        mã mặc định không khả dụng với tài khoản/khu vực của người dùng.
+//        Giá hiển thị LÀ GIÁ REAL-TIME (repaint có chủ đích) — đây là bảng
+//        theo dõi giá, không phải tín hiệu giao dịch.
+
+indicator(title="Global Markets Table", shorttitle="GMKT", overlay=true)
+
+// ─── Inputs: Danh Sách Mã ───
+sym_us30     = input.symbol(title="US30 (Dow Jones)",     defval="TVC:DJI",        group="Danh Sách Mã")
+sym_us30fut  = input.symbol(title="US30 Future (YM)",     defval="CBOT_MINI:YM1!", group="Danh Sách Mã")
+sym_ustech   = input.symbol(title="USTECH (Nasdaq 100)",  defval="TVC:NDX",        group="Danh Sách Mã")
+sym_nikkei   = input.symbol(title="NIKKEI 225",           defval="TVC:NI225",      group="Danh Sách Mã")
+sym_hangseng = input.symbol(title="HANG SENG",            defval="TVC:HSI",        group="Danh Sách Mã")
+sym_kospi    = input.symbol(title="KOSPI",                defval="KRX:KOSPI",      group="Danh Sách Mã")
+sym_oil      = input.symbol(title="OIL (WTI Crude)",      defval="TVC:USOIL",      group="Danh Sách Mã")
+sym_xau      = input.symbol(title="XAUUSD (Vàng)",        defval="TVC:GOLD",       group="Danh Sách Mã")
+sym_btc      = input.symbol(title="BTC (Bitcoin)",        defval="BITSTAMP:BTCUSD", group="Danh Sách Mã")
+
+// ─── Inputs: Hiển Thị ───
+table_pos_input = input.string(title="Vị Trí Bảng", defval="Trên-Phải",
+  options=["Trên-Phải", "Trên-Trái", "Dưới-Phải", "Dưới-Trái", "Giữa-Phải"], group="Hiển Thị")
+table_size_input = input.string(title="Cỡ Chữ", defval="Nhỏ",
+  options=["Rất Nhỏ", "Nhỏ", "Thường"], group="Hiển Thị")
+digits_input = input.int(title="Số Lẻ Thập Phân", defval=2, minval=0, maxval=4, group="Hiển Thị")
+color_up    = input.color(title="Màu Tăng",   defval=color.new(color.green, 0), group="Hiển Thị")
+color_down  = input.color(title="Màu Giảm",   defval=color.new(color.red, 0),   group="Hiển Thị")
+color_text_header = input.color(title="Màu Chữ Header", defval=color.white, group="Hiển Thị")
+color_name        = input.color(title="Màu Tên Chỉ Số", defval=color.white, group="Hiển Thị")
+color_bg_header   = input.color(title="Màu Nền Header",  defval=color.new(color.gray, 20), group="Hiển Thị")
+color_bg_table    = input.color(title="Màu Nền Bảng",    defval=color.new(color.black, 80), group="Hiển Thị")
+
+// ─── Hàm Helper ───
+f_table_position(pos) =>
+    switch pos
+        "Trên-Phải"  => position.top_right
+        "Trên-Trái"  => position.top_left
+        "Dưới-Phải"  => position.bottom_right
+        "Dưới-Trái"  => position.bottom_left
+        "Giữa-Phải"  => position.middle_right
+        => position.top_right
+
+f_table_size(sz) =>
+    switch sz
+        "Rất Nhỏ" => size.tiny
+        "Nhỏ"     => size.small
+        "Thường"  => size.normal
+        => size.small
+
+f_get_quote(sym) =>
+    [c, c_prev] = request.security(sym, "D", [close, close[1]])
+    [c, c_prev]
+
+// ─── Tính Toán: Lấy Giá Từng Mã ───
+[us30_c, us30_prev]         = f_get_quote(sym_us30)
+[us30fut_c, us30fut_prev]   = f_get_quote(sym_us30fut)
+[ustech_c, ustech_prev]     = f_get_quote(sym_ustech)
+[nikkei_c, nikkei_prev]     = f_get_quote(sym_nikkei)
+[hangseng_c, hangseng_prev] = f_get_quote(sym_hangseng)
+[kospi_c, kospi_prev]       = f_get_quote(sym_kospi)
+[oil_c, oil_prev]           = f_get_quote(sym_oil)
+[xau_c, xau_prev]           = f_get_quote(sym_xau)
+[btc_c, btc_prev]           = f_get_quote(sym_btc)
+
+// ─── Plots / Drawings: Bảng Giá ───
+var table gmkt_table = table.new(position=position.top_right, columns=4, rows=10,
+  border_width=1, border_color=color.new(color.gray, 50), frame_width=1, frame_color=color.new(color.gray, 50))
+
+if barstate.islast
+    table.clear(gmkt_table, 0, 0, 3, 9)
+
+    pos_cell  = f_table_position(table_pos_input)
+    size_cell = f_table_size(table_size_input)
+    table.set_position(gmkt_table, pos_cell)
+
+    // Header
+    table.cell(gmkt_table, 0, 0, "Chỉ Số",    text_color=color_text_header, bgcolor=color_bg_header, text_size=size_cell)
+    table.cell(gmkt_table, 1, 0, "Giá",       text_color=color_text_header, bgcolor=color_bg_header, text_size=size_cell)
+    table.cell(gmkt_table, 2, 0, "Thay Đổi",  text_color=color_text_header, bgcolor=color_bg_header, text_size=size_cell)
+    table.cell(gmkt_table, 3, 0, "%",         text_color=color_text_header, bgcolor=color_bg_header, text_size=size_cell)
+
+    names  = array.from("US30", "US30 Future", "USTECH", "NIKKEI", "HANGSENG", "KOSPI", "OIL", "XAUUSD", "BTC")
+    prices = array.from(us30_c, us30fut_c, ustech_c, nikkei_c, hangseng_c, kospi_c, oil_c, xau_c, btc_c)
+    prevs  = array.from(us30_prev, us30fut_prev, ustech_prev, nikkei_prev, hangseng_prev, kospi_prev, oil_prev, xau_prev, btc_prev)
+    string fmt_price = digits_input > 0 ? "#,###." + str.repeat("#", digits_input) : "#,###"
+
+    for i = 0 to 8
+        string name_i  = array.get(names, i)
+        float  price_i = array.get(prices, i)
+        float  prev_i  = array.get(prevs, i)
+        bool   valid_i = not na(price_i) and not na(prev_i)
+        float  chg_i   = valid_i ? price_i - prev_i : na
+        float  pct_i   = valid_i and prev_i != 0 ? chg_i / prev_i * 100 : na
+        color  row_color = not valid_i ? color.gray : chg_i >= 0 ? color_up : color_down
+        string price_txt = valid_i ? str.tostring(price_i, fmt_price) : "N/A"
+        string chg_txt   = valid_i ? (chg_i >= 0 ? "+" : "") + str.tostring(chg_i, fmt_price) : "—"
+        string pct_txt   = valid_i ? (pct_i >= 0 ? "+" : "") + str.tostring(pct_i, "#.##") + "%" : "—"
+
+        table.cell(gmkt_table, 0, i + 1, name_i,  text_color=color_name, bgcolor=color_bg_table, text_halign=text.align_left,  text_size=size_cell)
+        table.cell(gmkt_table, 1, i + 1, price_txt, text_color=row_color, bgcolor=color_bg_table, text_halign=text.align_right, text_size=size_cell)
+        table.cell(gmkt_table, 2, i + 1, chg_txt,   text_color=row_color, bgcolor=color_bg_table, text_halign=text.align_right, text_size=size_cell)
+        table.cell(gmkt_table, 3, i + 1, pct_txt,   text_color=row_color, bgcolor=color_bg_table, text_halign=text.align_right, text_size=size_cell)

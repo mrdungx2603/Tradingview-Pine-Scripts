@@ -1,9 +1,9 @@
 # Market Profile (Mind over Markets) — Tài Liệu
 
-> **Script**: [indicators/market_profile.pine](../indicators/market_profile.pine) (v2.2)
+> **Script**: [indicators/market_profile.pine](../indicators/market_profile.pine) (v3.2)
 > **Loại**: Indicator (overlay)
-> **Pine Script**: v6
-> **Ngày tạo**: 2026-11-14 / **Cập nhật**: 2026-11-14
+> **Pine Script**: v6 — import [libraries/market_profile_core.pine](../libraries/market_profile_core.pine) (`anthonydang/market_profile_core/2`)
+> **Ngày tạo**: 2026-11-14 / **Cập nhật**: 2026-11-21
 
 ## Tổng Quan
 
@@ -27,6 +27,8 @@ Indicator Market Profile / TPO (Time Price Opportunity) theo phương pháp kinh
 | Hiển thị & kéo dài Naked POC | `bool` | `true` | Đường POC phiên trước chưa bị lấp |
 | Hiển thị VAH/VAL/POC Phiên Trước | `bool` | `true` | Đường kẻ + label `(Open)`/`(Filled)` trên chart |
 | Hiển thị nhãn pVAH/pVAL/pPOC bên Thanh Giá | `bool` | `true` | Nhãn trên price scale (`plot(display=display.price_scale)`), đổi màu xám khi đã lấp |
+| Vẽ đường nối nhãn pVAH/pVAL/pPOC tới nến cuối | `bool` | `true` | Đoạn ngắn neo đúng tại nến cuối cùng (cập nhật mỗi bar), `extend=extend.right` vươn tới nhãn price scale; đổi màu xám khi mức giá đã bị lấp |
+| Kiểu đường nối pVAH/pVAL/pPOC | `string` | `Đứt nét` | Đứt nét / Liền nét / Chấm chấm |
 | Hiển thị Single Prints, Tails, Ledge & Spike | `bool` | `true` | Các mô hình cấu trúc đặc biệt |
 | Hiển thị nhãn Poor High/Low | `bool` | `true` | Đỉnh/đáy không có tail từ chối rõ ràng |
 | Hiển thị Bảng Thống Kê | `bool` | `true` | Dashboard 13 dòng (gọn, label viết tắt) |
@@ -122,6 +124,21 @@ fill(p_dev_poc, p_dev_val, color=c_va_below)
 
 Box/line tĩnh cũ (`draw.b_va_up/dn`, `draw.l_poc/vah/val`) đã bị xoá hoàn toàn — toggle "Hiển thị Developing VAH/POC/VAL & Khung VA" (`show_va`) giờ điều khiển đường bậc thang + vùng tô màu mới này.
 
+**Từ v2.3**: 3 `plot()` này dùng `display = display.pane + display.status_line + display.data_window` (bỏ `display.price_scale`) — vẫn vẽ trên pane như cũ nhưng **không hiện nhãn giá trị bên phải** (price scale) cho "VAH/POC/VAL (Developing)", tránh rối với các nhãn pVAH/pVAL/pPOC phiên trước đã có sẵn ở đó.
+
+## Thiết Kế: Market Profile Core Library (dùng chung với Order Flow Panel)
+
+**Vấn đề gặp phải**: `order_flow_profile_panel.pine` dùng lại gần như nguyên khối động cơ TPO/POC/Value Area/Day Type của `market_profile.pine` nhưng tự viết lại độc lập — và bản sao đó vẫn ở dạng **O(số nến trong phiên × grid_rows) mỗi bar** (thuật toán cũ mà chính `market_profile.pine` đã bỏ từ v2.0 vì quá chậm trên timeframe nhỏ). Hai file ngày càng lệch nhau, sửa bug ở 1 file không tự động áp dụng cho file kia.
+
+**Cách sửa (v3.0)**: tách toàn bộ phần tính toán THUẦN (không đụng tới `line`/`box`/`label`/`table`) ra `libraries/market_profile_core.pine`, publish lên TradingView (`import anthonydang/market_profile_core/1 as mpcore`) để cả 2 indicator cùng dùng:
+
+- **UDT `mpcore.SessionProfile`**: toàn bộ field số/bool/string của "động cơ" (IB, POC/VAH/VAL, RF, TPO Count, Day Type/Open Type, Tails/Poor/SP/Ledge/Spike, 80% VA Rule...). **Không chứa** object vẽ (`line`/`box`/`label`) — mỗi indicator tự giữ UDT vẽ riêng (`SessionDrawings` ở `market_profile.pine`). Cũng **không chứa** 6 cờ chống lặp cảnh báo (`alerted_*`) — đó là state riêng của từng indicator (chỉ `market_profile.pine` cần, panel kia không có cảnh báo), nay là `var bool` riêng ngoài UDT.
+- **Hàm pure** export từ library: `f_add_bar_tpo` (động cơ TPO incremental), `f_process_bar_period` (RF theo TPO Period), `f_calc_poc`/`f_calc_value_area`/`f_calc_tpo_above_below` (POC/VA/TPO Count), `f_detect_buying_tail`/`f_detect_selling_tail`/`f_count_tail_rows`/`f_detect_poor_hl`/`f_detect_single_prints`/`f_detect_ledge`/`f_detect_late_spike` (các mẫu hình), `f_classify_day_type`/`f_classify_open_type`/`f_get_daytype_color` (phân loại ngày), `f_check_80_rule` (80% VA Rule).
+- `market_profile.pine` v3.0 chỉ còn giữ: 2 UDT thuần vẽ (`NakedPOC`, `SessionDrawings`), input/màu/alert/dashboard, và phần RENDER (box/line/label/table) — mọi phép tính đều gọi qua `mpcore.*`. Hành vi/số liệu hiển thị **không đổi** so với v2.3 (refactor thuần, không đổi logic).
+- `order_flow_profile_panel.pine` v2.0 cũng chuyển engine TPO/POC/VA sang `mpcore` — xem `docs/order-flow-profile-panel.md` mục thiết kế tương ứng (có **đổi hành vi nhỏ**: input `grid_rows` → `price_step`, vì engine incremental yêu cầu bước giá cố định).
+
+**Ràng buộc vận hành (quan trọng, đã xác nhận qua thực nghiệm)**: `import user/lib/N` trỏ tới 1 "version publish" CỐ ĐỊNH, không tự trỏ theo bản mới nhất. Lần đầu publish library (qua Pine Editor, hoặc API `create_pine_script`) tạo ra `/1` dùng được ngay (sau 1 nhịp trễ lập chỉ mục ngắn). Nhưng các lần SỬA sau đó chỉ lưu thành 1 bản mới trong lịch sử "My Scripts" — **KHÔNG** tự sinh ra version import mới; phải chủ động mở Pine Editor, bấm **Publish script → Update existing publication** để tạo `/2`, `/3`... rồi mới cập nhật câu `import` ở các script muốn dùng bản mới. Bản cũ (`/1`) vẫn chạy ổn định cho script nào còn giữ nguyên câu import đó (Pine giữ lại mọi version đã publish).
+
 ## Output / Tín Hiệu Trên Chart
 
 - Đường IB High/Low + mở rộng 1.5x/2.0x.
@@ -143,6 +160,7 @@ Box/line tĩnh cũ (`draw.b_va_up/dn`, `draw.l_poc/vah/val`) đã bị xoá hoà
 - Dashboard (từ v2.1) dùng label/text viết tắt để gọn (ví dụ "IB" thay "Trạng thái IB", "✓/○" thay "(Đã lấp)/(Còn nguyên)") — bật toggle `show_diag` khi cần xem số liệu chẩn đoán dedup chi tiết.
 - Day Type/Open Type được đánh giá lại liên tục trong phiên (không "đóng băng" cho đến cuối phiên) — là hành vi mong muốn (profile sống theo thời gian thực), không phải repaint vì không dùng dữ liệu tương lai.
 - Giới hạn vẽ: `max_lines_count=500`, `max_boxes_count=500`, `max_labels_count=500`.
+- **Phụ thuộc library ngoài** (từ v3.0): cần `import anthonydang/market_profile_core/1` — nếu library bị unpublish/xoá trên TradingView, script này sẽ không compile được. Xem mục "Thiết Kế: Market Profile Core Library" phía trên.
 
 ## Changelog
 
@@ -158,3 +176,10 @@ Box/line tĩnh cũ (`draw.b_va_up/dn`, `draw.l_poc/vah/val`) đã bị xoá hoà
   - **Thêm Lưới Kép** (xem mục "Thiết Kế: Lưới Kép" phía trên): phát hiện qua test trên VN30F1M (3m) — TPO Count hiện 294/376 trông vô lý, nhưng chẩn đoán xác nhận dedup theo Period ĐÚNG (X≤Y), nguyên nhân là `price_step=0.1` quá mịn so với biên độ phiên (~200 hàng). Thêm input `shape_step` (mặc định 1.0) + mảng `tpo_counts_c`/`tpo_last_period_c`/`base_row_c` riêng cho TPO Count/Tail/Poor High-Low/Single Prints/Ledge (nhóm này phải dùng CHUNG 1 lưới vì chia sẻ `poc_row`/`buy_tail_rows`/`sell_tail_rows`, tách lưới riêng cho từng cái sẽ gây mâu thuẫn logic). POC/VAH/VAL vẫn dùng `price_step` mịn như cũ. Hàm `f_add_bar_tpo` thêm tham số `row_step`/`track_total` để dùng chung cho 2 lưới mà không đếm trùng `total_tpo`.
 - **v2.1** (2026-11-14): Dọn code — rút gọn changelog/comment dài dòng trong header file (lịch sử chi tiết chuyển hẳn vào tài liệu này); xoá field chẩn đoán lưới mịn không dùng tới (`poc_tpo_cnt`). Dashboard gọn lại: label/value viết tắt (vd "IB" thay "Trạng thái IB", "✓/○" thay "(Đã lấp)/(Còn nguyên)", rút gọn chuỗi trạng thái 80% VA Rule); số liệu chẩn đoán dedup (`POC:X/YP, Zh`) chuyển vào toggle riêng `show_diag` (mặc định tắt) thay vì luôn hiện. Thêm input `dash_pos_opt` chọn vị trí Dashboard (4 góc: Trên Trái/Phải, Dưới Trái/Phải) thay vì cố định `position.top_right`.
 - **v2.2** (2026-11-14): Chuyển VAH/POC/VAL từ box/line tĩnh (bị "viết lại" cả đoạn lịch sử mỗi khi giá trị mới nhất đổi) thành **Developing VA** đúng nghĩa — `plot(style=plot.style_stepline)` cho 3 đường + `fill()` tô 2 vùng, giữ đúng giá trị lịch sử từng bar, áp dụng cho mọi phiên kể cả đã đóng (xem mục "Thiết Kế: Developing VA"). Xoá hẳn `draw.b_va_up/dn`, `draw.l_poc/vah/val` (dead code) khỏi `SessionDrawings`.
+- **v2.3** (2026-11-15):
+  - Ẩn nhãn giá trị bên phải (price scale) của 3 đường Developing VAH/POC/VAL — thêm `display = display.pane + display.status_line + display.data_window` (bỏ `display.price_scale`), chỉ còn vẽ trên pane, không còn nhãn số bên phải chart. Đổi `shorttitle` của indicator từ `"MP Classic v6"` → `"MP"`.
+  - Thêm option vẽ đường (`show_pva_line`, kiểu chọn qua `pva_line_opt`: Đứt nét/Liền nét/Chấm chấm) nối nhãn `pVAH`/`pVAL`/`pPOC` (price scale) tới **nến cuối cùng hiện tại** — đoạn ngắn `[bar_index-1, bar_index]` được cập nhật lại (`line.set_xy1/xy2`) MỖI BAR để luôn bám đúng nến mới nhất (không neo cố định ở nến cuối phiên trước, tránh vẽ xuyên qua các nến của phiên đang chạy), kết hợp `extend=extend.right` để đoạn ngắn này vươn tới mép phải nơi nhãn price scale nằm. Việc cập nhật này KHÔNG dừng lại khi mức giá đã bị lấp (khác đường "Phiên Trước" của `show_prev_va`), chỉ đổi màu xám để vẫn luôn nối đúng tới nhãn. Đổi màu xám khi mức giá tương ứng đã bị lấp, đồng bộ với màu nhãn price scale.
+  - Tiện sửa luôn: logic phát hiện "đã lấp" pVAH/pVAL/pPOC (và alert tương ứng) trước đây vô tình bị buộc vào toggle `show_prev_va` (tắt toggle đó thì dashboard/alert cũng không cập nhật dù không liên quan) — tách phát hiện ra độc lập, chỉ còn phần VẼ (line/label) mới phụ thuộc đúng toggle của nó.
+- **v3.0** (2026-11-15): Tách toàn bộ động cơ tính toán thuần (TPO incremental, POC/Value Area, TPO Count, Rotation Factor theo TPO Period, Day Type/Open Type, Tails/Single Prints/Ledge/Late Spike, 80% VA Rule) ra library `libraries/market_profile_core.pine`, publish lên TradingView và import (`anthonydang/market_profile_core/1 as mpcore`) để dùng chung với `order_flow_profile_panel.pine` (v2.0) — xem mục "Thiết Kế: Market Profile Core Library" phía trên. UDT `SessionProfile` nay lấy từ library; bỏ field chẩn đoán `poc_tpo_cnt_c` (chuyển thành biến local `diag_poc_tpo_cnt_c`) và 6 cờ `alerted_*` (chuyển thành `var bool` riêng ngoài UDT) khỏi UDT vì không thuộc "động cơ" chung. Đây là refactor thuần — hành vi/số liệu hiển thị không đổi so với v2.3.
+- **v3.1** (2026-11-15): Gọn tiếp phần orchestration còn lại — chuyển 3 công thức tiện ích (kiểm tra mức giá bị lấp cho Naked POC/Prev VAH/VAL/POC qua `mpcore.f_check_level_tested`, 4 đường mở rộng IB qua `mpcore.f_calc_ib_extensions`, vị trí dải màu Day Type qua `mpcore.f_calc_band_position`) và 7 hàm định dạng chuỗi dashboard (IB state, số có dấu, TPO imbalance, trạng thái mức giá, tóm tắt Tails/Poor High-Low/mô hình đặc biệt) sang `market_profile_core` v1.1 (`import anthonydang/market_profile_core/2`). File indicator giờ chỉ còn orchestration (gọi `mpcore.*`) + vẽ đối tượng + layout dashboard — không còn công thức/format string rải rác trong code. Hành vi/số liệu hiển thị không đổi so với v3.0.
+- **v3.2** (2026-11-21): Thu hẹp Dashboard — dòng "Open Type" (và "Day Type") trả về chuỗi đầy đủ dài (vd `Open-Auction Out of Range (OAOR)`, `Double-Distribution Trend Day`) khiến cột giá trị của cả bảng bị kéo rộng theo. Thêm 2 hàm hiển thị cục bộ `f_short_day_type`/`f_short_open_type` trong `market_profile.pine` (chỉ format chuỗi cho dashboard, không đụng tới `market_profile_core`) để rút gọn 2 dòng này; chuỗi đầy đủ vẫn xem được qua tooltip khi hover ô. Số liệu/logic tính toán không đổi.

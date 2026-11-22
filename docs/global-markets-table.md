@@ -1,25 +1,30 @@
 # Global Markets Table — Tài Liệu
 
-> **Script**: [indicators/global_markets_table.pine](../indicators/global_markets_table.pine) (v1.0)
+> **Script**: [indicators/global_markets_table.pine](../indicators/global_markets_table.pine) (v1.3)
 > **Loại**: Indicator (overlay)
 > **Pine Script**: v6
-> **Ngày tạo**: 2026-11-18 / **Cập nhật**: 2026-11-18
+> **Ngày tạo**: 2026-11-18 / **Cập nhật**: 2026-11-21
 
 ## Tổng Quan
 
-Bảng giá real-time overlay lên chart, hiển thị 9 chỉ số/tài sản quan trọng trên thế giới: **US30** (Dow Jones), **US30 Future** (hợp đồng tương lai E-mini Dow/YM), **USTECH** (Nasdaq 100), **NIKKEI 225**, **HANG SENG**, **KOSPI**, **OIL** (WTI Crude), **XAUUSD** (Vàng), **BTC** (Bitcoin). Dùng để theo dõi nhanh biến động thị trường toàn cầu ngay trên chart đang xem, không phụ thuộc mã/khung thời gian của chart chính.
+Bảng giá real-time overlay lên chart, hiển thị 9 chỉ số/tài sản quan trọng trên thế giới: **US30** (Dow Jones), **US30 Future** (hợp đồng tương lai E-mini Dow/YM), **USTECH** (Nasdaq 100), **NIKKEI 225**, **HANG SENG**, **KOSPI**, **OIL** (WTI Crude), **XAUUSD** (Vàng), **BTC** (Bitcoin). Dùng để theo dõi nhanh biến động thị trường toàn cầu ngay trên chart đang xem, không phụ thuộc mã/khung thời gian của chart chính. Có 2 kiểu hiển thị chọn qua input, mặc định là kiểu lưới gọn (ít tốn chiều cao chart hơn).
 
 ## Tham Số Đầu Vào
 
 | Nhóm | Tham Số | Loại | Mặc Định | Mô Tả |
 |---|---|---|---|---|
 | Danh Sách Mã | US30 / US30 Future / USTECH / NIKKEI / HANG SENG / KOSPI / OIL / XAUUSD / BTC | `symbol` | `TVC:DJI`, `CBOT_MINI:YM1!`, `TVC:NDX`, `TVC:NI225`, `TVC:HSI`, `KRX:KOSPI`, `TVC:USOIL`, `TVC:GOLD`, `BITSTAMP:BTCUSD` | Mã nguồn dữ liệu từng dòng — đổi được nếu mã mặc định không khả dụng với tài khoản/khu vực |
+| Hiển Thị | Kiểu Hiển Thị | `string` | `Lưới Gọn` | 2 lựa chọn: "Lưới Gọn" (lưới 3x3, chỉ 3 dòng cao) / "Bảng Chi Tiết" (bảng 9 dòng x 4 cột như bản gốc) |
 | Hiển Thị | Vị Trí Bảng | `string` | `Trên-Phải` | 5 lựa chọn: Trên-Phải/Trên-Trái/Dưới-Phải/Dưới-Trái/Giữa-Phải |
 | Hiển Thị | Cỡ Chữ | `string` | `Nhỏ` | Rất Nhỏ/Nhỏ/Thường |
 | Hiển Thị | Số Lẻ Thập Phân | `int` | `2` | Áp dụng cho cột Giá và Thay Đổi (0-4) |
-| Hiển Thị | Màu Tăng / Màu Giảm | `color` | Xanh / Đỏ | Màu chữ Giá/Thay Đổi/% theo chiều biến động |
-| Hiển Thị | Màu Chữ Header / Màu Nền Header | `color` | Trắng / Xám | Styling dòng tiêu đề bảng |
-| Hiển Thị | Màu Nền Bảng | `color` | Đen (80% trong suốt) | Màu nền các dòng dữ liệu (không áp dụng cho header) |
+| Lưới Gọn - Màu Sắc | Màu Tăng / Màu Giảm | `color` | Xanh / Đỏ | Màu nền ô (trước khi áp độ trong suốt) theo chiều tăng/giảm — **chỉ áp dụng khi Kiểu Hiển Thị = "Lưới Gọn"** |
+| Lưới Gọn - Màu Sắc | Màu Chữ | `color` | Trắng | Màu chữ 3 dòng (Tên/Giá/Thay đổi) trong mỗi ô |
+| Lưới Gọn - Màu Sắc | Độ Trong Suốt Nền Ô | `int` | `60` | 0 (đặc) - 100 (trong suốt hoàn toàn), áp cho nền ô theo màu Tăng/Giảm |
+| Bảng Chi Tiết - Màu Sắc | Màu Tăng / Màu Giảm | `color` | Xanh / Đỏ | Màu chữ cột Giá/Thay Đổi/% — **chỉ áp dụng khi Kiểu Hiển Thị = "Bảng Chi Tiết"** |
+| Bảng Chi Tiết - Màu Sắc | Màu Chữ Header / Màu Nền Header | `color` | Trắng / Xám | Styling dòng tiêu đề bảng |
+| Bảng Chi Tiết - Màu Sắc | Màu Tên Chỉ Số | `color` | Trắng | Màu chữ cột "Chỉ Số" (tên mã) ở các dòng dữ liệu |
+| Bảng Chi Tiết - Màu Sắc | Màu Nền Bảng | `color` | Đen (80% trong suốt) | Màu nền các dòng dữ liệu (không áp dụng cho header) |
 
 ## Logic Chính
 
@@ -31,8 +36,8 @@ Bảng giá real-time overlay lên chart, hiển thị 9 chỉ số/tài sản q
 
 ## Output / Tín Hiệu Trên Chart
 
-- 1 bảng overlay, 10 dòng (1 header + 9 chỉ số) × 4 cột: Chỉ Số, Giá, Thay Đổi, %.
-- Màu xanh/đỏ theo chiều tăng/giảm so với phiên trước.
+- **Lưới Gọn** (mặc định): 1 bảng overlay, lưới 3x3 (3 dòng cao), mỗi ô = 1 chỉ số với 3 dòng text (Tên / Giá / Thay đổi tuyệt đối + %), nền ô tô màu xanh/đỏ nhạt theo chiều tăng/giảm.
+- **Bảng Chi Tiết**: 1 bảng overlay, 10 dòng (1 header + 9 chỉ số) × 4 cột: Chỉ Số, Giá, Thay Đổi, %, màu chữ xanh/đỏ theo chiều tăng/giảm.
 
 ## Giới Hạn & Lưu Ý
 
@@ -42,4 +47,7 @@ Bảng giá real-time overlay lên chart, hiển thị 9 chỉ số/tài sản q
 
 ## Changelog
 
+- **v1.3** (2026-11-21): Tách setting màu sắc/style thành 2 group riêng theo từng kiểu hiển thị — "Lưới Gọn - Màu Sắc" (Màu Tăng/Giảm, Màu Chữ, Độ Trong Suốt Nền Ô) và "Bảng Chi Tiết - Màu Sắc" (giữ các input màu cũ), không còn dùng chung input màu giữa 2 kiểu.
+- **v1.2** (2026-11-21): Thêm kiểu hiển thị "Lưới Gọn" (lưới 3x3, 3 dòng cao, nền ô tô màu theo tăng/giảm) để giảm chiều cao chiếm trên chart — đặt làm mặc định; giữ "Bảng Chi Tiết" (layout gốc) làm lựa chọn thứ 2 qua input "Kiểu Hiển Thị".
+- **v1.1** (2026-11-18): Thêm input "Màu Tên Chỉ Số" cho cột tên mã (trước đó hardcode màu trắng).
 - **v1.0** (2026-11-18): Phát hành lần đầu.
