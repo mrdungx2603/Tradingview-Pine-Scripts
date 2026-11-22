@@ -2,7 +2,7 @@
 // ─── Market Profile — Mind over Markets (Classic Light Edition) ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-11-14
-// Phiên bản: 3.2
+// Phiên bản: 3.3
 // Mô tả: Market Profile / TPO (Time Price Opportunity) theo phương pháp "Mind over Markets" —
 //        tính Initial Balance, Value Area (VAH/VAL/POC), Naked POC, Tails/Single Prints/Ledge/Spike,
 //        phân loại Day Type & Open Type, 80% VA Rule, Dashboard thống kê.
@@ -38,6 +38,8 @@
 //       (import .../market_profile_core/2). File này giờ chỉ còn orchestration (gọi mpcore.*)
 //       + vẽ đối tượng + dashboard layout — không còn công thức/format string rải rác. Hành
 //       vi/số liệu hiển thị KHÔNG đổi so với v3.0, xem docs/market-profile-core.md.
+// v3.3: Tail (buying/selling), Poor High/Low, Single Prints và Ledge chỉ xét sau khi IB khóa
+//       (sau ib_periods_cnt Period) — tránh tail/poor giả trong IB. Library không đổi.
 // v3.2: Thu hẹp Dashboard — 2 dòng Day Type/Open Type (prof.day_type/prof.open_type) vốn trả
 //       về chuỗi đầy đủ dài (vd "Open-Auction Out of Range (OAOR)", "Double-Distribution Trend
 //       Day") khiến cột giá trị của toàn bảng bị kéo rộng theo. Thêm 2 hàm rút gọn hiển thị
@@ -402,21 +404,24 @@ if not na(prof.start_bar) and array.size(tpo_counts) > 0
     prof.tpo_above_poc := above_cnt
     prof.tpo_below_poc := below_cnt
 
+    // Tail / Poor High-Low / Single Print / Ledge chỉ xét sau khi IB khóa (sau ib_periods_cnt Period).
+    // Trong IB chỉ có 1-2 Period nên mọi hàng biên đều TPO=1 → tail/poor giả.
+    bool shape_ready = prof.periods_in_sess > ib_periods_cnt
     int buy_tail_rows  = mpcore.f_count_tail_rows(tpo_counts_c, poc_row_c, true)
     int sell_tail_rows = mpcore.f_count_tail_rows(tpo_counts_c, poc_row_c, false)
-    prof.buying_tail_h  := mpcore.f_detect_buying_tail(tpo_counts_c, poc_row_c, grid_low_c, step_c, min_tail_tpo)
-    prof.selling_tail_l := mpcore.f_detect_selling_tail(tpo_counts_c, poc_row_c, grid_low_c, step_c, min_tail_tpo)
+    prof.buying_tail_h  := shape_ready ? mpcore.f_detect_buying_tail(tpo_counts_c, poc_row_c, grid_low_c, step_c, min_tail_tpo) : na
+    prof.selling_tail_l := shape_ready ? mpcore.f_detect_selling_tail(tpo_counts_c, poc_row_c, grid_low_c, step_c, min_tail_tpo) : na
 
     [has_poor_low, has_poor_high] = mpcore.f_detect_poor_hl(tpo_counts_c, prof.buying_tail_h, prof.selling_tail_l)
-    prof.has_poor_low  := has_poor_low
-    prof.has_poor_high := has_poor_high
+    prof.has_poor_low  := shape_ready and has_poor_low
+    prof.has_poor_high := shape_ready and has_poor_high
 
     [has_sp_mid, sp_mid_bot, sp_mid_top] = mpcore.f_detect_single_prints(tpo_counts_c, buy_tail_rows, sell_tail_rows, min_tail_tpo, grid_low_c, step_c)
-    prof.has_sp_mid := has_sp_mid
-    prof.sp_mid_bot := sp_mid_bot
-    prof.sp_mid_top := sp_mid_top
+    prof.has_sp_mid := shape_ready and has_sp_mid
+    prof.sp_mid_bot := shape_ready ? sp_mid_bot : na
+    prof.sp_mid_top := shape_ready ? sp_mid_top : na
 
-    prof.ledge_price := mpcore.f_detect_ledge(tpo_counts_c, grid_low_c, step_c)
+    prof.ledge_price := shape_ready ? mpcore.f_detect_ledge(tpo_counts_c, grid_low_c, step_c) : na
 
     [has_late_spike, spike_base] = mpcore.f_detect_late_spike(prof, ib_periods_cnt, step)
     prof.has_late_spike := has_late_spike
@@ -680,7 +685,7 @@ var table dash = table.new(dash_position, 2, 13, bgcolor=c_tbl_bg, border_color=
 
 if barstate.islast and show_dash
     table.cell(dash, 0, 0, "MARKET PROFILE", bgcolor=c_navy_poc, text_color=color.white, text_size=size.small, text_halign=text.align_left)
-    table.cell(dash, 1, 0, "v3.2", bgcolor=c_navy_poc, text_color=color.white, text_size=size.small, text_halign=text.align_right)
+    table.cell(dash, 1, 0, "v3.3", bgcolor=c_navy_poc, text_color=color.white, text_size=size.small, text_halign=text.align_right)
 
     color dt_col = mpcore.f_get_daytype_color(prof.day_type, c_dt_trend, c_dt_dd, c_dt_neutral, c_dt_nontrend, c_dt_normal)
     table.cell(dash, 0, 1, "Day Type", bgcolor=c_tbl_header, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
