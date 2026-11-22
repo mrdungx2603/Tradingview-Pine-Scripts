@@ -27,8 +27,13 @@
 // Premium hoặc sàn không hỗ trợ dữ liệu tick sẽ không có footprint, khi đó toàn bộ thanh order
 // flow (box + nhãn) sẽ KHÔNG được vẽ (ẩn hoàn toàn, không ước lượng thay thế).
 //
+// ⚠️ BẢN CHẨN ĐOÁN TẠM (1.13-debug): có thêm 4 plot DEBUG_cum_fp_vol/DEBUG_cum_raw_vol/
+// DEBUG_vol_diff/DEBUG_fp_pct_of_raw ở cuối file để kiểm tra giả thuyết "volume footprint
+// khác volume raw" (nguyên nhân POC lệch với Fixed Range Volume Profile). Sẽ xoá 4 plot này
+// ở bản kế tiếp sau khi xác định xong nguyên nhân — không phải tính năng chính thức.
+//
 // Ngày tạo: 2026-11-21
-// Phiên bản: 1.13
+// Phiên bản: 1.13-debug
 
 // ⚠️ Cần library này đã được Publish (không chỉ lưu "My Scripts") trên TradingView, nếu không
 // toàn bộ script sẽ lỗi compile ở dòng import này.
@@ -237,6 +242,12 @@ var bool has_fp_ever = false
 if has_footprint_data
     has_fp_ever := true
 
+// DEBUG TẠM — xem khối "DEBUG TẠM" ở dưới (gần f_merge_into_profile(sess_profile,...)) để
+// biết cách dùng. Chỉ để chẩn đoán POC lệch với Fixed Range Volume Profile của TradingView,
+// sẽ xoá sau khi xác định xong nguyên nhân.
+var float dbg_cum_fp_vol  = 0.0
+var float dbg_cum_raw_vol = 0.0
+
 // ===== BUCKET VOLUME THEO PRICE_STEP (TẦNG 2) =====
 // Gộp các row footprint (mỗi row = 1 tick, do ticks_per_row=1 ở trên) vào từng hàng
 // price_step. row_id = số nguyên tuyệt đối của bậc giá (không tương đối theo base động)
@@ -380,6 +391,17 @@ if barstate.isconfirmed
         array.clear(sess_profile.buys)
         array.clear(sess_profile.sells)
     f_merge_into_profile(sess_profile, bar_row_ids, bar_buys, bar_sells)
+
+    // ===== DEBUG TẠM — so sánh volume footprint vs volume raw (builtin) cộng dồn cả phiên =====
+    // Theo yêu cầu người dùng: kiểm tra giả thuyết "volume từ footprint khác volume raw"
+    // (nghi ngờ nguyên nhân POC lệch so với Fixed Range Volume Profile của TradingView dù đã
+    // khớp range + bước giá). CHỈ ĐỂ CHẨN ĐOÁN — sẽ xoá sau khi xác định xong nguyên nhân,
+    // không phải tính năng chính thức của indicator.
+    if is_new_session
+        dbg_cum_fp_vol  := 0.0
+        dbg_cum_raw_vol := 0.0
+    dbg_cum_fp_vol  := dbg_cum_fp_vol + array.sum(bar_buys) + array.sum(bar_sells)
+    dbg_cum_raw_vol := dbg_cum_raw_vol + volume
 
     // SMC state machine (Last HL — TASK 6, sửa sau review): nếu sang phiên mới thì reset về
     // trạng thái trống (seeded=false). Sau đó, RETRY seed MỖI BAR cho tới khi seed xong (đúng
@@ -662,3 +684,15 @@ if barstate.islast
 // đúng 1 plot(na) tối thiểu — không bắt buộc về mặt cú pháp (indicator không yêu cầu có
 // plot), chỉ giữ cho an toàn/quen thuộc với bố cục file chuẩn của dự án.
 plot(na)
+
+// ===== DEBUG TẠM — CHẨN ĐOÁN POC LỆCH VỚI FIXED RANGE VOLUME PROFILE (sẽ xoá sau) =====
+// Cách dùng: mở Data Window (hoặc rê chuột vào nến cuối phiên), đọc 2 giá trị
+// DEBUG_cum_fp_vol và DEBUG_cum_raw_vol tại đúng bar cuối cùng của phiên (hoặc bar hiện tại
+// nếu đang xem phiên đang chạy) — nếu 2 số này lệch nhau rõ (vd quá 5-10%), xác nhận đúng
+// giả thuyết "volume footprint khác volume raw" (footprint dùng dữ liệu tái tạo/không đầy đủ
+// tick thật trên symbol này) — đây là cách TradingView tính nội bộ, không phải lỗi code của
+// indicator này. DEBUG_fp_pct_of_raw = tỷ lệ % (fp/raw) — 100% nghĩa là khớp hoàn toàn.
+plot(dbg_cum_fp_vol, title="DEBUG_cum_fp_vol")
+plot(dbg_cum_raw_vol, title="DEBUG_cum_raw_vol")
+plot(dbg_cum_raw_vol - dbg_cum_fp_vol, title="DEBUG_vol_diff")
+plot(dbg_cum_raw_vol > 0 ? dbg_cum_fp_vol / dbg_cum_raw_vol * 100 : na, title="DEBUG_fp_pct_of_raw")

@@ -84,6 +84,11 @@ tính được chọn.
 
 ## Changelog
 
+- **v1.13-debug (2026-11-22)**: Bản chẩn đoán TẠM (không phải tính năng chính thức) — theo yêu cầu người dùng, kiểm tra giả thuyết "volume từ `request.footprint()` khác volume raw (builtin `volume`)" sau khi phát hiện POC lệch khá nhiều (8 hàng ở `price_step=0.3`) so với Fixed Range Volume Profile của TradingView, dù đã khớp bước giá và xác nhận đúng range.
+  - Thêm 2 biến `var float` (`dbg_cum_fp_vol`, `dbg_cum_raw_vol`) cộng dồn mỗi bar trong phiên (reset theo `is_new_session`, cùng mốc với `sess_profile`): `dbg_cum_fp_vol` = tổng `buy_volume()+sell_volume()` từ footprint; `dbg_cum_raw_vol` = tổng `volume` builtin.
+  - Thêm 4 plot debug ở cuối file: `DEBUG_cum_fp_vol`, `DEBUG_cum_raw_vol`, `DEBUG_vol_diff` (raw − fp), `DEBUG_fp_pct_of_raw` (% fp so với raw — 100% là khớp hoàn toàn). Đọc qua Data Window tại bar cuối phiên.
+  - **Dự kiến xoá 4 plot này ở bản kế tiếp** sau khi xác định xong nguyên nhân — đây không phải tính năng của indicator.
+  - Backup v1.13 tại `indicators/hist/order_flow_bar_v1.13.pine`.
 - **v1.13 (2026-11-22)**: Theo phản hồi người dùng sau khi test v1.12 — hoàn toàn không thấy delta nào (không chỉ lệch hàng như v1.11, mà biến mất hẳn).
   - Nguyên nhân nghi ngờ: box delta ở v1.12 dùng `border_color=na, bgcolor=na` VÀ `text_valign=text.align_center` — cả 2 chưa từng có tiền lệ dùng trong repo (chỉ `border_color`/`bgcolor`/`text`/`text_size`/`text_color`/`text_halign` đã xác nhận compile được qua `market_profile.pine`) — nhiều khả năng 1 trong 2 là cú pháp sai khiến `box.new` không vẽ được gì (không chỉ riêng text).
   - Đổi `border_color`/`bgcolor` từ `na` sang `color.new(color.gray, 95)` (gần như trong suốt, nhưng dùng đúng hàm `color.new` đã có tiền lệ dùng khắp file này) — bỏ hẳn `text_valign` (không rõ có tồn tại cho `box.new` hay không, chỉ giữ `text_halign` đã có tiền lệ).
