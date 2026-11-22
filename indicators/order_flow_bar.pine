@@ -28,7 +28,7 @@
 // flow (box + nhãn) sẽ KHÔNG được vẽ (ẩn hoàn toàn, không ước lượng thay thế).
 //
 // Ngày tạo: 2026-11-21
-// Phiên bản: 1.12
+// Phiên bản: 1.13
 
 // ⚠️ Cần library này đã được Publish (không chỉ lưu "My Scripts") trên TradingView, nếu không
 // toàn bộ script sẽ lỗi compile ở dòng import này.
@@ -577,17 +577,23 @@ f_draw_wings(RowProfile profile, int anchor_bar, int max_wing_bars, color buy_co
             array.push(of_boxes, sell_box)
 
             // Box delta ở GIỮA (theo phản hồi người dùng: nhãn label.new trước đó không dóng
-            // đúng hàng với box buyer/seller — label tự căn giữa text theo cách riêng của Pine,
-            // không đảm bảo khớp chính xác row_top/row_bot thật). Dùng box.new với ĐÚNG
-            // row_top/row_bot của chính hàng này (giống buy_box/sell_box) + tham số text= của
-            // box — Pine tự canh giữa text TRONG PHẠM VI box đó, nên luôn dóng đúng hàng với 2
-            // box buyer/seller cùng hàng (không trong suốt/không viền — chỉ dùng làm khung chứa
-            // text). Chỉ vẽ khi show_value_labels == true (giữ đúng input đang có để tắt/mở).
+            // đúng hàng với box buyer/seller). Dùng box.new với ĐÚNG row_top/row_bot của chính
+            // hàng này (giống buy_box/sell_box) + tham số text= của box — Pine tự canh giữa
+            // text TRONG PHẠM VI box đó, nên luôn dóng đúng hàng với 2 box buyer/seller cùng
+            // hàng. Chỉ vẽ khi show_value_labels == true.
+            // FIX (phản hồi người dùng: v1.12 không hiện delta gì cả): bản trước dùng
+            // border_color=na, bgcolor=na VÀ text_valign=text.align_center — cả 2 chưa có tiền
+            // lệ dùng trong repo (chỉ `border_color`/`bgcolor`/`text`/`text_size`/`text_color`/
+            // `text_halign` đã xác nhận compile được qua market_profile.pine), nhiều khả năng 1
+            // trong 2 là cú pháp sai khiến cả box không vẽ được (không chỉ riêng text). Đổi
+            // sang màu gần như trong suốt (color.new(_, 95), ĐÃ XÁC NHẬN dùng được nhiều nơi
+            // trong file này) thay cho na, và bỏ hẳn text_valign (không chắc tồn tại cho
+            // box.new, chỉ giữ text_halign đã có tiền lệ).
             if show_value_labels
                 array.push(of_boxes, box.new(left=anchor_bar - delta_col_width, top=row_top, right=anchor_bar + delta_col_width, bottom=row_bot,
-                     border_color=na, bgcolor=na,
+                     border_color=color.new(color.gray, 95), bgcolor=color.new(color.gray, 95),
                      text=delta_sign_str + str.tostring(delta_v, format.volume),
-                     text_color=delta_text_color, text_size=delta_label_size, text_halign=text.align_center, text_valign=text.align_center,
+                     text_color=delta_text_color, text_size=delta_label_size, text_halign=text.align_center,
                      xloc=xloc.bar_index))
 
 // Gọi mỗi tick NHƯNG chỉ ở bar cuối cùng (barstate.islast) — khác các accumulator Task 4/5 chỉ
