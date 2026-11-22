@@ -59,7 +59,7 @@ tính được chọn.
 - **Chọn active profile**: theo `mode_calc`, chọn 1 trong 3 `RowProfile` trên làm `active_profile`.
 - **POC / Peak Buy / Peak Sell**: trên `active_profile`, tính `row_id` ứng với `argmax(buy+sell)` (POC), `argmax(buy)` (Peak Buy), `argmax(sell)` (Peak Sell). Trả `na` nếu profile rỗng.
 - **Vẽ thanh**: với mỗi hàng trong `active_profile`, vẽ 1 box buyer (kéo phải từ bar neo, cao đúng `[row_id * price_step, (row_id + 1) * price_step)`) và 1 box seller (kéo trái), độ rộng tỷ lệ volume hàng đó / volume hàng lớn nhất, tối đa `wing_max_bars`. Hàng trùng POC/Peak Buy/Peak Sell được tô màu riêng theo thứ tự ưu tiên POC > Peak Buy > Peak Sell. Chỉ rebuild profile/POC/vẽ lại ở bar cuối cùng (`barstate.islast`, mỗi tick của bar đó) — các bar lịch sử không cần vẽ vì box/label luôn bị xoá-vẽ-lại toàn bộ, chỉ trạng thái cuối cùng có ý nghĩa.
-- **Nhãn giá trị**: nếu `show_value_labels = true` và có dữ liệu footprint (`has_fp_ever`), vẽ tối đa 3 nhãn (POC/Peak Buy/Peak Sell) ghi giá (định dạng `mintick`, lấy **trung điểm hàng** `(row_id + 0.5) * price_step`) và volume (định dạng `volume`) tại mỗi mức, nếu mức đó còn tồn tại trong profile.
+- **Nhãn giá trị**: nếu `show_value_labels = true` và có dữ liệu footprint (`has_fp_ever`), vẽ tối đa 3 nhãn (POC/Peak Buy/Peak Sell) ghi giá (định dạng `mintick`, lấy **trung điểm hàng** `(row_id + 0.5) * price_step`) và volume (định dạng `volume`) tại mỗi mức, nếu mức đó còn tồn tại trong profile. 3 nhãn này đặt **ra ngoài phạm vi box**, tại `anchor_bar + wing_max_bars + 2` (kiểu `label.style_label_right`, chữ loang ra bên phải điểm neo) — không chồng lên box buyer/seller phía sau.
 - **Cột giá tham khảo**: cùng điều kiện `show_value_labels`/`has_fp_ever`, vẽ thêm 1 nhãn giá nền đặc (`price_column_color`, không kèm volume, kiểu `label.style_label_center`) tại tâm mỗi `price_ruler_step_rows` hàng — tính theo giá trị `row_id` **nhỏ nhất/lớn nhất thật có trong profile** (không phải theo vị trí trong mảng, vì thứ tự chèn mảng không theo thứ tự giá), nên các nhãn cách đều nhau đúng theo giá, tạo thành 1 "cột" dễ đọc ở giữa thanh.
 - **Giá khớp hiện tại**: nếu `show_current_price_label = true`, vẽ thêm 1 nhãn riêng tại `y=close` (giá đóng cửa của bar đang chạy — giá khớp hiện tại), màu `current_price_color` (mặc định vàng, nổi bật nhất). Khác cột giá tham khảo ở trên — giá trị này liên tục, không bó theo lưới `price_step`. Kèm 1 đường kẻ ngang nét đứt (cùng màu, cùng điều kiện hiện/ẩn) nối trực tiếp từ nến hiện tại (`bar_index`) sang vị trí neo của thanh (`anchor_bar`), cùng `y=close` — giúp xác nhận bằng mắt nhãn này đúng độ cao thật với nến, dù thanh nổi cách xa nến do `anchor_offset_bars`.
 - **Viền mọi hàng**: mỗi box buyer/seller luôn có viền màu `wing_border_color` để phân biệt ranh giới giữa các hàng liền kề; hàng POC/Peak Buy/Peak Sell đè viền bằng màu riêng của mức đó (ưu tiên POC > Peak Buy > Peak Sell).
@@ -68,7 +68,7 @@ tính được chọn.
 
 - 1 thanh order flow gồm nhiều box buyer (phải)/seller (trái) theo hàng giá, neo tại `bar_index + anchor_offset_bars`.
 - 3 mức highlight màu riêng trên thanh: POC (ưu tiên cao nhất), Peak Buy, Peak Sell.
-- 3 nhãn text tại các mức trên: giá + volume (tuỳ chọn ẩn/hiện qua `show_value_labels`).
+- 3 nhãn text tại các mức trên: giá + volume (tuỳ chọn ẩn/hiện qua `show_value_labels`), đặt bên phải, ra ngoài phạm vi box (không chồng lấn cánh buyer/seller).
 - Không có alert condition.
 
 ## Giới Hạn & Lưu Ý
@@ -83,6 +83,10 @@ tính được chọn.
 
 ## Changelog
 
+- **v1.5 (2026-11-22)**: Theo phản hồi người dùng sau khi test v1.4 — nhãn POC/Peak Buy/Peak Sell đặt ngay tại `anchor_bar` (giữa 2 cánh) bị box buyer/seller che mất, không đọc được.
+  - Chuyển 3 nhãn này ra `anchor_bar + wing_max_bars + 2` (vượt quá điểm xa nhất cánh buyer có thể vẽ tới), đổi kiểu `label.style_label_left` → `label.style_label_right` để chữ loang ra bên phải, không chồng lên box.
+  - Cột giá tham khảo và nhãn giá khớp hiện tại (thêm ở v1.2-v1.4) giữ nguyên vị trí tại `anchor_bar` — chưa thay đổi ở bản này (người dùng chỉ phản hồi về nhãn POC/Peak).
+  - Backup v1.4 tại `indicators/hist/order_flow_bar_v1.4.pine`.
 - **v1.4 (2026-11-22)**: Theo phản hồi người dùng sau khi test v1.3 — nhãn giá khớp hiện tại nổi cách xa nến (do `anchor_offset_bars`) khiến khó xác nhận bằng mắt có đúng độ cao thật với nến không.
   - Thêm 1 đường kẻ ngang nét đứt (`line.new`, cùng màu `current_price_color`) nối trực tiếp từ nến hiện tại (`bar_index`, `y=close`) sang vị trí neo của thanh (`anchor_bar`, cùng `y=close`) — xoá/vẽ lại mỗi lần cập nhật (`barstate.islast`), cùng điều kiện hiện/ẩn với nhãn "Giá: X" (`show_current_price_label`).
   - Lưu ý kỹ thuật: indicator này `overlay=true` nên luôn dùng CHUNG 1 trục giá với candlestick (Pine không hỗ trợ trục riêng cho overlay study) — mọi box/label/line đều vẽ bằng giá trị giá thật (`price_step`/`row_id`/`close`), không có "trục riêng" theo nghĩa kỹ thuật; đường kẻ mới chỉ giúp xác nhận trực quan rõ hơn.

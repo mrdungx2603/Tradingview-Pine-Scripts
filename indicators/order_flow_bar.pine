@@ -24,7 +24,7 @@
 // flow (box + nhãn) sẽ KHÔNG được vẽ (ẩn hoàn toàn, không ước lượng thay thế).
 //
 // Ngày tạo: 2026-11-21
-// Phiên bản: 1.4
+// Phiên bản: 1.5
 
 // ⚠️ Cần library này đã được Publish (không chỉ lưu "My Scripts") trên TradingView, nếu không
 // toàn bộ script sẽ lỗi compile ở dòng import này.
@@ -547,7 +547,10 @@ f_clear_labels(array<label> labels) =>
 // footprint; mỗi mức (POC/Peak Buy/Peak Sell) chỉ vẽ nếu row_id tương ứng không na VÀ còn
 // tồn tại trong `profile` (array.indexof >= 0). Text = giá (format.mintick) + volume
 // (format.volume) — POC dùng tổng buy+sell tại hàng đó, Peak Buy dùng buy_volume, Peak
-// Sell dùng sell_volume. Ngoài 3 mức này, còn vẽ thêm:
+// Sell dùng sell_volume. 3 nhãn này đặt RA NGOÀI phạm vi box (bên phải, tại
+// anchor_bar + wing_max_bars + 2, dùng style_label_right) — theo phản hồi người dùng: đặt
+// ngay tại anchor_bar (giữa 2 cánh, như bản trước) bị box che mất, không đọc được.
+// Ngoài 3 mức này, còn vẽ thêm:
 //   - 1 "cột giá" tham khảo: nhãn giá nền đặc (price_column_color), cách đều mỗi
 //     price_ruler_step_rows hàng, để đọc nhanh giá tại bất kỳ vùng nào của thanh mà không
 //     cần nhìn sang trục giá gốc của chart (xa vị trí neo nổi).
@@ -556,6 +559,12 @@ f_clear_labels(array<label> labels) =>
 f_draw_level_labels(RowProfile profile, int anchor_bar) =>
     f_clear_labels(of_labels)
     if show_value_labels and has_fp_ever
+        // Nhãn POC/Peak Buy/Peak Sell đặt hẳn RA NGOÀI phạm vi box (bên phải, vượt quá điểm
+        // xa nhất cánh buyer có thể vẽ tới = anchor_bar + wing_max_bars), dùng style_label_right
+        // (chữ loang ra bên phải so với điểm neo) để không bao giờ chồng lên box buyer/seller —
+        // theo phản hồi người dùng: nhãn cũ đặt ngay tại anchor_bar (giữa 2 cánh) nên luôn bị
+        // box che mất, không đọc được.
+        int value_label_x = anchor_bar + wing_max_bars + 2
         // Tránh gọi array.indexof() với giá trị tìm kiếm là na (row_id na khi profile rỗng) —
         // ternary chặn trước, trả -1 luôn, không phụ thuộc hành vi indexof với na.
         int poc_idx       = na(poc_row_id) ? -1 : array.indexof(profile.row_ids, poc_row_id)
@@ -564,23 +573,23 @@ f_draw_level_labels(RowProfile profile, int anchor_bar) =>
         if not na(poc_row_id) and poc_idx >= 0
             float poc_price = (poc_row_id + 0.5) * price_step
             float poc_vol   = array.get(profile.buys, poc_idx) + array.get(profile.sells, poc_idx)
-            label poc_label = label.new(x=anchor_bar, y=poc_price, xloc=xloc.bar_index,
+            label poc_label = label.new(x=value_label_x, y=poc_price, xloc=xloc.bar_index,
                  text="POC " + str.tostring(poc_price, format.mintick) + " " + str.tostring(poc_vol, format.volume),
-                 style=label.style_label_left, color=poc_color, textcolor=color.white)
+                 style=label.style_label_right, color=poc_color, textcolor=color.white)
             array.push(of_labels, poc_label)
         if not na(peak_buy_row_id) and peak_buy_idx >= 0
             float peak_buy_price = (peak_buy_row_id + 0.5) * price_step
             float peak_buy_vol   = array.get(profile.buys, peak_buy_idx)
-            label peak_buy_label = label.new(x=anchor_bar, y=peak_buy_price, xloc=xloc.bar_index,
+            label peak_buy_label = label.new(x=value_label_x, y=peak_buy_price, xloc=xloc.bar_index,
                  text="Peak Buy " + str.tostring(peak_buy_price, format.mintick) + " " + str.tostring(peak_buy_vol, format.volume),
-                 style=label.style_label_left, color=peak_buy_color, textcolor=color.white)
+                 style=label.style_label_right, color=peak_buy_color, textcolor=color.white)
             array.push(of_labels, peak_buy_label)
         if not na(peak_sell_row_id) and peak_sell_idx >= 0
             float peak_sell_price = (peak_sell_row_id + 0.5) * price_step
             float peak_sell_vol   = array.get(profile.sells, peak_sell_idx)
-            label peak_sell_label = label.new(x=anchor_bar, y=peak_sell_price, xloc=xloc.bar_index,
+            label peak_sell_label = label.new(x=value_label_x, y=peak_sell_price, xloc=xloc.bar_index,
                  text="Peak Sell " + str.tostring(peak_sell_price, format.mintick) + " " + str.tostring(peak_sell_vol, format.volume),
-                 style=label.style_label_left, color=peak_sell_color, textcolor=color.white)
+                 style=label.style_label_right, color=peak_sell_color, textcolor=color.white)
             array.push(of_labels, peak_sell_label)
 
         // Cột giá tham khảo (theo yêu cầu người dùng — không biết giá của từng hàng khi nhìn
