@@ -11,20 +11,21 @@
 //   - Session: cộng dồn từ đầu phiên giao dịch hiện tại (reset mỗi ngày mới).
 //   - Last HL: từ leg Higher Low/Lower High gần nhất đã xác nhận (dùng state machine SMC
 //     của library smc_core để xác định biên leg, reseed lại mỗi phiên).
-// Trên profile đang active, indicator tính và highlight riêng màu 3 mức: POC (hàng có tổng
-// buy+sell lớn nhất), Peak Buy (hàng có buy volume lớn nhất), Peak Sell (hàng có sell volume
-// lớn nhất) — kèm nhãn giá + volume tại mỗi mức (tuỳ chọn ẩn/hiện). Mọi hàng đều có viền riêng
-// (wing_border_color) để phân biệt ranh giới giữa các hàng. Ở giữa thanh còn có 1 "cột giá"
-// riêng (nhãn nền đặc, cách đều mỗi N hàng) và 1 nhãn nổi bật ghi giá khớp HIỆN TẠI, nối bằng
-// 1 đường kẻ ngang (nét đứt) tới đúng nến hiện tại (cùng y=close) để xác nhận bằng mắt nhãn
-// đó đang đúng độ cao thật so với nến, không cần nhìn sang trục giá gốc của chart.
+// Trên profile đang active, indicator tính và highlight riêng 3 mức CHỈ qua màu viền/nền của
+// box (không có nhãn text riêng cho 3 mức này): POC (hàng có tổng buy+sell lớn nhất — đổi cả
+// viền+nền sang poc_color), Peak Buy (hàng có buy volume lớn nhất — chỉ đổi viền, nền đậm
+// hơn), Peak Sell (hàng có sell volume lớn nhất — tương tự Peak Buy). Mọi hàng đều có viền
+// riêng (wing_border_color) để phân biệt ranh giới giữa các hàng. Ở giữa thanh còn có 1
+// "cột giá" riêng (nhãn nền đặc, cách đều mỗi N hàng) và 1 nhãn nổi bật ghi giá khớp HIỆN
+// TẠI, nối bằng 1 đường kẻ ngang (nét đứt) tới đúng nến hiện tại (cùng y=close) để xác nhận
+// bằng mắt nhãn đó đang đúng độ cao thật so với nến, không cần nhìn sang trục giá gốc của chart.
 // Lưu ý quan trọng: chỉ dùng dữ liệu footprint Tầng 1 (request.footprint() mặc định của Pine,
 // KHÔNG dùng request.security_lower_tf hay ước lượng OHLCV) — symbol/tài khoản không có
 // Premium hoặc sàn không hỗ trợ dữ liệu tick sẽ không có footprint, khi đó toàn bộ thanh order
 // flow (box + nhãn) sẽ KHÔNG được vẽ (ẩn hoàn toàn, không ước lượng thay thế).
 //
 // Ngày tạo: 2026-11-21
-// Phiên bản: 1.6
+// Phiên bản: 1.7
 
 // ⚠️ Cần library này đã được Publish (không chỉ lưu "My Scripts") trên TradingView, nếu không
 // toàn bộ script sẽ lỗi compile ở dòng import này.
@@ -565,15 +566,10 @@ f_clear_labels(array<label> labels) =>
             label.delete(array.get(labels, i))
     array.clear(labels)
 
-// f_draw_level_labels: viết riêng (không sửa vào f_draw_wings, theo đúng Step 3 brief Task
-// 10), gọi ngay sau f_draw_wings. Chỉ vẽ khi show_value_labels == true và có dữ liệu
-// footprint; mỗi mức (POC/Peak Buy/Peak Sell) chỉ vẽ nếu row_id tương ứng không na VÀ còn
-// tồn tại trong `profile` (array.indexof >= 0). Text = giá (format.mintick) + volume
-// (format.volume) — POC dùng tổng buy+sell tại hàng đó, Peak Buy dùng buy_volume, Peak
-// Sell dùng sell_volume. 3 nhãn này đặt RA NGOÀI phạm vi box (bên phải, tại
-// anchor_bar + wing_max_bars + 2, dùng style_label_right) — theo phản hồi người dùng: đặt
-// ngay tại anchor_bar (giữa 2 cánh, như bản trước) bị box che mất, không đọc được.
-// Ngoài 3 mức này, còn vẽ thêm:
+// f_draw_level_labels: viết riêng (không sửa vào f_draw_wings). Theo yêu cầu người dùng,
+// KHÔNG còn vẽ nhãn text cho POC/Peak Buy/Peak Sell — 3 mức này chỉ thể hiện qua highlight
+// màu viền/nền của box trong f_draw_wings (xem is_poc/is_peak_buy/is_peak_sell ở đó). Hàm
+// này giờ chỉ vẽ khi show_value_labels == true và có dữ liệu footprint (`has_fp_ever`):
 //   - 1 "cột giá" tham khảo: nhãn giá nền đặc (price_column_color), cách đều mỗi
 //     price_ruler_step_rows hàng, để đọc nhanh giá tại bất kỳ vùng nào của thanh mà không
 //     cần nhìn sang trục giá gốc của chart (xa vị trí neo nổi).
@@ -582,39 +578,6 @@ f_clear_labels(array<label> labels) =>
 f_draw_level_labels(RowProfile profile, int anchor_bar) =>
     f_clear_labels(of_labels)
     if show_value_labels and has_fp_ever
-        // Nhãn POC/Peak Buy/Peak Sell đặt hẳn RA NGOÀI phạm vi box (bên phải, vượt quá điểm
-        // xa nhất cánh buyer có thể vẽ tới = anchor_bar + wing_max_bars), dùng style_label_right
-        // (chữ loang ra bên phải so với điểm neo) để không bao giờ chồng lên box buyer/seller —
-        // theo phản hồi người dùng: nhãn cũ đặt ngay tại anchor_bar (giữa 2 cánh) nên luôn bị
-        // box che mất, không đọc được.
-        int value_label_x = anchor_bar + wing_max_bars + 2
-        // Tránh gọi array.indexof() với giá trị tìm kiếm là na (row_id na khi profile rỗng) —
-        // ternary chặn trước, trả -1 luôn, không phụ thuộc hành vi indexof với na.
-        int poc_idx       = na(poc_row_id) ? -1 : array.indexof(profile.row_ids, poc_row_id)
-        int peak_buy_idx  = na(peak_buy_row_id) ? -1 : array.indexof(profile.row_ids, peak_buy_row_id)
-        int peak_sell_idx = na(peak_sell_row_id) ? -1 : array.indexof(profile.row_ids, peak_sell_row_id)
-        if not na(poc_row_id) and poc_idx >= 0
-            float poc_price = (poc_row_id + 0.5) * price_step
-            float poc_vol   = array.get(profile.buys, poc_idx) + array.get(profile.sells, poc_idx)
-            label poc_label = label.new(x=value_label_x, y=poc_price, xloc=xloc.bar_index,
-                 text="POC " + str.tostring(poc_price, format.mintick) + " " + str.tostring(poc_vol, format.volume),
-                 style=label.style_label_right, color=poc_color, textcolor=color.white)
-            array.push(of_labels, poc_label)
-        if not na(peak_buy_row_id) and peak_buy_idx >= 0
-            float peak_buy_price = (peak_buy_row_id + 0.5) * price_step
-            float peak_buy_vol   = array.get(profile.buys, peak_buy_idx)
-            label peak_buy_label = label.new(x=value_label_x, y=peak_buy_price, xloc=xloc.bar_index,
-                 text=str.tostring(peak_buy_price, format.mintick) + "  " + str.tostring(peak_buy_vol, format.volume),
-                 style=label.style_label_right, color=peak_buy_color, textcolor=color.white)
-            array.push(of_labels, peak_buy_label)
-        if not na(peak_sell_row_id) and peak_sell_idx >= 0
-            float peak_sell_price = (peak_sell_row_id + 0.5) * price_step
-            float peak_sell_vol   = array.get(profile.sells, peak_sell_idx)
-            label peak_sell_label = label.new(x=value_label_x, y=peak_sell_price, xloc=xloc.bar_index,
-                 text=str.tostring(peak_sell_price, format.mintick) + "  " + str.tostring(peak_sell_vol, format.volume),
-                 style=label.style_label_right, color=peak_sell_color, textcolor=color.white)
-            array.push(of_labels, peak_sell_label)
-
         // Cột giá tham khảo (theo yêu cầu người dùng — không biết giá của từng hàng khi nhìn
         // thanh neo nổi, xa trục giá gốc của chart): nhãn giá nhỏ tại tâm mỗi
         // price_ruler_step_rows hàng, tính theo row_id nhỏ nhất/lớn nhất đang có trong
