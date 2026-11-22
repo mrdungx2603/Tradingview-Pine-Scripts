@@ -24,7 +24,7 @@
 // flow (box + nhãn) sẽ KHÔNG được vẽ (ẩn hoàn toàn, không ước lượng thay thế).
 //
 // Ngày tạo: 2026-11-21
-// Phiên bản: 1.5
+// Phiên bản: 1.6
 
 // ⚠️ Cần library này đã được Publish (không chỉ lưu "My Scripts") trên TradingView, nếu không
 // toàn bộ script sẽ lỗi compile ở dòng import này.
@@ -129,15 +129,29 @@ poc_color = input.color(
     group="Hiển Thị"
 )
 
+// Dùng làm màu VIỀN (border) riêng cho hàng Peak Buy/Peak Sell (không còn thay cả màu nền —
+// xem peak_fill_transparency bên dưới). Mặc định vàng đặc (như ví dụ người dùng yêu cầu),
+// không trong suốt để viền luôn nổi rõ.
 peak_buy_color = input.color(
-    defval=color.new(color.lime, 50),
-    title="Màu Peak Buy",
+    defval=color.yellow,
+    title="Màu Viền Peak Buy",
     group="Hiển Thị"
 )
 
 peak_sell_color = input.color(
-    defval=color.new(color.orange, 50),
-    title="Màu Peak Sell",
+    defval=color.yellow,
+    title="Màu Viền Peak Sell",
+    group="Hiển Thị"
+)
+
+// Độ đậm (giảm trong suốt) của màu nền buyer/seller gốc khi hàng đó là Peak Buy/Peak Sell —
+// 0 = đặc hoàn toàn, 100 = trong suốt hoàn toàn. Thay cho cách cũ (đổi hẳn sang màu khác),
+// giữ nguyên tông màu buyer/seller, chỉ làm đậm hơn để nổi bật theo đúng yêu cầu người dùng.
+peak_fill_transparency = input.int(
+    defval=10,
+    title="Độ Đậm Highlight Peak (Transparency %)",
+    minval=0,
+    maxval=100,
     group="Hiển Thị"
 )
 
@@ -483,6 +497,12 @@ f_draw_wings(RowProfile profile, int anchor_bar, int max_wing_bars, color buy_co
             float row_total = array.get(profile.buys, i) + array.get(profile.sells, i)
             if row_total > max_total
                 max_total := row_total
+        // Màu nền "đậm" cho hàng Peak Buy/Peak Sell — GIỮ NGUYÊN tông màu buyer/seller gốc
+        // (chỉ đổi transparency qua peak_fill_transparency), KHÔNG đổi hẳn sang màu khác như
+        // trước — theo đúng yêu cầu người dùng ("tăng độ đậm của bar", không phải đổi màu nền).
+        // Tính 1 lần trước vòng for vì buy_color/sell_color không đổi theo từng hàng.
+        color buy_bg_peak  = color.rgb(color.r(buy_color), color.g(buy_color), color.b(buy_color), peak_fill_transparency)
+        color sell_bg_peak = color.rgb(color.r(sell_color), color.g(sell_color), color.b(sell_color), peak_fill_transparency)
         for i = 0 to n_rows - 1
             int   row_id       = array.get(profile.row_ids, i)
             float row_bot      = row_id * price_step
@@ -501,11 +521,14 @@ f_draw_wings(RowProfile profile, int anchor_bar, int max_wing_bars, color buy_co
             bool  is_peak_buy  = not is_poc and not na(peak_buy_row_id) and row_id == peak_buy_row_id
             bool  is_peak_sell = not is_poc and not is_peak_buy and not na(peak_sell_row_id) and row_id == peak_sell_row_id
             // Viền mọi hàng dùng wing_border_color (mặc định xám) để phân biệt ranh giới giữa
-            // các hàng liền kề — hàng POC/Peak vẫn đè lên bằng viền màu riêng của mức đó.
+            // các hàng liền kề. Hàng POC: đè cả viền + nền bằng poc_color (không đổi, như cũ).
+            // Hàng Peak Buy/Peak Sell: CHỈ đổi viền (peak_buy_color/peak_sell_color, mặc định
+            // vàng), nền vẫn giữ tông buy_color/sell_color gốc nhưng đậm hơn (buy_bg_peak/
+            // sell_bg_peak) — theo đúng yêu cầu người dùng.
             color buy_border   = is_poc ? poc_color : is_peak_buy ? peak_buy_color : wing_border_color
             color sell_border  = is_poc ? poc_color : is_peak_sell ? peak_sell_color : wing_border_color
-            color buy_bg       = is_poc ? poc_color : is_peak_buy ? peak_buy_color : buy_color
-            color sell_bg      = is_poc ? poc_color : is_peak_sell ? peak_sell_color : sell_color
+            color buy_bg       = is_poc ? poc_color : is_peak_buy ? buy_bg_peak : buy_color
+            color sell_bg      = is_poc ? poc_color : is_peak_sell ? sell_bg_peak : sell_color
             box   buy_box      = box.new(left=anchor_bar, top=row_top, right=anchor_bar + buy_bars, bottom=row_bot,
                  border_color=buy_border, bgcolor=buy_bg, xloc=xloc.bar_index)
             box   sell_box     = box.new(left=anchor_bar - sell_bars, top=row_top, right=anchor_bar, bottom=row_bot,
@@ -581,14 +604,14 @@ f_draw_level_labels(RowProfile profile, int anchor_bar) =>
             float peak_buy_price = (peak_buy_row_id + 0.5) * price_step
             float peak_buy_vol   = array.get(profile.buys, peak_buy_idx)
             label peak_buy_label = label.new(x=value_label_x, y=peak_buy_price, xloc=xloc.bar_index,
-                 text="Peak Buy " + str.tostring(peak_buy_price, format.mintick) + " " + str.tostring(peak_buy_vol, format.volume),
+                 text=str.tostring(peak_buy_price, format.mintick) + "  " + str.tostring(peak_buy_vol, format.volume),
                  style=label.style_label_right, color=peak_buy_color, textcolor=color.white)
             array.push(of_labels, peak_buy_label)
         if not na(peak_sell_row_id) and peak_sell_idx >= 0
             float peak_sell_price = (peak_sell_row_id + 0.5) * price_step
             float peak_sell_vol   = array.get(profile.sells, peak_sell_idx)
             label peak_sell_label = label.new(x=value_label_x, y=peak_sell_price, xloc=xloc.bar_index,
-                 text="Peak Sell " + str.tostring(peak_sell_price, format.mintick) + " " + str.tostring(peak_sell_vol, format.volume),
+                 text=str.tostring(peak_sell_price, format.mintick) + "  " + str.tostring(peak_sell_vol, format.volume),
                  style=label.style_label_right, color=peak_sell_color, textcolor=color.white)
             array.push(of_labels, peak_sell_label)
 

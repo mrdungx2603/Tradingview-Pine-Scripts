@@ -38,9 +38,10 @@ tính được chọn.
 | Hiển Thị | Màu Buyer (`buyer_color`) | xanh (50% trong suốt) | Màu box buyer (không highlight) |
 | Hiển Thị | Màu Seller (`seller_color`) | đỏ (50% trong suốt) | Màu box seller (không highlight) |
 | Hiển Thị | Màu Viền Hàng (`wing_border_color`) | xám (50% trong suốt) | Màu viền cho MỌI hàng (buyer+seller) — hàng POC/Peak Buy/Peak Sell đè lên bằng viền màu riêng của mức đó |
-| Hiển Thị | Màu POC (`poc_color`) | xanh dương | Màu highlight hàng POC (ưu tiên cao nhất) |
-| Hiển Thị | Màu Peak Buy (`peak_buy_color`) | lime (50% trong suốt) | Màu highlight hàng Peak Buy |
-| Hiển Thị | Màu Peak Sell (`peak_sell_color`) | cam (50% trong suốt) | Màu highlight hàng Peak Sell |
+| Hiển Thị | Màu POC (`poc_color`) | xanh dương | Màu highlight CẢ viền+nền hàng POC (ưu tiên cao nhất, không đổi) |
+| Hiển Thị | Màu Viền Peak Buy (`peak_buy_color`) | vàng (đặc) | Chỉ đổi màu VIỀN hàng Peak Buy — nền vẫn giữ tông `buyer_color` gốc (xem `peak_fill_transparency`) |
+| Hiển Thị | Màu Viền Peak Sell (`peak_sell_color`) | vàng (đặc) | Chỉ đổi màu VIỀN hàng Peak Sell — nền vẫn giữ tông `seller_color` gốc (xem `peak_fill_transparency`) |
+| Hiển Thị | Độ Đậm Highlight Peak (`peak_fill_transparency`) | 10 | Transparency (%) của màu nền hàng Peak Buy/Peak Sell — giữ nguyên tông `buyer_color`/`seller_color`, chỉ giảm trong suốt để "đậm" hơn các hàng thường. 0 = đặc hoàn toàn |
 | Hiển Thị | Hiển Thị Nhãn Giá Trị (`show_value_labels`) | true | Bật/tắt 3 nhãn giá + volume tại POC/Peak Buy/Peak Sell, VÀ cột giá tham khảo (xem 2 dòng dưới) |
 | Hiển Thị | Cột Giá: Mỗi N Hàng (`price_ruler_step_rows`) | 5 | Vẽ 1 nhãn giá nền đặc tại tâm mỗi N hàng, cách đều theo giá thật (không theo thứ tự mảng) — tạo thành 1 "cột giá" riêng dễ đọc ở giữa thanh |
 | Hiển Thị | Màu Nền Cột Giá (`price_column_color`) | xám (85% đặc) | Màu nền của các nhãn cột giá tham khảo — nền đặc (không trong suốt) để không bị lẫn vào màu box phía sau |
@@ -58,16 +59,16 @@ tính được chọn.
   - **Last HL**: dùng state machine SMC (library `smc_core`) để xác định leg Higher Low (uptrend) hoặc Lower High (downtrend) gần nhất **đã hoàn thành**; biên trái/phải lấy từ `hl_bar`→`hh_bar` (uptrend) hoặc `lh_bar`→`ll_bar` (downtrend). State machine được reset và seed lại (`seed_mode`) mỗi khi sang phiên mới, retry seed mỗi bar cho tới khi thành công.
 - **Chọn active profile**: theo `mode_calc`, chọn 1 trong 3 `RowProfile` trên làm `active_profile`.
 - **POC / Peak Buy / Peak Sell**: trên `active_profile`, tính `row_id` ứng với `argmax(buy+sell)` (POC), `argmax(buy)` (Peak Buy), `argmax(sell)` (Peak Sell). Trả `na` nếu profile rỗng.
-- **Vẽ thanh**: với mỗi hàng trong `active_profile`, vẽ 1 box buyer (kéo phải từ bar neo, cao đúng `[row_id * price_step, (row_id + 1) * price_step)`) và 1 box seller (kéo trái), độ rộng tỷ lệ volume hàng đó / volume hàng lớn nhất, tối đa `wing_max_bars`. Hàng trùng POC/Peak Buy/Peak Sell được tô màu riêng theo thứ tự ưu tiên POC > Peak Buy > Peak Sell. Chỉ rebuild profile/POC/vẽ lại ở bar cuối cùng (`barstate.islast`, mỗi tick của bar đó) — các bar lịch sử không cần vẽ vì box/label luôn bị xoá-vẽ-lại toàn bộ, chỉ trạng thái cuối cùng có ý nghĩa.
-- **Nhãn giá trị**: nếu `show_value_labels = true` và có dữ liệu footprint (`has_fp_ever`), vẽ tối đa 3 nhãn (POC/Peak Buy/Peak Sell) ghi giá (định dạng `mintick`, lấy **trung điểm hàng** `(row_id + 0.5) * price_step`) và volume (định dạng `volume`) tại mỗi mức, nếu mức đó còn tồn tại trong profile. 3 nhãn này đặt **ra ngoài phạm vi box**, tại `anchor_bar + wing_max_bars + 2` (kiểu `label.style_label_right`, chữ loang ra bên phải điểm neo) — không chồng lên box buyer/seller phía sau.
+- **Vẽ thanh**: với mỗi hàng trong `active_profile`, vẽ 1 box buyer (kéo phải từ bar neo, cao đúng `[row_id * price_step, (row_id + 1) * price_step)`) và 1 box seller (kéo trái), độ rộng tỷ lệ volume hàng đó / volume hàng lớn nhất, tối đa `wing_max_bars`. Hàng POC được tô CẢ viền + nền bằng `poc_color`. Hàng Peak Buy/Peak Sell CHỈ đổi viền (`peak_buy_color`/`peak_sell_color`, mặc định vàng) — nền giữ tông `buyer_color`/`seller_color` gốc nhưng giảm trong suốt (`peak_fill_transparency`) để "đậm" hơn, không đổi hẳn sang màu khác. Ưu tiên khi 1 hàng trùng nhiều mức: POC > Peak Buy > Peak Sell. Chỉ rebuild profile/POC/vẽ lại ở bar cuối cùng (`barstate.islast`, mỗi tick của bar đó) — các bar lịch sử không cần vẽ vì box/label luôn bị xoá-vẽ-lại toàn bộ, chỉ trạng thái cuối cùng có ý nghĩa.
+- **Nhãn giá trị**: nếu `show_value_labels = true` và có dữ liệu footprint (`has_fp_ever`), vẽ tối đa 3 nhãn ghi giá (định dạng `mintick`, lấy **trung điểm hàng** `(row_id + 0.5) * price_step`) và volume (định dạng `volume`) tại mỗi mức, nếu mức đó còn tồn tại trong profile — nhãn POC có prefix "POC", nhãn Peak Buy/Peak Sell chỉ gồm giá + volume (không prefix). 3 nhãn này đặt **ra ngoài phạm vi box**, tại `anchor_bar + wing_max_bars + 2` (kiểu `label.style_label_right`, chữ loang ra bên phải điểm neo) — không chồng lên box buyer/seller phía sau.
 - **Cột giá tham khảo**: cùng điều kiện `show_value_labels`/`has_fp_ever`, vẽ thêm 1 nhãn giá nền đặc (`price_column_color`, không kèm volume, kiểu `label.style_label_center`) tại tâm mỗi `price_ruler_step_rows` hàng — tính theo giá trị `row_id` **nhỏ nhất/lớn nhất thật có trong profile** (không phải theo vị trí trong mảng, vì thứ tự chèn mảng không theo thứ tự giá), nên các nhãn cách đều nhau đúng theo giá, tạo thành 1 "cột" dễ đọc ở giữa thanh.
 - **Giá khớp hiện tại**: nếu `show_current_price_label = true`, vẽ thêm 1 nhãn riêng tại `y=close` (giá đóng cửa của bar đang chạy — giá khớp hiện tại), màu `current_price_color` (mặc định vàng, nổi bật nhất). Khác cột giá tham khảo ở trên — giá trị này liên tục, không bó theo lưới `price_step`. Kèm 1 đường kẻ ngang nét đứt (cùng màu, cùng điều kiện hiện/ẩn) nối trực tiếp từ nến hiện tại (`bar_index`) sang vị trí neo của thanh (`anchor_bar`), cùng `y=close` — giúp xác nhận bằng mắt nhãn này đúng độ cao thật với nến, dù thanh nổi cách xa nến do `anchor_offset_bars`.
-- **Viền mọi hàng**: mỗi box buyer/seller luôn có viền màu `wing_border_color` để phân biệt ranh giới giữa các hàng liền kề; hàng POC/Peak Buy/Peak Sell đè viền bằng màu riêng của mức đó (ưu tiên POC > Peak Buy > Peak Sell).
+- **Viền mọi hàng**: mỗi box buyer/seller luôn có viền màu `wing_border_color` để phân biệt ranh giới giữa các hàng liền kề; hàng POC/Peak Buy/Peak Sell đè viền bằng màu riêng của mức đó (ưu tiên POC > Peak Buy > Peak Sell) — xem chi tiết màu nền ở mục "Vẽ thanh" phía trên.
 
 ## Output / Tín Hiệu
 
 - 1 thanh order flow gồm nhiều box buyer (phải)/seller (trái) theo hàng giá, neo tại `bar_index + anchor_offset_bars`.
-- 3 mức highlight màu riêng trên thanh: POC (ưu tiên cao nhất), Peak Buy, Peak Sell.
+- 3 mức highlight trên thanh: POC (viền+nền riêng, ưu tiên cao nhất), Peak Buy/Peak Sell (chỉ viền riêng, nền giữ tông buyer/seller nhưng đậm hơn).
 - 3 nhãn text tại các mức trên: giá + volume (tuỳ chọn ẩn/hiện qua `show_value_labels`), đặt bên phải, ra ngoài phạm vi box (không chồng lấn cánh buyer/seller).
 - Không có alert condition.
 
@@ -83,6 +84,11 @@ tính được chọn.
 
 ## Changelog
 
+- **v1.6 (2026-11-22)**: Theo yêu cầu người dùng — đổi cách highlight Peak Buy/Peak Sell.
+  - Thay cách cũ (đổi hẳn cả viền+nền sang `peak_buy_color`/`peak_sell_color`) bằng: CHỈ đổi viền sang màu đó (mặc định đổi từ lime/cam 50% trong suốt thành **vàng đặc**), nền giữ nguyên tông `buyer_color`/`seller_color` gốc nhưng giảm trong suốt qua input mới `peak_fill_transparency` (mặc định 10%) để "đậm" hơn — không đổi hẳn sang màu khác. Dùng `color.rgb(color.r/g/b(...), peak_fill_transparency)` để giữ đúng tông màu gốc.
+  - Hàng POC không đổi (vẫn đổi cả viền+nền sang `poc_color`, không bị ảnh hưởng bởi thay đổi này).
+  - Bỏ prefix "Peak Buy "/"Peak Sell " trong text nhãn — chỉ còn giá + volume (nhãn POC vẫn giữ prefix "POC").
+  - Backup v1.5 tại `indicators/hist/order_flow_bar_v1.5.pine`.
 - **v1.5 (2026-11-22)**: Theo phản hồi người dùng sau khi test v1.4 — nhãn POC/Peak Buy/Peak Sell đặt ngay tại `anchor_bar` (giữa 2 cánh) bị box buyer/seller che mất, không đọc được.
   - Chuyển 3 nhãn này ra `anchor_bar + wing_max_bars + 2` (vượt quá điểm xa nhất cánh buyer có thể vẽ tới), đổi kiểu `label.style_label_left` → `label.style_label_right` để chữ loang ra bên phải, không chồng lên box.
   - Cột giá tham khảo và nhãn giá khớp hiện tại (thêm ở v1.2-v1.4) giữ nguyên vị trí tại `anchor_bar` — chưa thay đổi ở bản này (người dùng chỉ phản hồi về nhãn POC/Peak).
