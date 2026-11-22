@@ -1,0 +1,280 @@
+//@version=6
+// ─── SMC Core Library — UDT + State Machine cho SMC Market Structure ───
+// Tác giả: TV Pine
+// Ngày tạo: 2026-07-10
+// Phiên bản: 1.0
+// Mô tả: Library chứa UDT SwingState và các pure function cho state machine SMC.
+//        Dùng chung cho indicator, strategy và MTF indicator.
+//        Tất cả hàm đều pure — không var, không request.*, không plot/line/box/label.
+library(title="SMC Core Library", overlay=false)
+
+// ╔══════════════════════════════════════════╗
+// ║        UDT — SWING STATE                ║
+// ╚══════════════════════════════════════════╝
+
+export type SwingState
+    int   trend          // 1=UPTREND, -1=DOWNTREND, 0=INIT (chờ breakout)
+    int   hh_bar         // bar index của Higher High gần nhất
+    float hh_price       // giá của Higher High
+    int   hl_bar         // bar index của Higher Low gần nhất
+    float hl_price       // giá của Higher Low
+    int   ll_bar         // bar index của Lower Low gần nhất
+    float ll_price       // giá của Lower Low
+    int   lh_bar         // bar index của Lower High gần nhất
+    float lh_price       // giá của Lower High
+    int   cand_bar       // bar index của candidate pivot đang săn
+    float cand_high      // high nhất trong quá trình săn HH
+    float cand_low       // low nhất trong quá trình săn LL
+    int   cand_type      // 1=săn HH, -1=săn LL, 0=không hoạt động
+    int   trigger_bar    // bar index bắt đầu range cần quét HL/LH
+    bool  seeded         // đã seed xong chưa
+    int   last_ph_bar    // pivot high gần nhất (dùng khi seed)
+    float last_ph_val
+    int   last_pl_bar    // pivot low gần nhất (dùng khi seed)
+    float last_pl_val
+    int   event          // 0=không có, 1=BoS Bull, -1=BoS Bear, 2=CHoCH Bear, -2=CHoCH Bull
+                         // (được set khi breakout xảy ra, caller dùng để vẽ line + label)
+
+// ╔══════════════════════════════════════════╗
+// ║     HÀM KHỞI TẠO & HELPER               ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Khởi tạo SwingState rỗng ───
+export f_init_state() =>
+    SwingState.new(
+        trend=0,
+        hh_bar=na, hh_price=na,
+        hl_bar=na, hl_price=na,
+        ll_bar=na, ll_price=na,
+        lh_bar=na, lh_price=na,
+        cand_bar=na, cand_high=na, cand_low=na,
+        cand_type=0, trigger_bar=na,
+        seeded=false,
+        last_ph_bar=na, last_ph_val=na,
+        last_pl_bar=na, last_pl_val=na,
+        event=0
+    )
+
+// ─── Chuyển đổi string → line style ───
+export f_get_line_style(string style_name) =>
+    switch style_name
+        "Solid"  => line.style_solid
+        "Dashed" => line.style_dashed
+        "Dotted" => line.style_dotted
+        => line.style_solid
+
+// ─── Chuyển đổi string → vị trí bảng ───
+export f_get_dashboard_pos(string pos_name) =>
+    switch pos_name
+        "Top Right"     => position.top_right
+        "Top Left"      => position.top_left
+        "Bottom Right"  => position.bottom_right
+        "Bottom Left"   => position.bottom_left
+        => position.top_right
+
+// ─── Tìm cực trị trong range, loại trừ 1 bar ───
+// find_high = true → tìm highest high, false → tìm lowest low
+export f_find_extreme(int start_bar, int end_bar, int exclude_bar, bool find_high) =>
+    int   best_bar   = start_bar
+    float best_price = find_high ? high[bar_index - start_bar] : low[bar_index - start_bar]
+    for i = start_bar to end_bar
+        if i != exclude_bar
+            if find_high
+                if high[bar_index - i] > best_price
+                    best_price := high[bar_index - i]
+                    best_bar   := i
+            else
+                if low[bar_index - i] < best_price
+                    best_price := low[bar_index - i]
+                    best_bar   := i
+    [best_bar, best_price]
+
+// ╔══════════════════════════════════════════╗
+// ║        HÀM SEEDING                       ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Seed bằng Pivot High/Low ───
+// Gọi mỗi bar, truyền ph/pl từ ta.pivothigh/pivotlow của caller
+export f_seed_pivot(SwingState s, float ph, float pl, int pivot_len) =>
+    if not na(ph)
+        s.last_ph_bar := bar_index - pivot_len
+        s.last_ph_val := ph
+    if not na(pl)
+        s.last_pl_bar := bar_index - pivot_len
+        s.last_pl_val := pl
+
+    if not na(s.last_ph_bar) and not na(s.last_pl_bar)
+        if s.last_ph_bar > s.last_pl_bar
+            // High xuất hiện sau Low → Uptrend
+            s.trend    := 1
+            s.hh_bar   := s.last_ph_bar
+            s.hh_price := s.last_ph_val
+            s.hl_bar   := s.last_pl_bar
+            s.hl_price := s.last_pl_val
+            s.seeded   := true
+        else
+            // Low xuất hiện sau High → Downtrend
+            s.trend    := -1
+            s.ll_bar   := s.last_pl_bar
+            s.ll_price := s.last_pl_val
+            s.lh_bar   := s.last_ph_bar
+            s.lh_price := s.last_ph_val
+            s.seeded   := true
+    s
+
+// ─── Seed bằng Session (chờ breakout xác nhận trend) ───
+export f_seed_session(SwingState s) =>
+    s.hh_bar   := bar_index
+    s.hh_price := high
+    s.hl_bar   := bar_index
+    s.hl_price := low
+    s.ll_bar   := bar_index
+    s.ll_price := low
+    s.lh_bar   := bar_index
+    s.lh_price := high
+    s.seeded   := true
+    s
+
+// ╔══════════════════════════════════════════╗
+// ║     STATE MACHINE — f_process_bar       ║
+// ╚══════════════════════════════════════════╝
+
+// Core state machine SMC. Chạy 1 bar, nhận state vào → trả state mới.
+// Dùng trực tiếp high/low/close/bar_index của chart (hoặc TF đích khi qua request.security).
+// Sự kiện được ghi vào s.event để caller phát hiện và vẽ.
+export f_process_bar(SwingState s) =>
+    // Reset event mỗi bar
+    s.event := 0
+
+    if not s.seeded
+        s
+
+    // ─── CASE 0: KHỞI TẠO TỪ SESSION SEED (Chưa rõ Trend) ───
+    else if s.trend == 0
+        if close > s.hh_price
+            s.cand_type   := 1
+            s.cand_bar    := bar_index
+            s.cand_high   := high
+            s.trigger_bar := bar_index
+            s.trend       := 1
+            s.event       := 1  // BoS Bull
+        else if close < s.ll_price
+            s.cand_type   := -1
+            s.cand_bar    := bar_index
+            s.cand_low    := low
+            s.trigger_bar := bar_index
+            s.trend       := -1
+            s.event       := -1  // BoS Bear
+        s
+
+    // ─── CASE 1: UPTREND ───
+    else if s.trend == 1
+        if s.cand_type == 0
+            if close > s.hh_price
+                s.cand_type   := 1
+                s.cand_bar    := bar_index
+                s.cand_high   := high
+                s.trigger_bar := s.hh_bar
+                s.event       := 1  // BoS Bull
+            else if close < s.hl_price
+                s.cand_type   := -1
+                s.cand_bar    := bar_index
+                s.cand_low    := low
+                s.trigger_bar := s.hl_bar
+                s.event       := 2  // CHoCH Bear
+
+        else if s.cand_type == 1
+            // Đang săn NEW_HH
+            if high > s.cand_high
+                s.cand_bar  := bar_index
+                s.cand_high := high
+            else if close < low[bar_index - s.cand_bar]
+                // XÁC NHẬN NEW HH
+                int new_hh_bar   = s.cand_bar
+                float new_hh_price = s.cand_high
+
+                // Quét Range tìm New HL (Thấp nhất từ HH cũ → HH mới, loại trừ chính HH)
+                [lowest_b, lowest_l] = f_find_extreme(s.trigger_bar, new_hh_bar, new_hh_bar, false)
+
+                s.hl_bar   := lowest_b
+                s.hl_price := lowest_l
+                s.hh_bar   := new_hh_bar
+                s.hh_price := new_hh_price
+                s.cand_type := 0
+
+        else if s.cand_type == -1
+            // Đang săn Đảo chiều sang Downtrend (CHoCH)
+            if low < s.cand_low
+                s.cand_bar := bar_index
+                s.cand_low := low
+            else if close > high[bar_index - s.cand_bar]
+                // XÁC NHẬN NEW LL + CHUYỂN XU HƯỚNG
+                int new_ll_bar   = s.cand_bar
+                float new_ll_price = s.cand_low
+
+                // Quét Range tìm New LH (Cao nhất từ HL cũ → LL mới, loại trừ chính LL)
+                [highest_b, highest_h] = f_find_extreme(s.trigger_bar, new_ll_bar, new_ll_bar, true)
+
+                s.lh_bar    := highest_b
+                s.lh_price  := highest_h
+                s.ll_bar    := new_ll_bar
+                s.ll_price  := new_ll_price
+                s.trend     := -1
+                s.cand_type := 0
+        s
+
+    // ─── CASE -1: DOWNTREND ───
+    else  // s.trend == -1
+        if s.cand_type == 0
+            if close < s.ll_price
+                s.cand_type   := -1
+                s.cand_bar    := bar_index
+                s.cand_low    := low
+                s.trigger_bar := s.ll_bar
+                s.event       := -1  // BoS Bear
+            else if close > s.lh_price
+                s.cand_type   := 1
+                s.cand_bar    := bar_index
+                s.cand_high   := high
+                s.trigger_bar := s.lh_bar
+                s.event       := -2  // CHoCH Bull
+
+        else if s.cand_type == -1
+            // Đang săn NEW_LL
+            if low < s.cand_low
+                s.cand_bar := bar_index
+                s.cand_low := low
+            else if close > high[bar_index - s.cand_bar]
+                // XÁC NHẬN NEW LL
+                int new_ll_bar   = s.cand_bar
+                float new_ll_price = s.cand_low
+
+                // Quét Range tìm New LH (Cao nhất từ LL cũ → LL mới, loại trừ chính LL)
+                [highest_b, highest_h] = f_find_extreme(s.trigger_bar, new_ll_bar, new_ll_bar, true)
+
+                s.lh_bar    := highest_b
+                s.lh_price  := highest_h
+                s.ll_bar    := new_ll_bar
+                s.ll_price  := new_ll_price
+                s.cand_type := 0
+
+        else if s.cand_type == 1
+            // Đang săn Đảo chiều sang Uptrend (CHoCH)
+            if high > s.cand_high
+                s.cand_bar  := bar_index
+                s.cand_high := high
+            else if close < low[bar_index - s.cand_bar]
+                // XÁC NHẬN NEW HH + CHUYỂN XU HƯỚNG
+                int new_hh_bar   = s.cand_bar
+                float new_hh_price = s.cand_high
+
+                // Quét Range tìm New HL (Thấp nhất từ LH cũ → HH mới, loại trừ chính HH)
+                [lowest_b, lowest_l] = f_find_extreme(s.trigger_bar, new_hh_bar, new_hh_bar, false)
+
+                s.hl_bar    := lowest_b
+                s.hl_price  := lowest_l
+                s.hh_bar    := new_hh_bar
+                s.hh_price  := new_hh_price
+                s.trend     := 1
+                s.cand_type := 0
+        s

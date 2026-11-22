@@ -1,10 +1,11 @@
 # SMC Core Library — Tài Liệu
 
-> **Script**: [libraries/smc_core.pine](../libraries/smc_core.pine) (v1.0)
+> **Script**: [libraries/smc_core.pine](../libraries/smc_core.pine) (v1.1)
 > **Loại**: Library (`library(overlay=false)`)
 > **Pine Script**: v6
-> **Ngày tạo**: 2026-07-10 / **Cập nhật**: 2026-07-10
-> **Dùng trong**: [strategies/smc_strategy.pine](../strategies/smc_strategy.pine), [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine), [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) — cả 3 đều `import mrdungx2603/smc_core/1 as smc`
+> **Ngày tạo**: 2026-07-10 / **Cập nhật**: 2026-11-22
+> **Dùng trong**: [strategies/smc_strategy.pine](../strategies/smc_strategy.pine) và [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) (`import mrdungx2603/smc_core/1 as smc`), [indicators/order_flow_bar.pine](../indicators/order_flow_bar.pine) (`import anthonydang/smc_core/1 as smc`).
+> ⚠️ **`indicators/smc_market_structure.pine` KHÔNG import library này** — tự có bản state machine viết tay riêng (bản gốc/tham chiếu, xem mục Changelog v1.1 bên dưới), không bị ảnh hưởng bởi thay đổi trong file này.
 
 ## Tổng Quan
 
@@ -51,8 +52,9 @@ Máy trạng thái 3 nhánh theo `trend`:
 ## Dùng Trong
 
 - `strategies/smc_strategy.pine` — dùng `SwingState` cho entry/exit signal (BoS/CHoCH) và tính Premium/Discount zone.
-- `indicators/smc_market_structure.pine` — dùng trực tiếp trên timeframe của chart.
 - `indicators/smc_market_structure_mtf.pine` — dùng qua wrapper `f_run_smc()` chạy bên trong `request.security()` cho từng khung thời gian phụ (xem [docs/smc-market-structure.md](smc-market-structure.md#cách-hoạt-động-v20--state-machine-thật-trên-từng-tf)).
+- `indicators/order_flow_bar.pine` — dùng `SwingState` để xác định biên leg Higher Low/Lower High gần nhất cho mode "Last HL" (xem [docs/order-flow-bar.md](order-flow-bar.md)). Reseed lại mỗi phiên mới (khác cách dùng trong 2 file trên).
+- **Không dùng trong** `indicators/smc_market_structure.pine` — file này có bản state machine viết tay riêng (bản gốc/tham chiếu mà `f_process_bar()` của library này được refactor từ đó), không import library.
 
 ## Giới Hạn & Lưu Ý
 
@@ -61,4 +63,10 @@ Máy trạng thái 3 nhánh theo `trend`:
 
 ## Changelog
 
+- **v1.1** (2026-11-22): Fix lệch kết quả so với bản gốc `smc_market_structure.pine` — phát hiện khi người dùng báo "Last HL" của `order_flow_bar.pine` không khớp cấu trúc HH/HL của `smc_market_structure.pine` dù cùng để `Seed Mode = Session Seed`.
+  - **Nguyên nhân**: trong `f_process_bar()`, nhánh `trend == 0` (ngay sau khi Session Seed, chưa rõ trend, chờ breakout) gán `s.trigger_bar := bar_index` (bar breakout hiện tại) — SAI so với bản gốc `smc_market_structure.pine` (dòng `trigger_bar := hl_bar`/`lh_bar`, tức bar đầu phiên lúc seed). 2 nhánh `trend == 1`/`trend == -1` khác trong cùng hàm đã đúng (gán `trigger_bar := s.hh_bar`/`s.hl_bar` tương ứng) — chỉ riêng nhánh `trend == 0` bị lệch khi refactor thành thư viện ở v1.0.
+  - **Hệ quả của bug**: `trigger_bar` là biên trái của phạm vi quét tìm "New HL"/"New LH" (qua `f_find_extreme`) khi HH/LL kế tiếp được xác nhận. Dùng `bar_index` (hẹp hơn, bắt đầu từ đúng bar breakout) thay vì `hl_bar`/`lh_bar` (rộng hơn, từ đầu phiên) có thể bỏ sót 1 đáy/đỉnh thấp/cao hơn thật nằm giữa đầu phiên và bar breakout — ra kết quả HL/LH sai (lệch so với bản gốc).
+  - **Sửa**: đổi `s.trigger_bar := bar_index` → `s.trigger_bar := s.hl_bar` (nhánh breakout Bull) và → `s.trigger_bar := s.lh_bar` (nhánh breakout Bear) trong `f_process_bar()`, khớp đúng bản gốc.
+  - **Ảnh hưởng**: `strategies/smc_strategy.pine` và `indicators/smc_market_structure_mtf.pine` (cả 2 import library này) — kết quả HH/HL/LL/LH tính ra sẽ chính xác hơn (khớp bản gốc), coi như fix bug, không phải regression. `indicators/smc_market_structure.pine` KHÔNG bị ảnh hưởng (không import library).
+  - Backup v1.0 tại `libraries/hist/smc_core_v1.0.pine`.
 - **v1.0** (2026-07-10): Phát hành lần đầu, tách từ `smc_strategy.pine` v2.0.

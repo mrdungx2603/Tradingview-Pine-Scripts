@@ -27,7 +27,7 @@
 
 | Tên | File Script | Version | Tài Liệu |
 |---|---|---|---|
-| SMC Core Library | [libraries/smc_core.pine](../libraries/smc_core.pine) | 1.0 | [smc-core.md](smc-core.md) |
+| SMC Core Library | [libraries/smc_core.pine](../libraries/smc_core.pine) | 1.1 | [smc-core.md](smc-core.md) |
 
 ## Không Tài Liệu Hóa (Có Chủ Đích)
 
