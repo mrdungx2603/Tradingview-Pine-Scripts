@@ -8,9 +8,9 @@
 
 | Tên | File Script | Version | Tài Liệu |
 |---|---|---|---|
-| Global Markets Table | [indicators/global_markets_table.pine](../indicators/global_markets_table.pine) | 1.3 | [global-markets-table.md](global-markets-table.md) |
+| Global Markets Table | [indicators/global_markets_table.pine](../indicators/global_markets_table.pine) | 1.5 | [global-markets-table.md](global-markets-table.md) |
 | LSC Pattern | [indicators/lsc_pattern.pine](../indicators/lsc_pattern.pine) | 1.0 | [lsc-pattern.md](lsc-pattern.md) |
-| Market Profile (Mind over Markets) | [indicators/market_profile.pine](../indicators/market_profile.pine) | 3.2 | [market-profile.md](market-profile.md) |
+| Market Profile (Mind over Markets) | [indicators/market_profile.pine](../indicators/market_profile.pine) | 3.3 | [market-profile.md](market-profile.md) |
 | Order Flow & Market Profile Panel | [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) | 1.14 | [order-flow-profile-panel.md](order-flow-profile-panel.md) |
 | Order Flow Overlay | [indicators/order_flow_overlay.pine](../indicators/order_flow_overlay.pine) | 1.0 | [order-flow-overlay.md](order-flow-overlay.md) |
 | SMC Market Structure | [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) | 1.16 | [smc-market-structure.md](smc-market-structure.md) |

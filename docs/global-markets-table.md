@@ -1,9 +1,9 @@
 # Global Markets Table — Tài Liệu
 
-> **Script**: [indicators/global_markets_table.pine](../indicators/global_markets_table.pine) (v1.3)
+> **Script**: [indicators/global_markets_table.pine](../indicators/global_markets_table.pine) (v1.5)
 > **Loại**: Indicator (overlay)
 > **Pine Script**: v6
-> **Ngày tạo**: 2026-11-18 / **Cập nhật**: 2026-11-21
+> **Ngày tạo**: 2026-11-18 / **Cập nhật**: 2026-11-22
 
 ## Tổng Quan
 
@@ -15,6 +15,8 @@ Bảng giá real-time overlay lên chart, hiển thị 9 chỉ số/tài sản q
 |---|---|---|---|---|
 | Danh Sách Mã | US30 / US30 Future / USTECH / NIKKEI / HANG SENG / KOSPI / OIL / XAUUSD / BTC | `symbol` | `TVC:DJI`, `CBOT_MINI:YM1!`, `TVC:NDX`, `TVC:NI225`, `TVC:HSI`, `KRX:KOSPI`, `TVC:USOIL`, `TVC:GOLD`, `BITSTAMP:BTCUSD` | Mã nguồn dữ liệu từng dòng — đổi được nếu mã mặc định không khả dụng với tài khoản/khu vực |
 | Hiển Thị | Kiểu Hiển Thị | `string` | `Lưới Gọn` | 2 lựa chọn: "Lưới Gọn" (lưới 3x3, chỉ 3 dòng cao) / "Bảng Chi Tiết" (bảng 9 dòng x 4 cột như bản gốc) |
+| Băng Chạy | Băng Chạy Ngang | `bool` | `false` | Bật: 9 chỉ số nằm trên 1 hàng, cuộn từ phải qua trái (cơ chế giống `ticker_tape.pine`). Khi bật, "Kiểu Hiển Thị" không còn tác dụng |
+| Băng Chạy | Tốc Độ (ô/giây) | `float` | `2.0` | Số ô băng dịch mỗi giây (0.5-20). Giảm để băng chạy chậm hơn. Chỉ áp dụng khi bật "Băng Chạy Ngang" |
 | Hiển Thị | Vị Trí Bảng | `string` | `Trên-Phải` | 5 lựa chọn: Trên-Phải/Trên-Trái/Dưới-Phải/Dưới-Trái/Giữa-Phải |
 | Hiển Thị | Cỡ Chữ | `string` | `Nhỏ` | Rất Nhỏ/Nhỏ/Thường |
 | Hiển Thị | Số Lẻ Thập Phân | `int` | `2` | Áp dụng cho cột Giá và Thay Đổi (0-4) |
@@ -38,6 +40,7 @@ Bảng giá real-time overlay lên chart, hiển thị 9 chỉ số/tài sản q
 
 - **Lưới Gọn** (mặc định): 1 bảng overlay, lưới 3x3 (3 dòng cao), mỗi ô = 1 chỉ số với 3 dòng text (Tên / Giá / Thay đổi tuyệt đối + %), nền ô tô màu xanh/đỏ nhạt theo chiều tăng/giảm.
 - **Bảng Chi Tiết**: 1 bảng overlay, 10 dòng (1 header + 9 chỉ số) × 4 cột: Chỉ Số, Giá, Thay Đổi, %, màu chữ xanh/đỏ theo chiều tăng/giảm.
+- **Băng Chạy Ngang** (bật "Băng Chạy Ngang"): 1 hàng × 36 ô, mỗi chỉ số chiếm 4 ô (Tên | Giá | Thay đổi (%) | "|"). Băng cuộn từ phải qua trái, dịch "Tốc Độ" ô mỗi giây trên tick realtime (mặc định 2 ô/giây). Màu chữ theo tăng/giảm dùng group "Bảng Chi Tiết - Màu Sắc".
 
 ## Giới Hạn & Lưu Ý
 
@@ -47,6 +50,8 @@ Bảng giá real-time overlay lên chart, hiển thị 9 chỉ số/tài sản q
 
 ## Changelog
 
+- **v1.5** (2026-11-22): Thêm input "Tốc Độ (ô/giây)" cho băng chạy (mặc định 2.0, chậm hơn bản 1.4 vốn dịch 5 ô/giây). Gom input băng chạy vào group riêng "Băng Chạy". Bản trước lưu tại `indicators/hist/global_markets_table_v1.4.pine`.
+- **v1.4** (2026-11-22): Thêm input "Băng Chạy Ngang" để hiển thị 9 chỉ số trên một hàng, cuộn từ phải qua trái theo cơ chế của `ticker_tape.pine`. Bản trước lưu tại `indicators/hist/global_markets_table_v1.3.pine`.
 - **v1.3** (2026-11-21): Tách setting màu sắc/style thành 2 group riêng theo từng kiểu hiển thị — "Lưới Gọn - Màu Sắc" (Màu Tăng/Giảm, Màu Chữ, Độ Trong Suốt Nền Ô) và "Bảng Chi Tiết - Màu Sắc" (giữ các input màu cũ), không còn dùng chung input màu giữa 2 kiểu.
 - **v1.2** (2026-11-21): Thêm kiểu hiển thị "Lưới Gọn" (lưới 3x3, 3 dòng cao, nền ô tô màu theo tăng/giảm) để giảm chiều cao chiếm trên chart — đặt làm mặc định; giữ "Bảng Chi Tiết" (layout gốc) làm lựa chọn thứ 2 qua input "Kiểu Hiển Thị".
 - **v1.1** (2026-11-18): Thêm input "Màu Tên Chỉ Số" cho cột tên mã (trước đó hardcode màu trắng).
