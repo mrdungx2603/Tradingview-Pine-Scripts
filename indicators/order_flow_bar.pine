@@ -1,0 +1,466 @@
+//@version=6
+// Order Flow Bar — Thanh Order Flow Buyer/Seller Theo Hàng Giá
+//
+// Vẽ 1 thanh order flow dạng cánh (wing), neo tại 1 bar mốc, trôi theo bar_index. Mỗi hàng
+// giá (cao price_step) có 1 box buyer (kéo phải) và 1 box seller (kéo trái), độ dài tỷ lệ
+// volume mua/bán của hàng đó so với hàng lớn nhất trong phạm vi tính. Dữ liệu buy/sell lấy từ
+// request.footprint() Tầng 1 (ticks_per_row=1) — bucket theo price_step, lưu buffer theo bar,
+// gộp thành 1 "profile" theo phạm vi tính (mode_calc):
+//   - Session: cộng dồn từ đầu phiên hiện tại, reset mỗi ngày mới.
+//   - Last HL: leg Higher Low→Higher High (hoặc Lower High→Lower Low) gần nhất ĐÃ XÁC NHẬN,
+//     dùng state machine SMC của library smc_core, reseed lại mỗi phiên.
+// Trên profile active, highlight 3 mức chỉ qua màu viền/nền box (không nhãn text riêng): POC
+// (buy+sell lớn nhất), Peak Buy (buy lớn nhất), Peak Sell (sell lớn nhất). Giữa 2 cánh có 1
+// box delta (buy - sell) mỗi hàng, nền gradient theo độ lớn delta.
+//
+// Chỉ dùng footprint Tầng 1 — symbol/tài khoản không hỗ trợ tick data sẽ KHÔNG vẽ gì.
+//
+// Ngày tạo: 2026-11-21
+// Phiên bản: 1.16
+
+// Cần library smc_core đã Publish thật trên TradingView, nếu không script lỗi compile ở import.
+import anthonydang/smc_core/2 as smc
+
+indicator(
+    title="Order Flow Tổng",
+    shorttitle="OF_BAR",
+    overlay=true,
+    max_lines_count=500,
+    max_labels_count=500,
+    max_boxes_count=500
+)
+
+// ===== PHẠM VI TÍNH =====
+mode_calc = input.string(
+    defval="Session",
+    title="Chế độ Phạm Vi",
+    options=["Session", "Last HL"],
+    group="Phạm Vi Tính"
+)
+
+price_step = input.float(
+    defval=1.0,
+    title="Bước Giá (Price Step)",
+    minval=0.01,
+    group="Phạm Vi Tính"
+)
+
+// Cap cho circular buffer of_buffer — Last HL dựng lại profile từ buffer này, nên leg dài hơn
+// số bar lưu được sẽ bị clip phần cũ hơn (xem Giới Hạn & Lưu Ý trong docs).
+max_lookback_bars = input.int(
+    defval=500,
+    title="Max Lookback Bars",
+    minval=1,
+    group="Phạm Vi Tính"
+)
+
+// ===== SMC (Last HL) =====
+pivot_length = input.int(
+    defval=10,
+    title="Pivot Length",
+    minval=1,
+    group="SMC (Last HL)"
+)
+
+seed_mode = input.string(
+    defval="Pivot Seed",
+    title="Seed Mode",
+    options=["Pivot Seed", "Session Seed"],
+    group="SMC (Last HL)"
+)
+
+// ===== HIỂN THỊ =====
+// Default 20, không phải 0 — offset=0 khiến cánh seller (kéo trái) che candlestick gần nhất.
+anchor_offset_bars = input.int(
+    defval=20,
+    title="Offset Bar Gốc",
+    minval=0,
+    group="Hiển Thị"
+)
+
+wing_max_bars = input.int(
+    defval=20,
+    title="Max Độ Rộng Cánh (Bars)",
+    minval=1,
+    group="Hiển Thị"
+)
+
+// Khoảng trống (bar) chừa giữa 2 cánh buyer/seller, canh tâm anchor_bar — chỗ vẽ box delta.
+delta_col_width = input.int(
+    defval=3,
+    title="Độ Rộng Cột Giữa (Bars)",
+    minval=0,
+    group="Hiển Thị"
+)
+
+buyer_color = input.color(
+    defval=color.new(color.green, 50),
+    title="Màu Buyer",
+    group="Hiển Thị"
+)
+
+seller_color = input.color(
+    defval=color.new(color.red, 50),
+    title="Màu Seller",
+    group="Hiển Thị"
+)
+
+wing_border_color = input.color(
+    defval=color.new(color.gray, 50),
+    title="Màu Viền Hàng",
+    group="Hiển Thị"
+)
+
+poc_color = input.color(
+    defval=color.blue,
+    title="Màu POC",
+    group="Hiển Thị"
+)
+
+// Peak Buy/Peak Sell: chỉ đổi màu VIỀN (nền xem peak_fill_transparency bên dưới).
+peak_buy_color = input.color(
+    defval=color.yellow,
+    title="Màu Viền Peak Buy",
+    group="Hiển Thị"
+)
+
+peak_sell_color = input.color(
+    defval=color.yellow,
+    title="Màu Viền Peak Sell",
+    group="Hiển Thị"
+)
+
+// Transparency (%) nền buyer/seller gốc tại hàng Peak Buy/Peak Sell — 0 = đặc hoàn toàn.
+peak_fill_transparency = input.int(
+    defval=10,
+    title="Độ Đậm Highlight Peak (Transparency %)",
+    minval=0,
+    maxval=100,
+    group="Hiển Thị"
+)
+
+// Màu NỀN gradient của box delta theo dấu (xem delta_bg_gradient).
+delta_pos_color = input.color(
+    defval=color.lime,
+    title="Màu Nền Delta Dương (Dư Mua)",
+    group="Hiển Thị"
+)
+
+delta_neg_color = input.color(
+    defval=color.red,
+    title="Màu Nền Delta Âm (Dư Bán)",
+    group="Hiển Thị"
+)
+
+// Tách riêng khỏi delta_pos_color/delta_neg_color (chỉ còn dùng cho nền) — chữ cùng tông nền
+// gradient rất khó đọc khi nền đậm; dấu +/- trong text đã đủ thể hiện chiều delta.
+delta_text_color = input.color(
+    defval=color.white,
+    title="Màu Chữ Delta",
+    group="Hiển Thị"
+)
+
+// Trade-off thật: Pine không co giãn cỡ chữ theo chiều cao thật của hàng trên màn hình (phụ
+// thuộc price_step + mức zoom) — hàng "mỏng" hơn cỡ chữ sẽ bị chồng chữ lên hàng kề.
+delta_text_size = input.string(
+    defval="Normal",
+    title="Cỡ Chữ Delta",
+    options=["Tiny", "Small", "Normal", "Large"],
+    group="Hiển Thị"
+)
+
+delta_bg_gradient = input.bool(
+    defval=true,
+    title="Nền Delta Dạng Gradient",
+    group="Hiển Thị"
+)
+
+delta_neutral_color = input.color(
+    defval=color.new(color.gray, 85),
+    title="Màu Nền Delta = 0",
+    group="Hiển Thị"
+)
+
+// ===== FOOTPRINT TẦNG 1 =====
+// request.footprint() chỉ gọi được 1 lần/script — tham số cố định, không expose input.
+footprint fp = request.footprint(ticks_per_row=1, va_percent=70, imbalance_percent=300)
+
+// Account/sàn không hỗ trợ tick data -> fp/fp.rows() na. Không raise lỗi, coi như chưa có dữ liệu.
+bool has_footprint_data = not na(fp) and not na(fp.rows()) and array.size(fp.rows()) > 0
+
+// has_footprint_data chỉ phản ánh bar hiện tại (false ở bar không có giao dịch khớp) — dùng
+// trực tiếp để gate vẽ sẽ làm thanh nhấp nháy. has_fp_ever sticky: bật true 1 lần rồi giữ nguyên.
+var bool has_fp_ever = false
+if has_footprint_data
+    has_fp_ever := true
+
+// ===== BUCKET VOLUME THEO PRICE_STEP =====
+// row_id tuyệt đối (floor(giá/step), không tương đối theo base động) để profile dùng lại trực tiếp.
+f_bucket_bar_rows(footprint fp_, float step) =>
+    array<int>   row_ids = array.new<int>()
+    array<float> buys    = array.new<float>()
+    array<float> sells   = array.new<float>()
+    // fp_ còn na (vd bar 0) -> gọi .rows() thẳng sẽ runtime error; chặn bằng short-circuit `and`.
+    if not na(fp_) and not na(fp_.rows())
+        array<volume_row> rows_arr = fp_.rows()
+        int n_rows = array.size(rows_arr)
+        if n_rows > 0
+            for i = 0 to n_rows - 1
+                volume_row row          = array.get(rows_arr, i)
+                float      row_price    = row.up_price()
+                int        row_id       = int(math.floor(row_price / step))
+                float      row_buy      = row.buy_volume()
+                float      row_sell     = row.sell_volume()
+                int        existing_idx = array.indexof(row_ids, row_id)
+                if existing_idx >= 0
+                    array.set(buys, existing_idx, array.get(buys, existing_idx) + row_buy)
+                    array.set(sells, existing_idx, array.get(sells, existing_idx) + row_sell)
+                else
+                    array.push(row_ids, row_id)
+                    array.push(buys, row_buy)
+                    array.push(sells, row_sell)
+    [row_ids, buys, sells]
+
+// ===== CIRCULAR BUFFER LƯU BUCKET THEO BAR =====
+// Giữ tối đa max_lookback_bars phần tử gần nhất — dùng để dựng lại profile cho Last HL.
+type BarRowVol
+    int          bar_idx
+    array<int>   row_ids
+    array<float> buys
+    array<float> sells
+
+var array<BarRowVol> of_buffer = array.new<BarRowVol>()
+
+// Caller chịu trách nhiệm chỉ gọi khi nến đã đóng — push lúc nến chưa đóng sẽ lặp dữ liệu.
+f_push_bar_buffer(array<BarRowVol> buf, int bar_idx, array<int> row_ids, array<float> buys, array<float> sells, int cap) =>
+    BarRowVol item = BarRowVol.new(bar_idx, row_ids, buys, sells)
+    array.push(buf, item)
+    if array.size(buf) > cap
+        array.shift(buf)
+
+// ===== SESSION ACCUMULATOR — CỘNG DỒN 1 CHIỀU, RESET MỖI NGÀY =====
+// RowProfile dùng chung cho mọi mode — Session chỉ cộng tiến trong ngày, không cần buffer.
+type RowProfile
+    array<int>   row_ids
+    array<float> buys
+    array<float> sells
+
+var RowProfile sess_profile = RowProfile.new(array.new<int>(), array.new<float>(), array.new<float>())
+
+// ===== SMC STATE MACHINE (Last HL) — RESEED MỖI PHIÊN =====
+// Khác bản gốc indicators/smc_market_structure.pine (seed 1 lần xuyên suốt lịch sử): ở đây
+// state machine reset + seed lại mỗi phiên mới, để Last HL luôn thuộc cấu trúc phiên hiện tại.
+var smc.SwingState of_smc_state = smc.f_init_state()
+
+// Gộp 1 cặp row_ids/buys/sells vào `profile` (mutate trực tiếp — Pine truyền UDT theo tham chiếu).
+f_merge_into_profile(RowProfile profile, array<int> row_ids, array<float> buys, array<float> sells) =>
+    int n_rows = array.size(row_ids)
+    if n_rows > 0
+        for i = 0 to n_rows - 1
+            int   row_id      = array.get(row_ids, i)
+            float row_buy     = array.get(buys, i)
+            float row_sell    = array.get(sells, i)
+            int   existing_idx = array.indexof(profile.row_ids, row_id)
+            if existing_idx >= 0
+                array.set(profile.buys, existing_idx, array.get(profile.buys, existing_idx) + row_buy)
+                array.set(profile.sells, existing_idx, array.get(profile.sells, existing_idx) + row_sell)
+            else
+                array.push(profile.row_ids, row_id)
+                array.push(profile.buys, row_buy)
+                array.push(profile.sells, row_sell)
+
+// ===== REBUILD PROFILE TỪ BUFFER CHO LAST HL =====
+// Gộp các phần tử of_buffer có bar_idx trong [left_bar, right_bar]. Biên na (vd chưa seed xong)
+// -> trả rỗng ngay, không duyệt. Biên nằm ngoài buffer còn lưu (bị shift do max_lookback_bars)
+// tự "clip" — không cần xử lý riêng.
+f_build_profile_from_buffer(array<BarRowVol> buf, int left_bar, int right_bar) =>
+    RowProfile result = RowProfile.new(array.new<int>(), array.new<float>(), array.new<float>())
+    if not na(left_bar) and not na(right_bar)
+        int n = array.size(buf)
+        if n > 0
+            for i = 0 to n - 1
+                BarRowVol item = array.get(buf, i)
+                if item.bar_idx >= left_bar and item.bar_idx <= right_bar
+                    f_merge_into_profile(result, item.row_ids, item.buys, item.sells)
+    result
+
+// timeframe.change()/ta.pivothigh/ta.pivotlow PHẢI gọi vô điều kiện mỗi bar — gọi có điều kiện
+// (chỉ trong nhánh reseed) làm mất liên tục lịch sử nội bộ của built-in, không bao giờ confirm
+// được pivot. Hành động reset/gộp mới mới bị gate theo barstate.isconfirmed.
+bool is_new_session = timeframe.change("D")
+float smc_ph = ta.pivothigh(pivot_length, pivot_length)
+float smc_pl = ta.pivotlow(pivot_length, pivot_length)
+
+// ===== BUCKET VOLUME CỦA BAR HIỆN TẠI =====
+[bar_row_ids, bar_buys, bar_sells] = f_bucket_bar_rows(fp, price_step)
+
+// Chỉ push/gộp khi nến đã đóng — tránh lặp dữ liệu nhiều lần trong 1 nến đang hình thành.
+if barstate.isconfirmed
+    f_push_bar_buffer(of_buffer, bar_index, bar_row_ids, bar_buys, bar_sells, max_lookback_bars)
+
+    // Reset sess_profile TRƯỚC khi gộp bar này — reset sau sẽ xoá luôn dữ liệu vừa gộp.
+    if is_new_session
+        array.clear(sess_profile.row_ids)
+        array.clear(sess_profile.buys)
+        array.clear(sess_profile.sells)
+    f_merge_into_profile(sess_profile, bar_row_ids, bar_buys, bar_sells)
+
+    // Reset state machine mỗi phiên mới, rồi RETRY seed mỗi bar (field seeded) cho tới khi
+    // thành công — không phải seed-1-lần-rồi-bỏ. Chỉ chạy cho mode Last HL (nhẹ gánh tính toán).
+    if mode_calc == "Last HL"
+        if is_new_session
+            of_smc_state := smc.f_init_state()
+
+        if not of_smc_state.seeded
+            if seed_mode == "Pivot Seed"
+                of_smc_state := smc.f_seed_pivot(of_smc_state, smc_ph, smc_pl, pivot_length)
+            else if seed_mode == "Session Seed"
+                of_smc_state := smc.f_seed_session(of_smc_state)
+        else
+            of_smc_state := smc.f_process_bar(of_smc_state)
+
+// Biên "Last HL" = leg đã HOÀN THÀNH, kết thúc tại hh_bar (uptrend)/ll_bar (downtrend) — KHÔNG
+// dùng bar_index, vì phần sau hh_bar/ll_bar là candidate đang dò pivot mới, chưa xác nhận.
+int lasthl_left_bar  = of_smc_state.trend == 1 ? of_smc_state.hl_bar : of_smc_state.trend == -1 ? of_smc_state.lh_bar : na
+int lasthl_right_bar = of_smc_state.trend == 1 ? of_smc_state.hh_bar : of_smc_state.trend == -1 ? of_smc_state.ll_bar : na
+
+// Chỉ rebuild ở bar cuối (f_draw_wings xoá-vẽ-lại toàn bộ mỗi lần, chạy mọi bar lịch sử chỉ lãng phí).
+RowProfile last_hl_profile = RowProfile.new(array.new<int>(), array.new<float>(), array.new<float>())
+if mode_calc == "Last HL" and barstate.islast
+    last_hl_profile := f_build_profile_from_buffer(of_buffer, lasthl_left_bar, lasthl_right_bar)
+
+// ===== CHỌN ACTIVE PROFILE THEO MODE + TÍNH POC/PEAK BUY/PEAK SELL =====
+RowProfile active_profile = mode_calc == "Session" ? sess_profile : last_hl_profile
+
+// Pure, na-safe: profile rỗng -> trả na cho cả 3. Trả về row_id (giá trị tuyệt đối), không phải index.
+f_calc_poc_peak(RowProfile profile) =>
+    int   n             = array.size(profile.row_ids)
+    int   poc_row       = na
+    int   peak_buy_row  = na
+    int   peak_sell_row = na
+    if n > 0
+        int   best_poc_idx  = 0
+        int   best_buy_idx  = 0
+        int   best_sell_idx = 0
+        float best_poc_val  = array.get(profile.buys, 0) + array.get(profile.sells, 0)
+        float best_buy_val  = array.get(profile.buys, 0)
+        float best_sell_val = array.get(profile.sells, 0)
+        if n > 1
+            for i = 1 to n - 1
+                float buy_v = array.get(profile.buys, i)
+                float sell_v = array.get(profile.sells, i)
+                float tot_v = buy_v + sell_v
+                if tot_v > best_poc_val
+                    best_poc_val := tot_v
+                    best_poc_idx := i
+                if buy_v > best_buy_val
+                    best_buy_val := buy_v
+                    best_buy_idx := i
+                if sell_v > best_sell_val
+                    best_sell_val := sell_v
+                    best_sell_idx := i
+        poc_row := array.get(profile.row_ids, best_poc_idx)
+        peak_buy_row := array.get(profile.row_ids, best_buy_idx)
+        peak_sell_row := array.get(profile.row_ids, best_sell_idx)
+    [poc_row, peak_buy_row, peak_sell_row]
+
+// Chỉ tính ở bar cuối (cùng lý do hiệu năng như last_hl_profile).
+int poc_row_id       = na
+int peak_buy_row_id  = na
+int peak_sell_row_id = na
+if barstate.islast
+    // Pine không hỗ trợ tuple reassignment trực tiếp ([a,b,c] := f()) — dùng biến tạm `=` rồi gán `:=`.
+    [poc_tmp, peak_buy_tmp, peak_sell_tmp] = f_calc_poc_peak(active_profile)
+    poc_row_id       := poc_tmp
+    peak_buy_row_id  := peak_buy_tmp
+    peak_sell_row_id := peak_sell_tmp
+
+// ===== VẼ THANH BUYER/SELLER =====
+// of_boxes thu thập box của thanh hiện tại để xoá sạch trước mỗi lần vẽ lại (khác accumulator
+// ở trên chỉ cộng khi nến đóng — thanh phải vẽ lại mỗi tick để bám active_profile/bar_index mới nhất).
+var array<box> of_boxes = array.new<box>()
+
+f_clear_boxes(array<box> boxes) =>
+    int n_boxes = array.size(boxes)
+    if n_boxes > 0
+        for i = 0 to n_boxes - 1
+            box.delete(array.get(boxes, i))
+    array.clear(boxes)
+
+// Mỗi hàng: 1 box buyer (kéo phải từ anchor_bar), 1 box seller (kéo trái), độ rộng tỷ lệ
+// buys[i]/sells[i] so với max_total, tối đa max_wing_bars. row_id bao đúng khoảng [row_id *
+// price_step, (row_id + 1) * price_step) — box vẽ bottom = row_id * price_step, top = (row_id + 1) * price_step.
+// Highlight theo thứ tự ưu tiên POC > Peak Buy > Peak Sell (1 hàng trùng nhiều mức chỉ nhận màu
+// ưu tiên cao nhất). Box delta ở giữa dùng CHUNG row_top/row_bot với buy_box/sell_box (box.new,
+// không phải label.new) để đảm bảo dóng hàng chính xác.
+f_draw_wings(RowProfile profile, int anchor_bar, int max_wing_bars, color buy_color, color sell_color) =>
+    f_clear_boxes(of_boxes)
+    int n_rows = array.size(profile.row_ids)
+    if has_fp_ever and n_rows > 0
+        float max_total     = 0.0
+        // max_abs_delta — trị tuyệt đối delta lớn nhất trong profile, chuẩn hoá gradient nền box
+        // delta (tính chung vòng for với max_total để khỏi quét profile lần 2).
+        float max_abs_delta = 0.0
+        for i = 0 to n_rows - 1
+            float row_buy_tmp  = array.get(profile.buys, i)
+            float row_sell_tmp = array.get(profile.sells, i)
+            float row_total    = row_buy_tmp + row_sell_tmp
+            float row_abs_delta = math.abs(row_buy_tmp - row_sell_tmp)
+            if row_total > max_total
+                max_total := row_total
+            if row_abs_delta > max_abs_delta
+                max_abs_delta := row_abs_delta
+        // Nền "đậm" cho Peak Buy/Peak Sell — giữ tông buyer/seller gốc, chỉ giảm transparency.
+        color buy_bg_peak  = color.rgb(color.r(buy_color), color.g(buy_color), color.b(buy_color), peak_fill_transparency)
+        color sell_bg_peak = color.rgb(color.r(sell_color), color.g(sell_color), color.b(sell_color), peak_fill_transparency)
+        delta_label_size = switch delta_text_size
+            "Tiny"   => size.tiny
+            "Small"  => size.small
+            "Normal" => size.normal
+            "Large"  => size.large
+            => size.normal
+        for i = 0 to n_rows - 1
+            int   row_id       = array.get(profile.row_ids, i)
+            float row_bot      = row_id * price_step
+            float row_top      = (row_id + 1) * price_step
+            float buy_v        = array.get(profile.buys, i)
+            float sell_v       = array.get(profile.sells, i)
+            float buy_ratio    = max_total > 0 ? buy_v / max_total : 0.0
+            float sell_ratio   = max_total > 0 ? sell_v / max_total : 0.0
+            int   buy_bars     = int(math.round(buy_ratio * max_wing_bars))
+            int   sell_bars    = int(math.round(sell_ratio * max_wing_bars))
+            float  delta_v        = buy_v - sell_v
+            string delta_sign_str = delta_v > 0 ? "+" : ""
+            // color.from_gradient chỉ nội suy tuyến tính giữa đúng 2 màu — tách riêng nhánh
+            // dương/âm bằng ternary.
+            color delta_bg_color = not delta_bg_gradient ? color.new(color.gray, 95)
+                 : delta_v > 0 ? color.from_gradient(delta_v, 0, max_abs_delta, delta_neutral_color, delta_pos_color)
+                 : delta_v < 0 ? color.from_gradient(delta_v, -max_abs_delta, 0, delta_neg_color, delta_neutral_color)
+                 : delta_neutral_color
+            bool  is_poc       = not na(poc_row_id) and row_id == poc_row_id
+            bool  is_peak_buy  = not is_poc and not na(peak_buy_row_id) and row_id == peak_buy_row_id
+            bool  is_peak_sell = not is_poc and not is_peak_buy and not na(peak_sell_row_id) and row_id == peak_sell_row_id
+            color buy_border   = is_poc ? poc_color : is_peak_buy ? peak_buy_color : wing_border_color
+            color sell_border  = is_poc ? poc_color : is_peak_sell ? peak_sell_color : wing_border_color
+            color buy_bg       = is_poc ? poc_color : is_peak_buy ? buy_bg_peak : buy_color
+            color sell_bg      = is_poc ? poc_color : is_peak_sell ? sell_bg_peak : sell_color
+            // buy_box/sell_box dời ra 2 bên thêm delta_col_width, chừa khoảng trống giữa cho box delta.
+            box   buy_box      = box.new(left=anchor_bar + delta_col_width, top=row_top, right=anchor_bar + delta_col_width + buy_bars, bottom=row_bot,
+                 border_color=buy_border, bgcolor=buy_bg, xloc=xloc.bar_index)
+            box   sell_box     = box.new(left=anchor_bar - delta_col_width - sell_bars, top=row_top, right=anchor_bar - delta_col_width, bottom=row_bot,
+                 border_color=sell_border, bgcolor=sell_bg, xloc=xloc.bar_index)
+            array.push(of_boxes, buy_box)
+            array.push(of_boxes, sell_box)
+
+            array.push(of_boxes, box.new(left=anchor_bar - delta_col_width, top=row_top, right=anchor_bar + delta_col_width, bottom=row_bot,
+                 border_color=delta_bg_color, bgcolor=delta_bg_color,
+                 text=delta_sign_str + str.tostring(delta_v, format.volume),
+                 text_color=delta_text_color, text_size=delta_label_size, text_halign=text.align_center,
+                 xloc=xloc.bar_index))
+
+// Vẽ lại mỗi tick nhưng chỉ ở bar cuối (barstate.islast) — f_draw_wings xoá-vẽ-lại toàn bộ mỗi
+// lần gọi, nên chạy trên bar lịch sử chỉ lãng phí, không đổi kết quả hiển thị cuối cùng.
+if barstate.islast
+    f_draw_wings(active_profile, bar_index + anchor_offset_bars, wing_max_bars, buyer_color, seller_color)
+
+plot(na)

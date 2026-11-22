@@ -12,22 +12,23 @@
 | LSC Pattern | [indicators/lsc_pattern.pine](../indicators/lsc_pattern.pine) | 1.0 | [lsc-pattern.md](lsc-pattern.md) |
 | Market Profile (Mind over Markets) | [indicators/market_profile.pine](../indicators/market_profile.pine) | 3.3 | [market-profile.md](market-profile.md) |
 | Order Flow & Market Profile Panel | [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) | 1.14 | [order-flow-profile-panel.md](order-flow-profile-panel.md) |
+| Order Flow Bar | [indicators/order_flow_bar.pine](../indicators/order_flow_bar.pine) | 1.16 | [order-flow-bar.md](order-flow-bar.md) |
 | Order Flow Overlay | [indicators/order_flow_overlay.pine](../indicators/order_flow_overlay.pine) | 1.0 | [order-flow-overlay.md](order-flow-overlay.md) |
 | SMC Market Structure | [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) | 1.16 | [smc-market-structure.md](smc-market-structure.md) |
-| SMC Market Structure + MTF | [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) | 2.0 | [smc-market-structure.md](smc-market-structure.md) *(chung tài liệu với bản base)* |
+| SMC Market Structure + MTF | [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) | 2.1 | [smc-market-structure.md](smc-market-structure.md) *(chung tài liệu với bản base)* |
 | Wyckoff Effort vs Result | [indicators/volume/wyckoff_evr.pine](../indicators/volume/wyckoff_evr.pine) | 1.0 | [wyckoff-evr.md](wyckoff-evr.md) |
 
 ## Strategies
 
 | Tên | File Script | Version | Tài Liệu |
 |---|---|---|---|
-| SMC Strategy | [strategies/smc_strategy.pine](../strategies/smc_strategy.pine) | 2.0 | [smc-strategy.md](smc-strategy.md) |
+| SMC Strategy | [strategies/smc_strategy.pine](../strategies/smc_strategy.pine) | 2.1 | [smc-strategy.md](smc-strategy.md) |
 
 ## Libraries
 
 | Tên | File Script | Version | Tài Liệu |
 |---|---|---|---|
-| SMC Core Library | [libraries/smc_core.pine](../libraries/smc_core.pine) | 1.0 | [smc-core.md](smc-core.md) |
+| SMC Core Library | [libraries/smc_core.pine](../libraries/smc_core.pine) | 1.2 | [smc-core.md](smc-core.md) |
 | Market Profile Core Library | [libraries/market_profile_core.pine](../libraries/market_profile_core.pine) | 1.1 | [market-profile-core.md](market-profile-core.md) |
 
 ## Không Tài Liệu Hóa (Có Chủ Đích)

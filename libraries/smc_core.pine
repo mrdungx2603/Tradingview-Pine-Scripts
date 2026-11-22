@@ -2,11 +2,13 @@
 // ─── SMC Core Library — UDT + State Machine cho SMC Market Structure ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-07-10
-// Phiên bản: 1.0
+// Phiên bản: 1.2
 // Mô tả: Library chứa UDT SwingState và các pure function cho state machine SMC.
 //        Dùng chung cho indicator, strategy và MTF indicator.
 //        Tất cả hàm đều pure — không var, không request.*, không plot/line/box/label.
-library(title="SMC Core Library", overlay=false)
+// Title publish trên TradingView: "smc_core" (đổi từ "SMC Core Library" ở v1.1 — khớp đúng tên
+// dùng trong mọi dòng import, account anthonydang).
+library(title="smc_core", overlay=false)
 
 // ╔══════════════════════════════════════════╗
 // ║        UDT — SWING STATE                ║
@@ -150,19 +152,25 @@ export f_process_bar(SwingState s) =>
         s
 
     // ─── CASE 0: KHỞI TẠO TỪ SESSION SEED (Chưa rõ Trend) ───
+    // FIX v1.1: trigger_bar phải lấy s.hl_bar/s.lh_bar (bar đầu phiên, lúc seed) — ĐÚNG như bản
+    // gốc indicators/smc_market_structure.pine (dòng trigger_bar := hl_bar/lh_bar ở case này) —
+    // không phải bar_index (bar breakout hiện tại). trigger_bar là biên trái của phạm vi quét
+    // tìm "New HL"/"New LH" khi HH/LL tiếp theo được xác nhận (xem f_find_extreme ở cand_type==1/-1
+    // bên dưới); dùng bar_index làm biên trái hẹp hơn thật, có thể bỏ sót đáy/đỉnh thấp/cao hơn nằm
+    // giữa đầu phiên và bar breakout này, khiến kết quả lệch so với bản gốc.
     else if s.trend == 0
         if close > s.hh_price
             s.cand_type   := 1
             s.cand_bar    := bar_index
             s.cand_high   := high
-            s.trigger_bar := bar_index
+            s.trigger_bar := s.hl_bar
             s.trend       := 1
             s.event       := 1  // BoS Bull
         else if close < s.ll_price
             s.cand_type   := -1
             s.cand_bar    := bar_index
             s.cand_low    := low
-            s.trigger_bar := bar_index
+            s.trigger_bar := s.lh_bar
             s.trend       := -1
             s.event       := -1  // BoS Bear
         s

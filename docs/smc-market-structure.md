@@ -1,9 +1,9 @@
 # SMC Market Structure Indicator — Tài Liệu Hướng Dẫn
 
 > **Script**: [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) (v1.16)
-> **Script MTF**: [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) (v2.0)
-> **Library dùng chung**: [libraries/smc_core.pine](smc-core.md) (v1.0), chỉ bản MTF import. Bản base có state machine riêng trong file.
-> **Ngày tạo**: 2026-06-18 / **Cập nhật**: 2026-11-15
+> **Script MTF**: [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) (v2.1)
+> **Library dùng chung**: [libraries/smc_core.pine](smc-core.md) (v1.2, `import anthonydang/smc_core/2 as smc`), chỉ bản MTF import. Bản base có state machine riêng trong file.
+> **Ngày tạo**: 2026-06-18 / **Cập nhật**: 2026-11-22
 > **Pine Script**: v6
 > **Loại**: Indicator (overlay)
 
@@ -729,6 +729,12 @@ Bảng MTF hiển thị trend (BULL/BEAR/WAIT) thật từ `SwingState.trend` k�
 - [x] Gọn code: helper `add_ob()` và `evict_oldest_ob()` thay cho các khối lặp tạo/xoá OB.
 - [x] Backup bản trước khi sửa: `indicators/hist/smc_market_structure_v1.8b.pine`.
 - [ ] Chưa làm: quét lại temp pivot mỗi bar, gom khối xác nhận HH/LL, gom bảng dashboard, bỏ `last_mitigated_idx`.
+
+### v2.1 — Chỉ bản MTF (Đã Hoàn Thành — 2026-11-22)
+
+- [x] Đổi `import mrdungx2603/smc_core/1` → `anthonydang/smc_core/2` — gộp về 1 account TradingView duy nhất (theo yêu cầu người dùng, xem `.claude/CLAUDE.md` mục "Tài Khoản TradingView"). Base indicator không đổi (không import library).
+- [x] Đồng thời nhận fix bug `trigger_bar` ở `smc_core` v1.1 (xem [docs/smc-core.md](smc-core.md#changelog)) — kết quả HH/HL/LL/LH tính chính xác hơn, không phải regression.
+- [x] Backup bản trước khi sửa: `indicators/hist/smc_market_structure_mtf_v2.0.pine`.
 
 ### v2.0 (Đã Hoàn Thành — 2026-07-10)
 

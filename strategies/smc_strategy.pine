@@ -2,10 +2,12 @@
 // ─── SMC Strategy — Chiến lược giao dịch dựa trên Smart Money Concepts ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-06-21
-// Phiên bản: 2.0
+// Phiên bản: 2.1
 // Mô tả: Strategy backtest dựa trên SMC Market Structure, Order Blocks,
 //        Premium/Discount, với 3 chế độ entry, SL/TP linh hoạt, trailing stop.
 // Thay đổi v2.0: Import library smc_core, dùng UDT SwingState + pure state machine.
+// Thay đổi v2.1: Đổi import sang account anthonydang/smc_core/2 (gộp account, theo yêu cầu
+//        người dùng — xem .claude/CLAUDE.md mục "Tài Khoản TradingView").
 strategy(
     title="SMC Strategy",
     shorttitle="SMC_STRATEGY",
@@ -20,7 +22,7 @@ strategy(
 )
 
 // ─── Import Library ───
-import mrdungx2603/smc_core/1 as smc
+import anthonydang/smc_core/2 as smc
 
 // ╔══════════════════════════════════════════╗
 // ║              INPUTS — Strategy           ║

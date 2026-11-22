@@ -2,12 +2,14 @@
 // ─── SMC Market Structure Indicator + Multi-Timeframe — Phân tích cấu trúc thị trường theo SMC ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-06-18
-// Phiên bản: 2.0
+// Phiên bản: 2.1
 // Mô tả: Mở rộng từ bản base, bổ sung bảng Multi-Timeframe hiển thị trend của 3 khung
 //        thời gian khác nhau. Phát hiện cấu trúc xu hướng (HH/HL, LL/LH),
 //        Break of Structure (BoS), Change of Character (CHoCH), Premium/Discount.
 // Thay đổi v2.0: Viết lại hoàn toàn — dùng library smc_core + request.security() wrapper
 //        chạy state machine SMC thật trên từng TF. Logic MTF chính xác (HH/HL/LH/LL).
+// Thay đổi v2.1: Đổi import sang account anthonydang/smc_core/2 (gộp account, theo yêu cầu
+//        người dùng — xem .claude/CLAUDE.md mục "Tài Khoản TradingView").
 indicator(
     title="SMC Market Structure + MTF",
     shorttitle="SMC_STRUCTURE_MTF",
@@ -17,7 +19,7 @@ indicator(
 )
 
 // ─── Import Library ───
-import mrdungx2603/smc_core/1 as smc
+import anthonydang/smc_core/2 as smc
 
 // ╔══════════════════════════════════════════╗
 // ║              INPUTS                      ║
