@@ -2,9 +2,9 @@
 
 ## Tổng Quan
 
-> ⚠️ **Yêu cầu hạ tầng bắt buộc**: indicator này `import mrdungx2603/smc_core/1 as smc`. Nếu
+> ⚠️ **Yêu cầu hạ tầng bắt buộc**: indicator này `import anthonydang/smc_core/1 as smc`. Nếu
 > library `smc_core` chưa được **Publish thật** (Publish Library, không chỉ lưu "My Scripts")
-> trên TradingView dưới tài khoản `mrdungx2603`, **TOÀN BỘ script sẽ không compile được**
+> trên TradingView dưới tài khoản `anthonydang`, **TOÀN BỘ script sẽ không compile được**
 > (lỗi ngay tại dòng `import`) — không chỉ riêng mode "Last HL". Xem chi tiết ở mục Giới Hạn
 > & Lưu Ý bên dưới.
 
@@ -41,8 +41,11 @@ tính được chọn.
 | Hiển Thị | Màu POC (`poc_color`) | xanh dương | Màu highlight hàng POC (ưu tiên cao nhất) |
 | Hiển Thị | Màu Peak Buy (`peak_buy_color`) | lime (50% trong suốt) | Màu highlight hàng Peak Buy |
 | Hiển Thị | Màu Peak Sell (`peak_sell_color`) | cam (50% trong suốt) | Màu highlight hàng Peak Sell |
-| Hiển Thị | Hiển Thị Nhãn Giá Trị (`show_value_labels`) | true | Bật/tắt 3 nhãn giá + volume tại POC/Peak Buy/Peak Sell, VÀ cột giá tham khảo (xem dòng dưới) |
-| Hiển Thị | Cột Giá: Mỗi N Hàng (`price_ruler_step_rows`) | 5 | Vẽ 1 nhãn giá trơn (không kèm volume) tại tâm mỗi N hàng, cách đều theo giá thật (không theo thứ tự mảng) — đọc nhanh giá của thanh mà không cần nhìn sang trục giá gốc của chart |
+| Hiển Thị | Hiển Thị Nhãn Giá Trị (`show_value_labels`) | true | Bật/tắt 3 nhãn giá + volume tại POC/Peak Buy/Peak Sell, VÀ cột giá tham khảo (xem 2 dòng dưới) |
+| Hiển Thị | Cột Giá: Mỗi N Hàng (`price_ruler_step_rows`) | 5 | Vẽ 1 nhãn giá nền đặc tại tâm mỗi N hàng, cách đều theo giá thật (không theo thứ tự mảng) — tạo thành 1 "cột giá" riêng dễ đọc ở giữa thanh |
+| Hiển Thị | Màu Nền Cột Giá (`price_column_color`) | xám (85% đặc) | Màu nền của các nhãn cột giá tham khảo — nền đặc (không trong suốt) để không bị lẫn vào màu box phía sau |
+| Hiển Thị | Hiển Thị Giá Khớp Hiện Tại (`show_current_price_label`) | true | Bật/tắt 1 nhãn riêng ghi giá khớp hiện tại (`close`) — độc lập với cột giá tham khảo (giá trị liên tục, không bó theo lưới `price_step`) |
+| Hiển Thị | Màu Giá Khớp Hiện Tại (`current_price_color`) | vàng | Màu nhãn giá khớp hiện tại — nổi bật nhất trong toàn bộ thanh để dễ phân biệt với các mức giá khác |
 
 ## Logic Chính
 
@@ -57,7 +60,8 @@ tính được chọn.
 - **POC / Peak Buy / Peak Sell**: trên `active_profile`, tính `row_id` ứng với `argmax(buy+sell)` (POC), `argmax(buy)` (Peak Buy), `argmax(sell)` (Peak Sell). Trả `na` nếu profile rỗng.
 - **Vẽ thanh**: với mỗi hàng trong `active_profile`, vẽ 1 box buyer (kéo phải từ bar neo, cao đúng `[row_id * price_step, (row_id + 1) * price_step)`) và 1 box seller (kéo trái), độ rộng tỷ lệ volume hàng đó / volume hàng lớn nhất, tối đa `wing_max_bars`. Hàng trùng POC/Peak Buy/Peak Sell được tô màu riêng theo thứ tự ưu tiên POC > Peak Buy > Peak Sell. Chỉ rebuild profile/POC/vẽ lại ở bar cuối cùng (`barstate.islast`, mỗi tick của bar đó) — các bar lịch sử không cần vẽ vì box/label luôn bị xoá-vẽ-lại toàn bộ, chỉ trạng thái cuối cùng có ý nghĩa.
 - **Nhãn giá trị**: nếu `show_value_labels = true` và có dữ liệu footprint (`has_fp_ever`), vẽ tối đa 3 nhãn (POC/Peak Buy/Peak Sell) ghi giá (định dạng `mintick`, lấy **trung điểm hàng** `(row_id + 0.5) * price_step`) và volume (định dạng `volume`) tại mỗi mức, nếu mức đó còn tồn tại trong profile.
-- **Cột giá tham khảo**: cùng điều kiện `show_value_labels`/`has_fp_ever`, vẽ thêm 1 nhãn giá trơn (không kèm volume, kiểu `label.style_none`) tại tâm mỗi `price_ruler_step_rows` hàng — tính theo giá trị `row_id` **nhỏ nhất/lớn nhất thật có trong profile** (không phải theo vị trí trong mảng, vì thứ tự chèn mảng không theo thứ tự giá), nên các nhãn cách đều nhau đúng theo giá.
+- **Cột giá tham khảo**: cùng điều kiện `show_value_labels`/`has_fp_ever`, vẽ thêm 1 nhãn giá nền đặc (`price_column_color`, không kèm volume, kiểu `label.style_label_center`) tại tâm mỗi `price_ruler_step_rows` hàng — tính theo giá trị `row_id` **nhỏ nhất/lớn nhất thật có trong profile** (không phải theo vị trí trong mảng, vì thứ tự chèn mảng không theo thứ tự giá), nên các nhãn cách đều nhau đúng theo giá, tạo thành 1 "cột" dễ đọc ở giữa thanh.
+- **Giá khớp hiện tại**: nếu `show_current_price_label = true`, vẽ thêm 1 nhãn riêng tại `y=close` (giá đóng cửa của bar đang chạy — giá khớp hiện tại), màu `current_price_color` (mặc định vàng, nổi bật nhất). Khác cột giá tham khảo ở trên — giá trị này liên tục, không bó theo lưới `price_step`.
 - **Viền mọi hàng**: mỗi box buyer/seller luôn có viền màu `wing_border_color` để phân biệt ranh giới giữa các hàng liền kề; hàng POC/Peak Buy/Peak Sell đè viền bằng màu riêng của mức đó (ưu tiên POC > Peak Buy > Peak Sell).
 
 ## Output / Tín Hiệu
@@ -73,12 +77,17 @@ tính được chọn.
 - **`price_step` phải cố định xuyên suốt**: `row_id` được tính trực tiếp từ `price_step` hiện tại và lưu nguyên vào buffer; đổi `price_step` giữa chừng sẽ làm các bucket cũ trong buffer (tính theo step cũ) không còn tương thích với bucket mới, gây lệch khi dựng lại profile. Đổi `price_step` nên đi kèm xoá/làm mới chart (hoặc chờ buffer tự xoay hết dữ liệu cũ).
 - **Buffer giới hạn `max_lookback_bars`**: `of_buffer` chỉ giữ tối đa `max_lookback_bars` bar gần nhất; nếu phạm vi cần dựng (Visible Chart với `vis_bars_n` lớn, hoặc leg Last HL dài) vượt quá số bar còn lưu trong buffer, phần dữ liệu cũ hơn bị **clip tự nhiên** (không còn trong buffer, không raise lỗi) — profile dựng được sẽ thiếu phần đó.
 - **Pivot Seed (Last HL) có thể không seed được**: `seed_mode = "Pivot Seed"` cần `ta.pivothigh`/`ta.pivotlow` cùng xác nhận đúng lúc trong vài bar đầu phiên; nếu không rơi đúng lúc, trạng thái SMC có thể không seed xong trong suốt phiên đó → `last_hl_profile` rỗng (không vẽ) cho tới phiên sau. `seed_mode = "Session Seed"` không gặp giới hạn này.
-- **Blocker hạ tầng — library `smc_core` cần publish thật trên TradingView**: file dùng `import mrdungx2603/smc_core/1 as smc`. Tại thời điểm viết tài liệu này, `libraries/smc_core.pine` **chưa được publish thật** lên TradingView (chỉ tồn tại trong git repo) — đã xác nhận qua `mcp-tv-validate-pine-script` ở Task 6: lỗi `"The user 'mrdungx2603' does not have a published library titled 'smc_core'"` tại chính dòng `import`. Đây là blocker phát hiện từ Task 6, **người dùng cần tự publish `libraries/smc_core.pine` qua Pine Editor → Publish Library (tối thiểu mức Invite-only/Private)** trước khi mode "Last HL" (và cả `smc_strategy.pine`/`smc_market_structure_mtf.pine`) chạy được thật trên TradingView. Mode "Visible Chart" và "Session" không phụ thuộc `smc_core`, không bị ảnh hưởng bởi blocker này.
+- **Blocker hạ tầng — library `smc_core` cần publish thật trên TradingView**: file dùng `import anthonydang/smc_core/1 as smc` (đổi từ `mrdungx2603/smc_core/1` ở bản v1.2 trở về trước — theo yêu cầu người dùng). Task 6 đã xác nhận qua `mcp-tv-validate-pine-script` với import cũ (`mrdungx2603`) lỗi dạng `"The user '<tên tài khoản>' does not have a published library titled 'smc_core'"` tại chính dòng `import` khi library chưa publish — cùng loại lỗi này sẽ xảy ra với `anthonydang` nếu `libraries/smc_core.pine` cũng chưa được publish dưới tài khoản đó. **Người dùng cần tự publish `libraries/smc_core.pine` qua Pine Editor → Publish Library (tối thiểu mức Invite-only/Private) dưới tài khoản `anthonydang`** trước khi mode "Last HL" chạy được thật trên TradingView. Mode "Visible Chart" và "Session" không phụ thuộc `smc_core`, không bị ảnh hưởng bởi blocker này.
 - **Giới hạn 500 box/500 label** (cấu hình `max_boxes_count`/`max_labels_count` trong `indicator()`): mỗi hàng giá trong `active_profile` dùng **2 box** (buyer + seller). Nếu số hàng trong phạm vi tính vượt quá **250 hàng** (ví dụ `price_step` quá nhỏ so với range giá của phạm vi đang tính), tổng số box sẽ vượt `max_boxes_count=500` — TradingView tự xoá box cũ nhất để giữ dưới giới hạn, có thể làm **mất ngẫu nhiên 1 vài hàng (kể cả hàng POC)** mà không báo lỗi. Nên chọn `price_step` sao cho `(range giá của phạm vi tính) / price_step < 250`.
 - Chỉ so sánh pivot/leg SMC gần nhất; không hiển thị lịch sử nhiều leg.
 
 ## Changelog
 
+- **v1.3 (2026-11-22)**: Theo yêu cầu người dùng sau khi xem lại v1.2.
+  - Đổi `import mrdungx2603/smc_core/1` → `import anthonydang/smc_core/1` — library `smc_core` publish dưới tài khoản `anthonydang` (khác tài khoản dùng khi phát hiện blocker ở Task 6).
+  - Đổi cột giá tham khảo từ nhãn trong suốt (`label.style_none`, khó nhìn trên nền box màu) sang nhãn nền đặc (`label.style_label_center` + input `price_column_color` mới) — tạo thành 1 "cột" rõ ràng, dễ đọc ở giữa thanh.
+  - Thêm nhãn riêng ghi **giá khớp hiện tại** (`close`, input `show_current_price_label`/`current_price_color` mới, mặc định màu vàng nổi bật) — trả lời trực tiếp câu hỏi "giá khớp đang là bao nhiêu", độc lập với cột giá tham khảo (giá trị liên tục, không bó theo lưới `price_step`).
+  - Backup v1.2 tại `indicators/hist/order_flow_bar_v1.2.pine`.
 - **v1.2 (2026-11-22)**: Theo yêu cầu người dùng sau khi xem lại — 2 cải tiến hiển thị.
   - Thêm input `wing_border_color` (mặc định xám 50% trong suốt) — mọi hàng buyer/seller giờ có viền rõ ràng để phân biệt ranh giới giữa các hàng (trước đó viền `na`/vô hình với hàng không highlight).
   - Thêm "cột giá" tham khảo: input `price_ruler_step_rows` (mặc định 5) — vẽ nhãn giá trơn cách đều mỗi N hàng (tính theo giá trị `row_id` thật, không theo thứ tự mảng) tại vị trí neo thanh, giúp đọc giá nhanh không cần nhìn sang trục giá gốc của chart.
