@@ -9,6 +9,9 @@
 //   - Session: cộng dồn từ đầu phiên hiện tại, reset mỗi ngày mới.
 //   - Last HL: leg Higher Low→Higher High (hoặc Lower High→Lower Low) gần nhất ĐÃ XÁC NHẬN,
 //     dùng state machine SMC của library smc_core, reseed lại mỗi phiên.
+//   - Last HL (Đến Hiện Tại): giống Last HL nhưng biên phải kéo dài đến bar hiện tại (gộp luôn
+//     phần swing đang hình thành, chưa xác nhận thành HH/LL mới) — phản ánh "last swing" sát
+//     giá hiện tại hơn, thay vì chỉ leg đã xác nhận xong.
 // Trên profile active, highlight 3 mức chỉ qua màu viền/nền box (không nhãn text riêng): POC
 // (buy+sell lớn nhất), Peak Buy (buy lớn nhất), Peak Sell (sell lớn nhất). Giữa 2 cánh có 1
 // box delta (buy - sell) mỗi hàng, nền gradient theo độ lớn delta.
@@ -16,7 +19,7 @@
 // Chỉ dùng footprint Tầng 1 — symbol/tài khoản không hỗ trợ tick data sẽ KHÔNG vẽ gì.
 //
 // Ngày tạo: 2026-11-21
-// Phiên bản: 1.16
+// Phiên bản: 1.17
 
 // Cần library smc_core đã Publish thật trên TradingView, nếu không script lỗi compile ở import.
 import anthonydang/smc_core/2 as smc
@@ -34,9 +37,13 @@ indicator(
 mode_calc = input.string(
     defval="Session",
     title="Chế độ Phạm Vi",
-    options=["Session", "Last HL"],
+    options=["Session", "Last HL", "Last HL (Đến Hiện Tại)"],
     group="Phạm Vi Tính"
 )
+
+// "Last HL" và "Last HL (Đến Hiện Tại)" dùng chung state machine SMC — chỉ khác biên phải của
+// profile (xem lasthl_right_bar bên dưới). Gom thành 1 cờ để tránh lặp so sánh string.
+bool is_lasthl_mode = mode_calc == "Last HL" or mode_calc == "Last HL (Đến Hiện Tại)"
 
 price_step = input.float(
     defval=1.0,
@@ -306,8 +313,8 @@ if barstate.isconfirmed
     f_merge_into_profile(sess_profile, bar_row_ids, bar_buys, bar_sells)
 
     // Reset state machine mỗi phiên mới, rồi RETRY seed mỗi bar (field seeded) cho tới khi
-    // thành công — không phải seed-1-lần-rồi-bỏ. Chỉ chạy cho mode Last HL (nhẹ gánh tính toán).
-    if mode_calc == "Last HL"
+    // thành công — không phải seed-1-lần-rồi-bỏ. Chỉ chạy cho các mode Last HL (nhẹ gánh tính toán).
+    if is_lasthl_mode
         if is_new_session
             of_smc_state := smc.f_init_state()
 
@@ -319,14 +326,20 @@ if barstate.isconfirmed
         else
             of_smc_state := smc.f_process_bar(of_smc_state)
 
-// Biên "Last HL" = leg đã HOÀN THÀNH, kết thúc tại hh_bar (uptrend)/ll_bar (downtrend) — KHÔNG
-// dùng bar_index, vì phần sau hh_bar/ll_bar là candidate đang dò pivot mới, chưa xác nhận.
-int lasthl_left_bar  = of_smc_state.trend == 1 ? of_smc_state.hl_bar : of_smc_state.trend == -1 ? of_smc_state.lh_bar : na
-int lasthl_right_bar = of_smc_state.trend == 1 ? of_smc_state.hh_bar : of_smc_state.trend == -1 ? of_smc_state.ll_bar : na
+// Biên trái luôn là điểm swing gốc (HL/LH) — giống nhau cho cả 2 mode Last HL.
+int lasthl_left_bar = of_smc_state.trend == 1 ? of_smc_state.hl_bar : of_smc_state.trend == -1 ? of_smc_state.lh_bar : na
+
+// Biên phải khác nhau theo mode:
+//   - "Last HL": leg đã HOÀN THÀNH, kết thúc tại hh_bar (uptrend)/ll_bar (downtrend) — KHÔNG dùng
+//     bar_index, vì phần sau hh_bar/ll_bar là candidate đang dò pivot mới, chưa xác nhận.
+//   - "Last HL (Đến Hiện Tại)": kéo dài đến bar_index hiện tại — gộp luôn phần candidate đang
+//     dò (chưa xác nhận thành HH/LL mới), phản ánh swing đang hình thành.
+int lasthl_right_bar = mode_calc == "Last HL (Đến Hiện Tại)" ? bar_index
+     : of_smc_state.trend == 1 ? of_smc_state.hh_bar : of_smc_state.trend == -1 ? of_smc_state.ll_bar : na
 
 // Chỉ rebuild ở bar cuối (f_draw_wings xoá-vẽ-lại toàn bộ mỗi lần, chạy mọi bar lịch sử chỉ lãng phí).
 RowProfile last_hl_profile = RowProfile.new(array.new<int>(), array.new<float>(), array.new<float>())
-if mode_calc == "Last HL" and barstate.islast
+if is_lasthl_mode and barstate.islast
     last_hl_profile := f_build_profile_from_buffer(of_buffer, lasthl_left_bar, lasthl_right_bar)
 
 // ===== CHỌN ACTIVE PROFILE THEO MODE + TÍNH POC/PEAK BUY/PEAK SELL =====

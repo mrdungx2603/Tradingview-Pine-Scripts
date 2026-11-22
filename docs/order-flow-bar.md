@@ -12,8 +12,10 @@ Mỗi hàng giá (cao `price_step`) có 1 box buyer kéo sang phải (volume mua
 sang trái (volume bán), độ dài box tỷ lệ với volume của hàng đó so với hàng lớn nhất trong
 phạm vi tính hiện tại. Dữ liệu buy/sell volume theo hàng giá lấy từ `request.footprint()`
 **Tầng 1** (footprint mặc định của Pine, không dùng lower-timeframe hay ước lượng OHLCV),
-bucket lại theo `price_step`, rồi gộp theo 1 trong 2 phạm vi tính (`mode_calc`): Session,
-hoặc Last HL (leg Higher Low/Lower High gần nhất theo cấu trúc SMC). Trên profile đang
+bucket lại theo `price_step`, rồi gộp theo 1 trong 3 phạm vi tính (`mode_calc`): Session,
+Last HL (leg Higher Low/Lower High gần nhất ĐÃ XÁC NHẬN theo cấu trúc SMC), hoặc Last HL
+(Đến Hiện Tại) (giống Last HL nhưng kéo dài biên phải đến bar hiện tại, gộp luôn phần swing
+đang hình thành). Trên profile đang
 active, indicator highlight riêng màu 3 mức (chỉ qua box, không nhãn text): POC, Peak Buy,
 Peak Sell. Giữa 2 cánh buyer/seller có 1 "cột giữa" hiện delta (buy - sell) tại mỗi hàng,
 nền dạng gradient theo độ lớn delta, màu chữ tách riêng khỏi màu nền để luôn đọc được.
@@ -27,7 +29,7 @@ tính được chọn.
 
 | Nhóm | Tham số | Mặc định | Ý nghĩa |
 |---|---|---|---|
-| Phạm Vi Tính | Chế độ Phạm Vi (`mode_calc`) | Session | Phạm vi gộp dữ liệu: Session / Last HL (bỏ "Visible Chart" từ v1.8 theo yêu cầu người dùng) |
+| Phạm Vi Tính | Chế độ Phạm Vi (`mode_calc`) | Session | Phạm vi gộp dữ liệu: Session / Last HL / Last HL (Đến Hiện Tại) (bỏ "Visible Chart" từ v1.8 theo yêu cầu người dùng) |
 | Phạm Vi Tính | Bước Giá (`price_step`) | 1.0 | Độ cao mỗi hàng giá khi bucket volume. Cần giữ cố định xuyên suốt (xem Giới Hạn) |
 | Phạm Vi Tính | Max Lookback Bars (`max_lookback_bars`) | 500 | Số bar tối đa lưu trong buffer nội bộ; Last HL chỉ dựng lại được trong giới hạn này (Session không dùng buffer) |
 | SMC (Last HL) | Pivot Length (`pivot_length`) | 10 | Số nến trái/phải để xác nhận pivot high/low (dùng cho Pivot Seed) |
@@ -54,10 +56,11 @@ tính được chọn.
 - **Footprint Tầng 1**: gọi `request.footprint(ticks_per_row=1, va_percent=70, imbalance_percent=300)` đúng 1 lần (giới hạn Pine), không expose tham số ra input. Cờ `has_footprint_data` phát hiện tài khoản/sàn không có dữ liệu tick (`fp`/`fp.rows()` na), nhưng cờ dùng để **gate vẽ** là `has_fp_ever` (sticky — bật `true` 1 lần khi từng có footprint và giữ nguyên), để tránh thanh nhấp nháy/biến mất ở các bar không có giao dịch khớp dù dữ liệu tích lũy vẫn còn. Không raise lỗi khi không có dữ liệu.
 - **Bucket theo hàng giá**: mỗi `volume_row` của footprint (1 tick/row) được gộp vào `row_id = floor(giá / price_step)` (số nguyên tuyệt đối) — hàng `row_id` bao đúng khoảng giá `[row_id * price_step, (row_id + 1) * price_step)`, cộng dồn `buy_volume()`/`sell_volume()` theo hàng.
 - **Buffer theo bar**: kết quả bucket của mỗi bar đã đóng (`barstate.isconfirmed`) được đẩy vào circular buffer `of_buffer`, giữ tối đa `max_lookback_bars` phần tử gần nhất (phần tử cũ nhất bị shift ra khi vượt cap).
-- **2 phạm vi tính (`mode_calc`)** (bỏ "Visible Chart" từ v1.8), mỗi phạm vi dựng lại 1 `RowProfile`:
+- **3 phạm vi tính (`mode_calc`)** (bỏ "Visible Chart" từ v1.8), mỗi phạm vi dựng lại 1 `RowProfile`:
   - **Session**: cộng dồn 1 chiều từ đầu phiên hiện tại, reset về rỗng mỗi khi sang ngày mới (`timeframe.change("D")`) — không dùng buffer, tính độc lập.
   - **Last HL**: dùng state machine SMC (library `smc_core`) để xác định leg Higher Low (uptrend) hoặc Lower High (downtrend) gần nhất **đã hoàn thành**; biên trái/phải lấy từ `hl_bar`→`hh_bar` (uptrend) hoặc `lh_bar`→`ll_bar` (downtrend) — dựng lại bằng cách duyệt `of_buffer`. State machine được reset và seed lại (`seed_mode`) mỗi khi sang phiên mới, retry seed mỗi bar cho tới khi thành công.
-- **Chọn active profile**: theo `mode_calc`, chọn 1 trong 2 `RowProfile` trên làm `active_profile`.
+  - **Last HL (Đến Hiện Tại)**: dùng CHUNG state machine SMC và biên trái (`hl_bar`/`lh_bar`) với "Last HL", nhưng biên phải đổi thành `bar_index` hiện tại (không dừng ở `hh_bar`/`ll_bar`) — gộp luôn phần swing đang hình thành (candidate chưa xác nhận thành HH/LL mới), phản ánh "last swing" sát giá hiện tại hơn.
+- **Chọn active profile**: theo `mode_calc`, chọn 1 trong 3 `RowProfile` trên làm `active_profile` (2 mode Last HL dùng chung biến `last_hl_profile`, chỉ khác biên phải khi dựng).
 - **POC / Peak Buy / Peak Sell**: trên `active_profile`, tính `row_id` ứng với `argmax(buy+sell)` (POC), `argmax(buy)` (Peak Buy), `argmax(sell)` (Peak Sell). Trả `na` nếu profile rỗng.
 - **Vẽ thanh — 3 thành phần mỗi hàng (box seller | box delta | box buyer)**: với mỗi hàng trong `active_profile`, vẽ 1 box buyer (kéo phải, bắt đầu từ `anchor_bar + delta_col_width`, cao đúng `[row_id * price_step, (row_id + 1) * price_step)`), 1 box seller (kéo trái, kết thúc tại `anchor_bar - delta_col_width`) — độ rộng tỷ lệ volume hàng đó / volume hàng lớn nhất, tối đa `wing_max_bars` — và 1 **box delta** ở giữa (`anchor_bar - delta_col_width` đến `anchor_bar + delta_col_width`, CÙNG `top`/`bottom` với 2 box kia): nền/viền dùng `delta_bg_color` — nếu `delta_bg_gradient = true` (mặc định), màu được tính qua `color.from_gradient(delta, 0|-max_abs_delta, max_abs_delta|0, delta_neutral_color, delta_pos_color|delta_neg_color)` (2 nhánh dương/âm riêng vì `color.from_gradient` chỉ nội suy tuyến tính giữa đúng 2 màu) — `max_abs_delta` là trị tuyệt đối delta lớn nhất trong `active_profile`, nên hàng có delta càng lớn thì nền càng đậm về phía màu dương/âm tương ứng; nếu `delta_bg_gradient = false`, giữ nền gần-trong-suốt cố định (`color.new(color.gray, 95)`, như bản v1.13). Box delta dùng tham số `text=` của `box.new` để hiện `delta = buy - sell` tại đúng hàng đó (`format.volume`, có dấu `+`/`-`), cỡ chữ `delta_text_size`, màu chữ LUÔN lấy từ input `delta_text_color` (tách riêng khỏi màu nền gradient, từ v1.15 — không còn đổi theo dấu delta, vì dấu `+`/`-` trong text đã đủ thể hiện chiều). Dùng `box.new` (không phải `label.new`) cho phần delta để đảm bảo dóng hàng tuyệt đối với 2 box buyer/seller cùng hàng — Pine tự canh giữa `text` trong đúng phạm vi `top`/`bottom` của box, khác `label.new` (dùng ở bản v1.9-v1.11) tự canh giữa text theo cách riêng không đảm bảo khớp `row_top`/`row_bot` thật. Hàng POC được tô CẢ viền + nền bằng `poc_color`. Hàng Peak Buy/Peak Sell CHỈ đổi viền (`peak_buy_color`/`peak_sell_color`, mặc định vàng) — nền giữ tông `buyer_color`/`seller_color` gốc nhưng giảm trong suốt (`peak_fill_transparency`) để "đậm" hơn. Ưu tiên khi 1 hàng trùng nhiều mức: POC > Peak Buy > Peak Sell. Box delta LUÔN vẽ (từ v1.15, bỏ toggle `show_value_labels` — delta là thông tin cốt lõi, không còn coi là nhãn phụ có thể tắt). Chỉ rebuild profile/POC/vẽ lại ở bar cuối cùng (`barstate.islast`, mỗi tick của bar đó) — các bar lịch sử không cần vẽ vì box/label luôn bị xoá-vẽ-lại toàn bộ, chỉ trạng thái cuối cùng có ý nghĩa.
 - **Không có nhãn text riêng cho POC/Peak Buy/Peak Sell** (theo yêu cầu người dùng, bỏ ở v1.7) — 3 mức này CHỈ thể hiện qua màu viền/nền của box (xem mục "Vẽ thanh" phía trên), không vẽ `label.new` kèm giá/volume.
@@ -82,6 +85,10 @@ tính được chọn.
 
 ## Changelog
 
+- **v1.17 (2026-11-22)**: Theo yêu cầu người dùng — thêm mode phạm vi tính thứ 3.
+  - Thêm option `"Last HL (Đến Hiện Tại)"` vào `mode_calc` (bên cạnh "Session"/"Last HL") — dùng chung state machine SMC + biên trái (`hl_bar`/`lh_bar`) với "Last HL", nhưng biên phải đổi thành `bar_index` hiện tại thay vì `hh_bar`/`ll_bar` đã xác nhận — phản ánh swing đang hình thành (chưa chốt thành HH/LL mới), sát giá hiện tại hơn.
+  - Thêm cờ `is_lasthl_mode` (gộp `mode_calc == "Last HL" or mode_calc == "Last HL (Đến Hiện Tại)"`) để chạy chung state machine + rebuild `last_hl_profile` cho cả 2 mode — chỉ biến `lasthl_right_bar` khác nhau theo mode.
+  - Backup v1.16 tại `indicators/hist/order_flow_bar_v1.16.pine`.
 - **v1.16 (2026-11-22)**: Theo yêu cầu người dùng — gộp account import, lean code.
   - Đổi `import anthonydang/smc_core/1` → `anthonydang/smc_core/2` (library `smc_core` publish lại thành version 2, title `smc_core` — xem [docs/smc-core.md](smc-core.md#changelog)).
   - Lean toàn bộ comment trong code: bỏ comment thuật lại lịch sử/quyết định (tham chiếu "Task N", "theo yêu cầu người dùng", "FIX review cuối", số version cũ...) — các thông tin này đã có trong Changelog ở đây. Chỉ giữ comment giải thích WHY không hiển nhiên (gotcha Pine, invariant, trade-off thật). Giảm từ 634 → 466 dòng, KHÔNG đổi logic/hành vi (chỉ đổi comment + số version import).
