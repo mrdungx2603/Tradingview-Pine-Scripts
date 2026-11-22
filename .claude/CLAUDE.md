@@ -15,6 +15,12 @@ Dự án này dùng để phát triển các script Pine Script chạy trên Tra
 - **Pine Script v5** (`//@version=5`) — chỉ dùng khi cần tương thích với code cũ hoặc người dùng yêu cầu cụ thể.
 - Script chạy trên **TradingView Pine Editor**, không có môi trường build local.
 
+## Tài Khoản TradingView (Import Library)
+
+- **Account TradingView duy nhất dùng cho mọi `import username/library/version`: `anthonydang`.**
+- Không dùng `mrdungx2603` (tài khoản cũ) cho import mới — nếu thấy `mrdungx2603` trong 1 dòng `import` ở code đang sửa/review, phải đổi sang `anthonydang` trong cùng lần làm việc đó.
+- Library `smc_core` hiện publish dưới `anthonydang`, title publish là **`smc_core`** (không phải "SMC Core Library") — version hiện tại trên TradingView: **2** (`anthonydang/smc_core/2`). Khi publish lại (ví dụ sau khi sửa bug trong `libraries/smc_core.pine`), version TradingView sẽ tăng lên — phải cập nhật số version này trong dòng `import` ở **mọi** file đang dùng, VÀ cập nhật lại 2 giá trị (title/version) ghi ở mục này.
+
 ## Cấu Trúc Thư Mục
 
 ```

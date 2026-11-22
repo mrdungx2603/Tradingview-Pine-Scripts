@@ -2,11 +2,13 @@
 // ─── SMC Core Library — UDT + State Machine cho SMC Market Structure ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-07-10
-// Phiên bản: 1.1
+// Phiên bản: 1.2
 // Mô tả: Library chứa UDT SwingState và các pure function cho state machine SMC.
 //        Dùng chung cho indicator, strategy và MTF indicator.
 //        Tất cả hàm đều pure — không var, không request.*, không plot/line/box/label.
-library(title="SMC Core Library", overlay=false)
+// Title publish trên TradingView: "smc_core" (đổi từ "SMC Core Library" ở v1.1 — khớp đúng tên
+// dùng trong mọi dòng import, account anthonydang).
+library(title="smc_core", overlay=false)
 
 // ╔══════════════════════════════════════════╗
 // ║        UDT — SWING STATE                ║

@@ -2,11 +2,10 @@
 
 ## Tổng Quan
 
-> ⚠️ **Yêu cầu hạ tầng bắt buộc**: indicator này `import anthonydang/smc_core/1 as smc`. Nếu
-> library `smc_core` chưa được **Publish thật** (Publish Library, không chỉ lưu "My Scripts")
-> trên TradingView dưới tài khoản `anthonydang`, **TOÀN BỘ script sẽ không compile được**
-> (lỗi ngay tại dòng `import`) — không chỉ riêng mode "Last HL". Xem chi tiết ở mục Giới Hạn
-> & Lưu Ý bên dưới.
+> **Yêu cầu hạ tầng**: indicator này `import anthonydang/smc_core/2 as smc` — library `smc_core`
+> đã publish dưới account `anthonydang`, title `smc_core`, version 2 (xem `.claude/CLAUDE.md`
+> mục "Tài Khoản TradingView"). Nếu version publish trên TradingView thay đổi, cần sửa lại số
+> version trong dòng `import` này.
 
 Indicator overlay vẽ **1 thanh order flow** dạng cánh (wing) neo tại 1 bar mốc trên chart.
 Mỗi hàng giá (cao `price_step`) có 1 box buyer kéo sang phải (volume mua) và 1 box seller kéo
@@ -77,12 +76,16 @@ tính được chọn.
 - **`price_step` phải cố định xuyên suốt**: `row_id` được tính trực tiếp từ `price_step` hiện tại và lưu nguyên vào buffer; đổi `price_step` giữa chừng sẽ làm các bucket cũ trong buffer (tính theo step cũ) không còn tương thích với bucket mới, gây lệch khi dựng lại profile. Đổi `price_step` nên đi kèm xoá/làm mới chart (hoặc chờ buffer tự xoay hết dữ liệu cũ).
 - **Buffer giới hạn `max_lookback_bars`**: `of_buffer` chỉ giữ tối đa `max_lookback_bars` bar gần nhất; nếu leg Last HL dài vượt quá số bar còn lưu trong buffer, phần dữ liệu cũ hơn bị **clip tự nhiên** (không còn trong buffer, không raise lỗi) — profile dựng được sẽ thiếu phần đó. Session không dùng buffer này (tính độc lập, không bị clip).
 - **Pivot Seed (Last HL) có thể không seed được**: `seed_mode = "Pivot Seed"` cần `ta.pivothigh`/`ta.pivotlow` cùng xác nhận đúng lúc trong vài bar đầu phiên; nếu không rơi đúng lúc, trạng thái SMC có thể không seed xong trong suốt phiên đó → `last_hl_profile` rỗng (không vẽ) cho tới phiên sau. `seed_mode = "Session Seed"` không gặp giới hạn này.
-- **Blocker hạ tầng — library `smc_core` cần publish thật trên TradingView**: file dùng `import anthonydang/smc_core/1 as smc` (đổi từ `mrdungx2603/smc_core/1` ở bản v1.2 trở về trước — theo yêu cầu người dùng). Task 6 đã xác nhận qua `mcp-tv-validate-pine-script` với import cũ (`mrdungx2603`) lỗi dạng `"The user '<tên tài khoản>' does not have a published library titled 'smc_core'"` tại chính dòng `import` khi library chưa publish — cùng loại lỗi này sẽ xảy ra với `anthonydang` nếu `libraries/smc_core.pine` cũng chưa được publish dưới tài khoản đó. **Người dùng cần tự publish `libraries/smc_core.pine` qua Pine Editor → Publish Library (tối thiểu mức Invite-only/Private) dưới tài khoản `anthonydang`** trước khi mode "Last HL" chạy được thật trên TradingView. Mode "Session" không phụ thuộc `smc_core`, không bị ảnh hưởng bởi blocker này.
+- **Phụ thuộc library `smc_core`**: file dùng `import anthonydang/smc_core/2 as smc` — library đã publish thật dưới account `anthonydang`, title `smc_core`, version 2. Nếu `smc_core` được publish lại (version tăng lên), cần sửa số version trong dòng `import` này. Mode "Session" không phụ thuộc `smc_core`, không bị ảnh hưởng.
 - **Giới hạn 500 box/500 label** (cấu hình `max_boxes_count`/`max_labels_count` trong `indicator()`): mỗi hàng giá trong `active_profile` dùng **2 box** (buyer + seller). Nếu số hàng trong phạm vi tính vượt quá **250 hàng** (ví dụ `price_step` quá nhỏ so với range giá của phạm vi đang tính), tổng số box sẽ vượt `max_boxes_count=500` — TradingView tự xoá box cũ nhất để giữ dưới giới hạn, có thể làm **mất ngẫu nhiên 1 vài hàng (kể cả hàng POC)** mà không báo lỗi. Nên chọn `price_step` sao cho `(range giá của phạm vi tính) / price_step < 250`.
 - Chỉ so sánh pivot/leg SMC gần nhất; không hiển thị lịch sử nhiều leg.
 
 ## Changelog
 
+- **v1.16 (2026-11-22)**: Theo yêu cầu người dùng — gộp account import, lean code.
+  - Đổi `import anthonydang/smc_core/1` → `anthonydang/smc_core/2` (library `smc_core` publish lại thành version 2, title `smc_core` — xem [docs/smc-core.md](smc-core.md#changelog)).
+  - Lean toàn bộ comment trong code: bỏ comment thuật lại lịch sử/quyết định (tham chiếu "Task N", "theo yêu cầu người dùng", "FIX review cuối", số version cũ...) — các thông tin này đã có trong Changelog ở đây. Chỉ giữ comment giải thích WHY không hiển nhiên (gotcha Pine, invariant, trade-off thật). Giảm từ 634 → 466 dòng, KHÔNG đổi logic/hành vi (chỉ đổi comment + số version import).
+  - Backup v1.15 tại `indicators/hist/order_flow_bar_v1.15.pine`.
 - **v1.15 (2026-11-22)**: Theo yêu cầu người dùng — rà soát và bỏ tính năng không còn dùng, thêm chỉnh màu chữ delta độc lập với nền gradient.
   - **Giữ nguyên `max_lookback_bars`** (đã kiểm tra: vẫn đang được dùng trực tiếp làm cap cho circular buffer `of_buffer` qua `f_push_bar_buffer(..., max_lookback_bars)` — buffer này là nguồn dữ liệu duy nhất để dựng lại profile cho mode "Last HL", không phải code chết).
   - Bỏ hẳn input `show_value_labels` — box delta ở giữa mỗi hàng giờ LUÔN vẽ (không còn toggle ẩn/hiện riêng), vì đây là thông tin cốt lõi của indicator, không còn coi là "nhãn phụ" có thể tắt.

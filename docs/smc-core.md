@@ -1,10 +1,11 @@
 # SMC Core Library — Tài Liệu
 
-> **Script**: [libraries/smc_core.pine](../libraries/smc_core.pine) (v1.1)
+> **Script**: [libraries/smc_core.pine](../libraries/smc_core.pine) (v1.2)
 > **Loại**: Library (`library(overlay=false)`)
 > **Pine Script**: v6
 > **Ngày tạo**: 2026-07-10 / **Cập nhật**: 2026-11-22
-> **Dùng trong**: [strategies/smc_strategy.pine](../strategies/smc_strategy.pine) và [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) (`import mrdungx2603/smc_core/1 as smc`), [indicators/order_flow_bar.pine](../indicators/order_flow_bar.pine) (`import anthonydang/smc_core/1 as smc`).
+> **Publish trên TradingView**: account `anthonydang`, title `smc_core`, version hiện tại **2** — mọi `import` trong dự án đều dùng `anthonydang/smc_core/2 as smc` (xem `.claude/CLAUDE.md` mục "Tài Khoản TradingView").
+> **Dùng trong**: [strategies/smc_strategy.pine](../strategies/smc_strategy.pine), [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine), [indicators/order_flow_bar.pine](../indicators/order_flow_bar.pine).
 > ⚠️ **`indicators/smc_market_structure.pine` KHÔNG import library này** — tự có bản state machine viết tay riêng (bản gốc/tham chiếu, xem mục Changelog v1.1 bên dưới), không bị ảnh hưởng bởi thay đổi trong file này.
 
 ## Tổng Quan
@@ -63,6 +64,11 @@ Máy trạng thái 3 nhánh theo `trend`:
 
 ## Changelog
 
+- **v1.2** (2026-11-22): Theo yêu cầu người dùng — gộp về 1 account TradingView duy nhất, đồng bộ version thật đã publish.
+  - Đổi `library(title="SMC Core Library", ...)` → `library(title="smc_core", ...)` — khớp đúng title thật đã publish trên TradingView.
+  - Cập nhật `import` ở `strategies/smc_strategy.pine` và `indicators/smc_market_structure_mtf.pine` từ `mrdungx2603/smc_core/1` → `anthonydang/smc_core/2` (gộp về cùng account với `order_flow_bar.pine`); `order_flow_bar.pine` cũng cập nhật version từ `/1` → `/2`.
+  - Thêm mục "Tài Khoản TradingView" vào `.claude/CLAUDE.md` để không tái phạm việc dùng lẫn 2 account.
+  - Backup v1.1 tại `libraries/hist/smc_core_v1.1.pine`.
 - **v1.1** (2026-11-22): Fix lệch kết quả so với bản gốc `smc_market_structure.pine` — phát hiện khi người dùng báo "Last HL" của `order_flow_bar.pine` không khớp cấu trúc HH/HL của `smc_market_structure.pine` dù cùng để `Seed Mode = Session Seed`.
   - **Nguyên nhân**: trong `f_process_bar()`, nhánh `trend == 0` (ngay sau khi Session Seed, chưa rõ trend, chờ breakout) gán `s.trigger_bar := bar_index` (bar breakout hiện tại) — SAI so với bản gốc `smc_market_structure.pine` (dòng `trigger_bar := hl_bar`/`lh_bar`, tức bar đầu phiên lúc seed). 2 nhánh `trend == 1`/`trend == -1` khác trong cùng hàm đã đúng (gán `trigger_bar := s.hh_bar`/`s.hl_bar` tương ứng) — chỉ riêng nhánh `trend == 0` bị lệch khi refactor thành thư viện ở v1.0.
   - **Hệ quả của bug**: `trigger_bar` là biên trái của phạm vi quét tìm "New HL"/"New LH" (qua `f_find_extreme`) khi HH/LL kế tiếp được xác nhận. Dùng `bar_index` (hẹp hơn, bắt đầu từ đúng bar breakout) thay vì `hl_bar`/`lh_bar` (rộng hơn, từ đầu phiên) có thể bỏ sót 1 đáy/đỉnh thấp/cao hơn thật nằm giữa đầu phiên và bar breakout — ra kết quả HL/LH sai (lệch so với bản gốc).
