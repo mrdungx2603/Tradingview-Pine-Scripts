@@ -15,18 +15,20 @@
 // viền+nền sang poc_color), Peak Buy (hàng có buy volume lớn nhất — chỉ đổi viền, nền đậm
 // hơn), Peak Sell (hàng có sell volume lớn nhất — tương tự Peak Buy). Mọi hàng đều có viền
 // riêng (wing_border_color) để phân biệt ranh giới giữa các hàng. Giữa 2 cánh buyer/seller có
-// 1 khoảng trống (delta_col_width bar) dành cho "cột giữa": mỗi hàng có dữ liệu hiện 1 nhãn
-// giá + delta (buy - sell tại hàng đó, màu theo dấu), và 1 nhãn nổi bật riêng ghi giá khớp
-// HIỆN TẠI, nối bằng 1 đường kẻ ngang (nét đứt) tới đúng nến hiện tại (cùng y=close) để xác
-// nhận bằng mắt nhãn đó đang đúng độ cao thật so với nến, không cần nhìn sang trục giá gốc
-// của chart.
+// 1 khoảng trống (delta_col_width bar) dành cho "box delta": mỗi hàng có dữ liệu có 1 box
+// trong suốt (không viền/không nền, chỉ chứa text) hiện delta (buy - sell tại hàng đó, màu
+// theo dấu) — dùng box.new (không phải label.new) với ĐÚNG row_top/row_bot của chính hàng đó
+// để đảm bảo dóng hàng tuyệt đối với 2 cánh buyer/seller cùng hàng. Ngoài ra có 1 nhãn nổi
+// bật riêng ghi giá khớp HIỆN TẠI, nối bằng 1 đường kẻ ngang (nét đứt) tới đúng nến hiện tại
+// (cùng y=close) để xác nhận bằng mắt nhãn đó đang đúng độ cao thật so với nến, không cần
+// nhìn sang trục giá gốc của chart.
 // Lưu ý quan trọng: chỉ dùng dữ liệu footprint Tầng 1 (request.footprint() mặc định của Pine,
 // KHÔNG dùng request.security_lower_tf hay ước lượng OHLCV) — symbol/tài khoản không có
 // Premium hoặc sàn không hỗ trợ dữ liệu tick sẽ không có footprint, khi đó toàn bộ thanh order
 // flow (box + nhãn) sẽ KHÔNG được vẽ (ẩn hoàn toàn, không ước lượng thay thế).
 //
 // Ngày tạo: 2026-11-21
-// Phiên bản: 1.11
+// Phiên bản: 1.12
 
 // ⚠️ Cần library này đã được Publish (không chỉ lưu "My Scripts") trên TradingView, nếu không
 // toàn bộ script sẽ lỗi compile ở dòng import này.
@@ -502,10 +504,12 @@ f_clear_boxes(array<box> boxes) =>
 // hàng row_id bao đúng khoảng [row_id * price_step, (row_id + 1) * price_step) — box vẽ
 // bottom = row_id * price_step, top = (row_id + 1) * price_step (FIX review cuối: bản cũ
 // top = row_id * price_step, bottom = (row_id - 1) * price_step bị lệch xuống 1 hàng so với
-// row_id thực tính ở Task 3). f_draw_level_labels (Task 10, bên dưới) dùng trung điểm hàng
-// (row_id + 0.5) * price_step làm giá trị giá hiển thị, nhất quán với khoảng box ở đây.
+// row_id thực tính ở Task 3).
 // Highlight hàng POC/Peak Buy/Peak Sell (TASK 10): xem khối is_poc/is_peak_buy/is_peak_sell
-// trong vòng `for` bên dưới — đổi border_color/bgcolor riêng cho box tương ứng.
+// trong vòng `for` bên dưới — đổi border_color/bgcolor riêng cho box tương ứng. Box delta ở
+// giữa (xem cuối vòng for) dùng CHUNG row_top/row_bot với buy_box/sell_box nên luôn dóng
+// đúng hàng — theo phản hồi người dùng, thay cho bản dùng label.new (Task 10 cũ) không đảm
+// bảo khớp chính xác row_top/row_bot thật.
 f_draw_wings(RowProfile profile, int anchor_bar, int max_wing_bars, color buy_color, color sell_color) =>
     f_clear_boxes(of_boxes)
     int n_rows = array.size(profile.row_ids)
@@ -521,6 +525,16 @@ f_draw_wings(RowProfile profile, int anchor_bar, int max_wing_bars, color buy_co
         // Tính 1 lần trước vòng for vì buy_color/sell_color không đổi theo từng hàng.
         color buy_bg_peak  = color.rgb(color.r(buy_color), color.g(buy_color), color.b(buy_color), peak_fill_transparency)
         color sell_bg_peak = color.rgb(color.r(sell_color), color.g(sell_color), color.b(sell_color), peak_fill_transparency)
+        // Map input string -> size.* cho text trong box delta (xem khối box delta bên dưới) —
+        // tính 1 lần trước vòng for vì delta_text_size không đổi theo từng hàng. Cùng convention
+        // dùng trong indicators/smc_market_structure.pine (không khai báo kiểu rõ ràng để Pine
+        // tự suy luận đúng kiểu "size" riêng, tránh ép kiểu string sai).
+        delta_label_size = switch delta_text_size
+            "Tiny"   => size.tiny
+            "Small"  => size.small
+            "Normal" => size.normal
+            "Large"  => size.large
+            => size.normal
         for i = 0 to n_rows - 1
             int   row_id       = array.get(profile.row_ids, i)
             float row_bot      = row_id * price_step
@@ -531,6 +545,12 @@ f_draw_wings(RowProfile profile, int anchor_bar, int max_wing_bars, color buy_co
             float sell_ratio   = max_total > 0 ? sell_v / max_total : 0.0
             int   buy_bars     = int(math.round(buy_ratio * max_wing_bars))
             int   sell_bars    = int(math.round(sell_ratio * max_wing_bars))
+            // Delta của hàng này — khai báo ở ĐẦU scope `for` (đúng QUY TẮC SCOPE CLAUDE.md,
+            // không khai báo biến mới trong `if` lồng trong `for`), dùng cho box delta bên
+            // dưới (if show_value_labels chỉ gọi box.new/array.push, không khai báo gì thêm).
+            float  delta_v          = buy_v - sell_v
+            color  delta_text_color = delta_v > 0 ? delta_pos_color : delta_v < 0 ? delta_neg_color : color.gray
+            string delta_sign_str   = delta_v > 0 ? "+" : ""
             // TASK 10: highlight hàng POC/Peak Buy/Peak Sell. Ưu tiên kiểm tra theo thứ tự
             // POC > Peak Buy > Peak Sell (else-if, không phải 3 điều kiện độc lập) — nếu 1
             // hàng trùng nhiều mức, chỉ highlight đúng theo thứ tự ưu tiên này (vd hàng vừa
@@ -548,13 +568,27 @@ f_draw_wings(RowProfile profile, int anchor_bar, int max_wing_bars, color buy_co
             color buy_bg       = is_poc ? poc_color : is_peak_buy ? buy_bg_peak : buy_color
             color sell_bg      = is_poc ? poc_color : is_peak_sell ? sell_bg_peak : sell_color
             // Dời buy_box sang phải / sell_box sang trái thêm delta_col_width — chừa khoảng
-            // trống ở giữa (canh tâm anchor_bar) cho cột delta (xem f_draw_level_labels).
+            // trống ở giữa (canh tâm anchor_bar) cho box delta (xem ngay dưới).
             box   buy_box      = box.new(left=anchor_bar + delta_col_width, top=row_top, right=anchor_bar + delta_col_width + buy_bars, bottom=row_bot,
                  border_color=buy_border, bgcolor=buy_bg, xloc=xloc.bar_index)
             box   sell_box     = box.new(left=anchor_bar - delta_col_width - sell_bars, top=row_top, right=anchor_bar - delta_col_width, bottom=row_bot,
                  border_color=sell_border, bgcolor=sell_bg, xloc=xloc.bar_index)
             array.push(of_boxes, buy_box)
             array.push(of_boxes, sell_box)
+
+            // Box delta ở GIỮA (theo phản hồi người dùng: nhãn label.new trước đó không dóng
+            // đúng hàng với box buyer/seller — label tự căn giữa text theo cách riêng của Pine,
+            // không đảm bảo khớp chính xác row_top/row_bot thật). Dùng box.new với ĐÚNG
+            // row_top/row_bot của chính hàng này (giống buy_box/sell_box) + tham số text= của
+            // box — Pine tự canh giữa text TRONG PHẠM VI box đó, nên luôn dóng đúng hàng với 2
+            // box buyer/seller cùng hàng (không trong suốt/không viền — chỉ dùng làm khung chứa
+            // text). Chỉ vẽ khi show_value_labels == true (giữ đúng input đang có để tắt/mở).
+            if show_value_labels
+                array.push(of_boxes, box.new(left=anchor_bar - delta_col_width, top=row_top, right=anchor_bar + delta_col_width, bottom=row_bot,
+                     border_color=na, bgcolor=na,
+                     text=delta_sign_str + str.tostring(delta_v, format.volume),
+                     text_color=delta_text_color, text_size=delta_label_size, text_halign=text.align_center, text_valign=text.align_center,
+                     xloc=xloc.bar_index))
 
 // Gọi mỗi tick NHƯNG chỉ ở bar cuối cùng (barstate.islast) — khác các accumulator Task 4/5 chỉ
 // cộng dữ liệu khi nến đã đóng; thanh order flow phải vẽ lại ngay để luôn hiện đúng vị trí
@@ -587,60 +621,21 @@ f_clear_labels(array<label> labels) =>
 
 // f_draw_level_labels: viết riêng (không sửa vào f_draw_wings). Theo yêu cầu người dùng,
 // KHÔNG còn vẽ nhãn text cho POC/Peak Buy/Peak Sell — 3 mức này chỉ thể hiện qua highlight
-// màu viền/nền của box trong f_draw_wings (xem is_poc/is_peak_buy/is_peak_sell ở đó). Hàm
-// này giờ chỉ vẽ khi show_value_labels == true và có dữ liệu footprint (`has_fp_ever`):
-//   - 1 "cột giữa" (trong khoảng trống delta_col_width giữa 2 cánh): MỖI hàng có dữ liệu
-//     trong `profile` được 1 nhãn CHỈ delta (buy - sell tại đúng hàng đó, không kèm giá —
-//     theo yêu cầu người dùng), màu chữ theo dấu delta, cỡ chữ tuỳ chọn (delta_text_size).
-//   - 1 nhãn riêng ghi giá khớp HIỆN TẠI (`close`, màu current_price_color, nổi bật nhất) —
-//     giá trị liên tục, không bó theo lưới price_step, khác cột giữa ở trên.
+// màu viền/nền của box trong f_draw_wings. Delta mỗi hàng (trước ở đây, dùng label.new)
+// ĐÃ CHUYỂN sang vẽ bằng box.new ngay trong f_draw_wings (xem box delta ở đó) — theo phản
+// hồi người dùng: label.new tự canh giữa text theo cách riêng của Pine, không đảm bảo khớp
+// đúng row_top/row_bot thật như box, nên vẫn lệch hàng dù y đã đúng công thức trung điểm.
+// Dùng box.new (cùng row_top/row_bot với box buyer/seller) đảm bảo dóng hàng tuyệt đối.
+// Hàm này giờ CHỈ còn vẽ 1 nhãn riêng ghi giá khớp HIỆN TẠI (`close`, màu
+// current_price_color, nổi bật nhất) khi show_current_price_label == true — giá trị liên
+// tục, không bó theo lưới price_step, không liên quan tới "dóng hàng" nên vẫn dùng label.new.
 f_draw_level_labels(RowProfile profile, int anchor_bar) =>
     f_clear_labels(of_labels)
-    if show_value_labels and has_fp_ever
-        // Cột giữa: lặp qua ĐÚNG các hàng có dữ liệu trong `profile` (giống cách f_draw_wings
-        // lặp, KHÔNG quét toàn khoảng min->max row_id như bản ruler cũ) — vì delta chỉ có ý
-        // nghĩa tại hàng thực sự có buy/sell, không phải mọi mức giá lý thuyết.
-        int n_rows_delta = array.size(profile.row_ids)
-        // Map input string -> size.* (cùng convention đã dùng trong indicators/smc_market_structure.pine
-        // — hàm get_imb_text_size ở đó cũng không khai báo kiểu rõ ràng cho kết quả switch, để Pine
-        // tự suy luận đúng kiểu "size" riêng, tránh ép kiểu string sai). Tính 1 lần trước vòng for vì
-        // delta_text_size không đổi theo từng hàng.
-        delta_label_size = switch delta_text_size
-            "Tiny"   => size.tiny
-            "Small"  => size.small
-            "Normal" => size.normal
-            "Large"  => size.large
-            => size.normal
-        if n_rows_delta > 0
-            for i = 0 to n_rows_delta - 1
-                int   row_id_d  = array.get(profile.row_ids, i)
-                float row_mid   = (row_id_d + 0.5) * price_step
-                float buy_v_d   = array.get(profile.buys, i)
-                float sell_v_d  = array.get(profile.sells, i)
-                float delta_v   = buy_v_d - sell_v_d
-                // Màu chữ theo dấu delta: dương (dư mua) = delta_pos_color, âm (dư bán) =
-                // delta_neg_color, bằng 0 = xám trung tính. Dùng ternary, không if/else, để
-                // không vi phạm QUY TẮC SCOPE (không khai báo biến mới trong if lồng trong for).
-                color delta_text_color = delta_v > 0 ? delta_pos_color : delta_v < 0 ? delta_neg_color : color.gray
-                string delta_sign_str  = delta_v > 0 ? "+" : ""
-                // CHỈ hiện delta (bỏ giá — theo yêu cầu người dùng). label.style_none (không
-                // khối nền) để giảm chồng lấn khi nhiều hàng liền kề (xem fix v1.10). y =
-                // row_mid = tâm đúng hàng đó, CÙNG công thức row_bot/row_top mà f_draw_wings
-                // dùng để vẽ box buyer/seller của chính hàng này — nên nhãn delta LUÔN dóng
-                // đúng chiều cao với 2 box buyer/seller cùng hàng, không cần thêm xử lý gì.
-                array.push(of_labels, label.new(x=anchor_bar, y=row_mid, xloc=xloc.bar_index,
-                     text=delta_sign_str + str.tostring(delta_v, format.volume),
-                     style=label.style_none, color=color.new(color.black, 100),
-                     textcolor=delta_text_color, size=delta_label_size))
-
-        // Nhãn giá khớp HIỆN TẠI (close) — tách biệt khỏi cột giá tham khảo ở trên: giá trị
-        // liên tục (không bó theo lưới price_step), màu riêng (current_price_color) để nổi bật
-        // rõ nhất trong toàn bộ thanh, trả lời đúng câu hỏi "giá khớp đang là bao nhiêu".
-        if show_current_price_label
-            array.push(of_labels, label.new(x=anchor_bar, y=close, xloc=xloc.bar_index,
-                 text="Giá: " + str.tostring(close, format.mintick),
-                 style=label.style_label_center, color=current_price_color,
-                 textcolor=color.black, size=size.normal))
+    if show_current_price_label and has_fp_ever
+        array.push(of_labels, label.new(x=anchor_bar, y=close, xloc=xloc.bar_index,
+             text="Giá: " + str.tostring(close, format.mintick),
+             style=label.style_label_center, color=current_price_color,
+             textcolor=color.black, size=size.normal))
 
 // GATE (FIX review cuối, hiệu năng): cùng lý do như f_draw_wings ở trên — bọc `if barstate.islast`.
 if barstate.islast
