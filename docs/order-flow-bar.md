@@ -37,10 +37,12 @@ tính được chọn.
 | Hiển Thị | Max Độ Rộng Cánh (Bars) (`wing_max_bars`) | 20 | Số bar tối đa mỗi cánh (buyer/seller) khi hàng đó đạt volume lớn nhất |
 | Hiển Thị | Màu Buyer (`buyer_color`) | xanh (50% trong suốt) | Màu box buyer (không highlight) |
 | Hiển Thị | Màu Seller (`seller_color`) | đỏ (50% trong suốt) | Màu box seller (không highlight) |
+| Hiển Thị | Màu Viền Hàng (`wing_border_color`) | xám (50% trong suốt) | Màu viền cho MỌI hàng (buyer+seller) — hàng POC/Peak Buy/Peak Sell đè lên bằng viền màu riêng của mức đó |
 | Hiển Thị | Màu POC (`poc_color`) | xanh dương | Màu highlight hàng POC (ưu tiên cao nhất) |
 | Hiển Thị | Màu Peak Buy (`peak_buy_color`) | lime (50% trong suốt) | Màu highlight hàng Peak Buy |
 | Hiển Thị | Màu Peak Sell (`peak_sell_color`) | cam (50% trong suốt) | Màu highlight hàng Peak Sell |
-| Hiển Thị | Hiển Thị Nhãn Giá Trị (`show_value_labels`) | true | Bật/tắt 3 nhãn giá + volume tại POC/Peak Buy/Peak Sell |
+| Hiển Thị | Hiển Thị Nhãn Giá Trị (`show_value_labels`) | true | Bật/tắt 3 nhãn giá + volume tại POC/Peak Buy/Peak Sell, VÀ cột giá tham khảo (xem dòng dưới) |
+| Hiển Thị | Cột Giá: Mỗi N Hàng (`price_ruler_step_rows`) | 5 | Vẽ 1 nhãn giá trơn (không kèm volume) tại tâm mỗi N hàng, cách đều theo giá thật (không theo thứ tự mảng) — đọc nhanh giá của thanh mà không cần nhìn sang trục giá gốc của chart |
 
 ## Logic Chính
 
@@ -55,6 +57,8 @@ tính được chọn.
 - **POC / Peak Buy / Peak Sell**: trên `active_profile`, tính `row_id` ứng với `argmax(buy+sell)` (POC), `argmax(buy)` (Peak Buy), `argmax(sell)` (Peak Sell). Trả `na` nếu profile rỗng.
 - **Vẽ thanh**: với mỗi hàng trong `active_profile`, vẽ 1 box buyer (kéo phải từ bar neo, cao đúng `[row_id * price_step, (row_id + 1) * price_step)`) và 1 box seller (kéo trái), độ rộng tỷ lệ volume hàng đó / volume hàng lớn nhất, tối đa `wing_max_bars`. Hàng trùng POC/Peak Buy/Peak Sell được tô màu riêng theo thứ tự ưu tiên POC > Peak Buy > Peak Sell. Chỉ rebuild profile/POC/vẽ lại ở bar cuối cùng (`barstate.islast`, mỗi tick của bar đó) — các bar lịch sử không cần vẽ vì box/label luôn bị xoá-vẽ-lại toàn bộ, chỉ trạng thái cuối cùng có ý nghĩa.
 - **Nhãn giá trị**: nếu `show_value_labels = true` và có dữ liệu footprint (`has_fp_ever`), vẽ tối đa 3 nhãn (POC/Peak Buy/Peak Sell) ghi giá (định dạng `mintick`, lấy **trung điểm hàng** `(row_id + 0.5) * price_step`) và volume (định dạng `volume`) tại mỗi mức, nếu mức đó còn tồn tại trong profile.
+- **Cột giá tham khảo**: cùng điều kiện `show_value_labels`/`has_fp_ever`, vẽ thêm 1 nhãn giá trơn (không kèm volume, kiểu `label.style_none`) tại tâm mỗi `price_ruler_step_rows` hàng — tính theo giá trị `row_id` **nhỏ nhất/lớn nhất thật có trong profile** (không phải theo vị trí trong mảng, vì thứ tự chèn mảng không theo thứ tự giá), nên các nhãn cách đều nhau đúng theo giá.
+- **Viền mọi hàng**: mỗi box buyer/seller luôn có viền màu `wing_border_color` để phân biệt ranh giới giữa các hàng liền kề; hàng POC/Peak Buy/Peak Sell đè viền bằng màu riêng của mức đó (ưu tiên POC > Peak Buy > Peak Sell).
 
 ## Output / Tín Hiệu
 
@@ -75,6 +79,11 @@ tính được chọn.
 
 ## Changelog
 
+- **v1.2 (2026-11-22)**: Theo yêu cầu người dùng sau khi xem lại — 2 cải tiến hiển thị.
+  - Thêm input `wing_border_color` (mặc định xám 50% trong suốt) — mọi hàng buyer/seller giờ có viền rõ ràng để phân biệt ranh giới giữa các hàng (trước đó viền `na`/vô hình với hàng không highlight).
+  - Thêm "cột giá" tham khảo: input `price_ruler_step_rows` (mặc định 5) — vẽ nhãn giá trơn cách đều mỗi N hàng (tính theo giá trị `row_id` thật, không theo thứ tự mảng) tại vị trí neo thanh, giúp đọc giá nhanh không cần nhìn sang trục giá gốc của chart.
+  - **Lưu ý**: bản v1.2 **chưa được compile thật trên TradingView** tại thời điểm viết (tương tự tình trạng v1.0/v1.1 — xem mục Giới Hạn & Lưu Ý) — người dùng tự kiểm tra qua Pine Editor trước khi dùng.
+  - Backup v1.1 tại `indicators/hist/order_flow_bar_v1.1.pine`.
 - **v1.1 (2026-11-21)**: Fix wave từ final whole-branch review trước khi merge.
   - Sửa off-by-one: box hàng giá bao đúng `[row_id * price_step, (row_id + 1) * price_step)` (trước đó lệch xuống 1 hàng); nhãn giá trị dùng trung điểm hàng `(row_id + 0.5) * price_step`.
   - Thêm cờ sticky `has_fp_ever` để gate vẽ thay cho `has_footprint_data` (tránh thanh nhấp nháy/biến mất ở bar không có giao dịch khớp).
