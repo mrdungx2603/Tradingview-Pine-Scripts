@@ -26,7 +26,7 @@
 // flow (box + nhãn) sẽ KHÔNG được vẽ (ẩn hoàn toàn, không ước lượng thay thế).
 //
 // Ngày tạo: 2026-11-21
-// Phiên bản: 1.10
+// Phiên bản: 1.11
 
 // ⚠️ Cần library này đã được Publish (không chỉ lưu "My Scripts") trên TradingView, nếu không
 // toàn bộ script sẽ lỗi compile ở dòng import này.
@@ -172,11 +172,12 @@ show_value_labels = input.bool(
 )
 
 // Cột giữa (tại anchor_bar, trong khoảng trống delta_col_width): MỖI hàng có dữ liệu trong
-// active_profile được hiện 1 dòng text "giá  Δdelta" (delta = buy - sell tại đúng hàng đó),
-// màu chữ theo dấu delta (xanh = dư mua, đỏ = dư bán) — theo yêu cầu người dùng ("thêm thông
-// tin delta tại giá đó"). Hiện dạng TEXT TRƠN (label.style_none, không có khối nền) — bản
-// đầu dùng label.style_label_center (có khối nền đặc) bị chồng lấn khi nhiều hàng liền kề,
-// theo phản hồi người dùng đổi sang chỉ hiện chữ để giảm chồng lấn.
+// active_profile được hiện 1 dòng text CHỈ delta (buy - sell tại đúng hàng đó, KHÔNG kèm
+// giá — theo yêu cầu người dùng), màu chữ theo dấu delta (xanh = dư mua, đỏ = dư bán). Hiện
+// dạng TEXT TRƠN (label.style_none, không có khối nền) để giảm chồng lấn khi nhiều hàng liền
+// kề. y = tâm đúng hàng đó ((row_id + 0.5) * price_step) — LUÔN dóng đúng theo chiều cao của
+// box buyer/seller cùng hàng (box cũng dùng chung công thức row_bot/row_top từ row_id này),
+// không cần sửa gì thêm để "dóng hàng" vì đã cùng 1 nguồn row_id/price_step từ đầu.
 delta_pos_color = input.color(
     defval=color.lime,
     title="Màu Delta Dương (Dư Mua)",
@@ -186,6 +187,18 @@ delta_pos_color = input.color(
 delta_neg_color = input.color(
     defval=color.red,
     title="Màu Delta Âm (Dư Bán)",
+    group="Hiển Thị"
+)
+
+// Cỡ chữ cột delta — để input (không hardcode) vì đây là lựa chọn có TRADE-OFF thật: chữ to
+// hơn dễ đọc nhưng Pine không tự co giãn cỡ chữ theo chiều cao thật của mỗi hàng trên màn
+// hình (phụ thuộc price_step VÀ mức zoom người dùng đang chọn) — nếu hàng "mỏng" hơn cỡ chữ,
+// chữ của hàng này sẽ chồng lên hàng kề bên (tái diễn lỗi chồng lấn v1.9 đã sửa ở v1.10).
+// Người dùng tự tăng/giảm theo price_step + mức zoom thực tế đang dùng.
+delta_text_size = input.string(
+    defval="Normal",
+    title="Cỡ Chữ Delta",
+    options=["Tiny", "Small", "Normal", "Large"],
     group="Hiển Thị"
 )
 
@@ -577,8 +590,8 @@ f_clear_labels(array<label> labels) =>
 // màu viền/nền của box trong f_draw_wings (xem is_poc/is_peak_buy/is_peak_sell ở đó). Hàm
 // này giờ chỉ vẽ khi show_value_labels == true và có dữ liệu footprint (`has_fp_ever`):
 //   - 1 "cột giữa" (trong khoảng trống delta_col_width giữa 2 cánh): MỖI hàng có dữ liệu
-//     trong `profile` được 1 nhãn "giá  Δdelta" (delta = buy - sell tại đúng hàng đó), màu
-//     chữ theo dấu delta — theo yêu cầu người dùng ("thêm thông tin delta tại giá đó").
+//     trong `profile` được 1 nhãn CHỈ delta (buy - sell tại đúng hàng đó, không kèm giá —
+//     theo yêu cầu người dùng), màu chữ theo dấu delta, cỡ chữ tuỳ chọn (delta_text_size).
 //   - 1 nhãn riêng ghi giá khớp HIỆN TẠI (`close`, màu current_price_color, nổi bật nhất) —
 //     giá trị liên tục, không bó theo lưới price_step, khác cột giữa ở trên.
 f_draw_level_labels(RowProfile profile, int anchor_bar) =>
@@ -588,6 +601,16 @@ f_draw_level_labels(RowProfile profile, int anchor_bar) =>
         // lặp, KHÔNG quét toàn khoảng min->max row_id như bản ruler cũ) — vì delta chỉ có ý
         // nghĩa tại hàng thực sự có buy/sell, không phải mọi mức giá lý thuyết.
         int n_rows_delta = array.size(profile.row_ids)
+        // Map input string -> size.* (cùng convention đã dùng trong indicators/smc_market_structure.pine
+        // — hàm get_imb_text_size ở đó cũng không khai báo kiểu rõ ràng cho kết quả switch, để Pine
+        // tự suy luận đúng kiểu "size" riêng, tránh ép kiểu string sai). Tính 1 lần trước vòng for vì
+        // delta_text_size không đổi theo từng hàng.
+        delta_label_size = switch delta_text_size
+            "Tiny"   => size.tiny
+            "Small"  => size.small
+            "Normal" => size.normal
+            "Large"  => size.large
+            => size.normal
         if n_rows_delta > 0
             for i = 0 to n_rows_delta - 1
                 int   row_id_d  = array.get(profile.row_ids, i)
@@ -600,16 +623,15 @@ f_draw_level_labels(RowProfile profile, int anchor_bar) =>
                 // không vi phạm QUY TẮC SCOPE (không khai báo biến mới trong if lồng trong for).
                 color delta_text_color = delta_v > 0 ? delta_pos_color : delta_v < 0 ? delta_neg_color : color.gray
                 string delta_sign_str  = delta_v > 0 ? "+" : ""
-                // FIX theo phản hồi người dùng: label.style_label_center vẽ kèm 1 "khối" nền
-                // đặc (price_column_color) có kích thước padding cố định theo pixel — khi
-                // nhiều hàng liền kề (price_step nhỏ/nhiều dữ liệu), các khối này chồng lấn
-                // lên nhau thành 1 vùng màu đặc, không đọc được chữ. Đổi sang
-                // label.style_none (CHỈ hiện chữ, không vẽ khối nền) + size.tiny (chữ nhỏ
-                // hơn) để giảm tối đa diện tích chiếm dụng theo chiều dọc, giảm chồng lấn.
+                // CHỈ hiện delta (bỏ giá — theo yêu cầu người dùng). label.style_none (không
+                // khối nền) để giảm chồng lấn khi nhiều hàng liền kề (xem fix v1.10). y =
+                // row_mid = tâm đúng hàng đó, CÙNG công thức row_bot/row_top mà f_draw_wings
+                // dùng để vẽ box buyer/seller của chính hàng này — nên nhãn delta LUÔN dóng
+                // đúng chiều cao với 2 box buyer/seller cùng hàng, không cần thêm xử lý gì.
                 array.push(of_labels, label.new(x=anchor_bar, y=row_mid, xloc=xloc.bar_index,
-                     text=str.tostring(row_mid, format.mintick) + " " + delta_sign_str + str.tostring(delta_v, format.volume),
+                     text=delta_sign_str + str.tostring(delta_v, format.volume),
                      style=label.style_none, color=color.new(color.black, 100),
-                     textcolor=delta_text_color, size=size.tiny))
+                     textcolor=delta_text_color, size=delta_label_size))
 
         // Nhãn giá khớp HIỆN TẠI (close) — tách biệt khỏi cột giá tham khảo ở trên: giá trị
         // liên tục (không bó theo lưới price_step), màu riêng (current_price_color) để nổi bật

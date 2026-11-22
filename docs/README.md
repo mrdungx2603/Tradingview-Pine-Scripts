@@ -11,7 +11,7 @@
 | LSC Pattern | [indicators/lsc_pattern.pine](../indicators/lsc_pattern.pine) | 1.0 | [lsc-pattern.md](lsc-pattern.md) |
 | Market Profile (Mind over Markets) | [indicators/market_profile.pine](../indicators/market_profile.pine) | 2.2 | [market-profile.md](market-profile.md) |
 | Order Flow & Market Profile Panel | [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) | 1.14 | [order-flow-profile-panel.md](order-flow-profile-panel.md) |
-| Order Flow Bar | [indicators/order_flow_bar.pine](../indicators/order_flow_bar.pine) | 1.10 | [order-flow-bar.md](order-flow-bar.md) |
+| Order Flow Bar | [indicators/order_flow_bar.pine](../indicators/order_flow_bar.pine) | 1.11 | [order-flow-bar.md](order-flow-bar.md) |
 | Order Flow Overlay | [indicators/order_flow_overlay.pine](../indicators/order_flow_overlay.pine) | 1.0 | [order-flow-overlay.md](order-flow-overlay.md) |
 | SMC Market Structure | [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) | 1.16 | [smc-market-structure.md](smc-market-structure.md) |
 | SMC Market Structure + MTF | [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) | 2.0 | [smc-market-structure.md](smc-market-structure.md) *(chung tài liệu với bản base)* |
