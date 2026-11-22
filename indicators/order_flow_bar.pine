@@ -26,7 +26,7 @@
 // flow (box + nhãn) sẽ KHÔNG được vẽ (ẩn hoàn toàn, không ước lượng thay thế).
 //
 // Ngày tạo: 2026-11-21
-// Phiên bản: 1.9
+// Phiên bản: 1.10
 
 // ⚠️ Cần library này đã được Publish (không chỉ lưu "My Scripts") trên TradingView, nếu không
 // toàn bộ script sẽ lỗi compile ở dòng import này.
@@ -172,17 +172,11 @@ show_value_labels = input.bool(
 )
 
 // Cột giữa (tại anchor_bar, trong khoảng trống delta_col_width): MỖI hàng có dữ liệu trong
-// active_profile được hiện 1 nhãn "giá  Δdelta" (delta = buy - sell tại đúng hàng đó), màu
-// chữ theo dấu delta (xanh = dư mua, đỏ = dư bán) — theo yêu cầu người dùng ("thêm thông tin
-// delta tại giá đó"). Thay cho "cột giá" chỉ hiện giá cách đều cũ (không còn input riêng
-// price_ruler_step_rows — giờ hiện đủ mọi hàng vì delta cần đúng từng hàng, không chỉ tham
-// khảo cách đều).
-price_column_color = input.color(
-    defval=color.new(color.gray, 15),
-    title="Màu Nền Cột Giữa",
-    group="Hiển Thị"
-)
-
+// active_profile được hiện 1 dòng text "giá  Δdelta" (delta = buy - sell tại đúng hàng đó),
+// màu chữ theo dấu delta (xanh = dư mua, đỏ = dư bán) — theo yêu cầu người dùng ("thêm thông
+// tin delta tại giá đó"). Hiện dạng TEXT TRƠN (label.style_none, không có khối nền) — bản
+// đầu dùng label.style_label_center (có khối nền đặc) bị chồng lấn khi nhiều hàng liền kề,
+// theo phản hồi người dùng đổi sang chỉ hiện chữ để giảm chồng lấn.
 delta_pos_color = input.color(
     defval=color.lime,
     title="Màu Delta Dương (Dư Mua)",
@@ -606,10 +600,16 @@ f_draw_level_labels(RowProfile profile, int anchor_bar) =>
                 // không vi phạm QUY TẮC SCOPE (không khai báo biến mới trong if lồng trong for).
                 color delta_text_color = delta_v > 0 ? delta_pos_color : delta_v < 0 ? delta_neg_color : color.gray
                 string delta_sign_str  = delta_v > 0 ? "+" : ""
+                // FIX theo phản hồi người dùng: label.style_label_center vẽ kèm 1 "khối" nền
+                // đặc (price_column_color) có kích thước padding cố định theo pixel — khi
+                // nhiều hàng liền kề (price_step nhỏ/nhiều dữ liệu), các khối này chồng lấn
+                // lên nhau thành 1 vùng màu đặc, không đọc được chữ. Đổi sang
+                // label.style_none (CHỈ hiện chữ, không vẽ khối nền) + size.tiny (chữ nhỏ
+                // hơn) để giảm tối đa diện tích chiếm dụng theo chiều dọc, giảm chồng lấn.
                 array.push(of_labels, label.new(x=anchor_bar, y=row_mid, xloc=xloc.bar_index,
-                     text=str.tostring(row_mid, format.mintick) + "  " + delta_sign_str + str.tostring(delta_v, format.volume),
-                     style=label.style_label_center, color=price_column_color,
-                     textcolor=delta_text_color, size=size.small))
+                     text=str.tostring(row_mid, format.mintick) + " " + delta_sign_str + str.tostring(delta_v, format.volume),
+                     style=label.style_none, color=color.new(color.black, 100),
+                     textcolor=delta_text_color, size=size.tiny))
 
         // Nhãn giá khớp HIỆN TẠI (close) — tách biệt khỏi cột giá tham khảo ở trên: giá trị
         // liên tục (không bó theo lưới price_step), màu riêng (current_price_color) để nổi bật
