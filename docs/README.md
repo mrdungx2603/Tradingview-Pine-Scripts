@@ -50,6 +50,7 @@ Hướng dẫn lấy dữ liệu lịch sử TradingView để làm báo cáo: [
 
 ## Tài Liệu Tham Khảo Khác
 
+- [quy-trinh-giao-dich-vn30f1m.md](quy-trinh-giao-dich-vn30f1m.md) — Quy trình giao dịch VN30F1M (1m, không qua đêm): vai trò từng indicator (SMC/MP/Order Flow Bar/LSC/GMKT), playbook 3 setup, quy tắc vào lệnh, quản trị rủi ro, checklist trước/trong/sau giờ.
 - [ghi-chu-pine-script.md](ghi-chu-pine-script.md) — Ghi chú nhanh hàm/cú pháp Pine Script v6 thường dùng (không phải tài liệu indicator).
 - [market-profile-strategy-ideas.md](market-profile-strategy-ideas.md) — Brainstorm 31 ý tưởng strategy dựa trên Market Profile + combo SMC/VPA (ý tưởng #2 đã có backtest thật, xem bảng "Báo Cáo Backtest & Thống Kê" trên).
 - `docs/superpowers/` — Plan/spec nội bộ khi dùng skill brainstorming/writing-plans, không thuộc phạm vi tài liệu indicator này.
