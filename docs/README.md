@@ -16,6 +16,7 @@
 | Order Flow Overlay | [indicators/order_flow_overlay.pine](../indicators/order_flow_overlay.pine) | 1.0 | [order-flow-overlay.md](order-flow-overlay.md) |
 | SMC Market Structure | [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) | 1.16 | [smc-market-structure.md](smc-market-structure.md) |
 | SMC Market Structure + MTF | [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) | 2.1 | [smc-market-structure.md](smc-market-structure.md) *(chung tài liệu với bản base)* |
+| Volume Profile + Delta | [indicators/volume_profile_delta.pine](../indicators/volume_profile_delta.pine) | 1.4 | [volume-profile-delta.md](volume-profile-delta.md) |
 | Wyckoff Effort vs Result | [indicators/volume/wyckoff_evr.pine](../indicators/volume/wyckoff_evr.pine) | 1.0 | [wyckoff-evr.md](wyckoff-evr.md) |
 
 ## Strategies
