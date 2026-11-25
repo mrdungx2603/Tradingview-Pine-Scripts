@@ -2,7 +2,7 @@
 // ─── Market Profile Core Library — TPO/POC/VA Engine + Day/Open Type + Patterns ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-11-15
-// Phiên bản: 1.1
+// Phiên bản: 1.2
 // Mô tả: Library chứa UDT SessionProfile (state thuần, không có object vẽ) và các pure
 //        function cho động cơ Market Profile/TPO: lưới TPO incremental, Point of Control,
 //        Value Area, TPO Count, Rotation Factor theo TPO Period, phân loại Day Type/Open
@@ -23,6 +23,10 @@
 //       f_format_special_patterns_summary) — rút ra từ market_profile.pine v3.0 để indicator
 //       đó (và các indicator Market Profile khác sau này) gọn hơn, chỉ còn orchestration +
 //       vẽ, không còn công thức/format string rải rác trong code.
+// v1.2: Thêm f_build_confirmed_grid — rút ra từ market_profile.pine v3.3 (hàm cục bộ cùng tên)
+//       theo yêu cầu người dùng rà soát lại core/library, tránh lặp logic xử lý lưới TPO rải
+//       rác ngoài indicator. Dùng để trì hoãn hiển thị Tail/Single Print/Poor High-Low/Ledge
+//       do TPO Period hiện tại (chưa đóng) tạo ra.
 library(title="market_profile_core", overlay=false)
 
 // ╔══════════════════════════════════════════╗
@@ -227,6 +231,26 @@ export f_calc_tpo_above_below(array<int> counts, int poc_row) =>
 // ╔══════════════════════════════════════════╗
 // ║   3. TAILS / SINGLE PRINTS / LEDGE / SPIKE (lưới thô) ║
 // ╚══════════════════════════════════════════╝
+
+// Lưới "đã xác nhận" (confirmed grid) — dùng trước khi gọi các hàm detect Tail/Single
+// Print/Poor High-Low/Ledge bên dưới, để trì hoãn hiển thị mẫu hình do TPO Period HIỆN TẠI
+// (chưa đóng) tạo ra. CHỈ ẩn (set về 0) hàng có TPO count thực = 1 VÀ lần chạm DUY NHẤT là
+// Period HIỆN TẠI (còn đang mở) — tức hàng hoàn toàn MỚI hình thành, chưa Period nào khác
+// từng chạm, nên còn tạm thời. KHÔNG đụng tới hàng đã có count >= 2 (dù lần chạm gần nhất
+// cũng là Period hiện tại): khi đó Period hiện tại đang "fill" vào 1 hàng mà Period trước (đã
+// đóng) từng xác nhận là single print — hàng đó NGAY LẬP TỨC không còn là single print nữa
+// (sự kiện đã xảy ra, không cần chờ xác nhận thêm), phải hiện đúng số thực để Tail/SP bị phá
+// vỡ ngay. `last_period_c` lấy từ tham số thứ 2 của `f_add_bar_tpo()`, `cur_period_id` lấy từ
+// `SessionProfile.last_period_id`.
+export f_build_confirmed_grid(array<int> counts_c, array<int> last_period_c, int cur_period_id) =>
+    array<int> confirmed = array.copy(counts_c)
+    int n_rows = array.size(confirmed)
+    if n_rows > 0
+        for r = 0 to n_rows - 1
+            bool is_brand_new_row = array.get(last_period_c, r) == cur_period_id and array.get(confirmed, r) == 1
+            if is_brand_new_row
+                array.set(confirmed, r, 0)
+    confirmed
 
 // Buying Tail: đuôi đơn (TPO=1) liên tục từ đáy lưới lên tới poc_row_c.
 // Trả về buying_tail_h (giá đỉnh đuôi) hoặc na nếu đuôi ngắn hơn min_tail_tpo.

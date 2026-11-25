@@ -1,10 +1,11 @@
 # Market Profile Core Library — Tài Liệu
 
-> **Script**: [libraries/market_profile_core.pine](../libraries/market_profile_core.pine) (v1.1)
+> **Script**: [libraries/market_profile_core.pine](../libraries/market_profile_core.pine) (v1.2)
 > **Loại**: Library (`library(overlay=false)`)
 > **Pine Script**: v6
-> **Ngày tạo**: 2026-11-15 / **Cập nhật**: 2026-11-15
-> **Dùng trong**: [indicators/market_profile.pine](../indicators/market_profile.pine) (v3.1, `import anthonydang/market_profile_core/2 as mpcore`), [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) (v2.0, vẫn dùng `/1` — không cần hàm mới của v1.1)
+> **Ngày tạo**: 2026-11-15 / **Cập nhật**: 2026-11-25
+> **Publish trên TradingView**: account `anthonydang`, title `market_profile_core`, version hiện tại **3** (`anthonydang/market_profile_core/3`).
+> **Dùng trong**: [indicators/market_profile.pine](../indicators/market_profile.pine) (v3.5, `import anthonydang/market_profile_core/3 as mpcore`), [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) (v2.0, vẫn dùng `/1` — không cần hàm mới của v1.1/v1.2)
 
 ## Tổng Quan
 
@@ -37,6 +38,7 @@ Chỉ chứa số/bool/string — không có `line`/`box`/`label` (phần vẽ d
 | `f_calc_poc(counts, grid_low, step, sess_high, sess_low)` | Point of Control — tie-break theo hàng gần giá giữa phiên thực. Trả `[poc_price, poc_row]` |
 | `f_calc_value_area(counts, poc_row, grid_low, step, total_tpo, va_pct)` | Value Area (VAH/VAL) mở rộng từ POC theo `va_pct` (tỷ lệ 0-1). Trả `[vah, val]` |
 | `f_calc_tpo_above_below(counts, poc_row)` | TPO Count 2 phía POC. Trả `[above_cnt, below_cnt]` |
+| `f_build_confirmed_grid(counts_c, last_period_c, cur_period_id)` *(v1.2)* | Lưới "đã xác nhận" — dùng trước khi gọi `f_detect_buying_tail`/`f_detect_selling_tail`/`f_detect_poor_hl`/`f_detect_single_prints`/`f_detect_ledge` bên dưới, để trì hoãn hiển thị mẫu hình do TPO Period hiện tại (chưa đóng) tạo ra. Ẩn (set 0) hàng có TPO count thực = 1 và lần chạm duy nhất là Period hiện tại |
 | `f_detect_buying_tail`/`f_detect_selling_tail(counts_c, poc_row_c, grid_low_c, step_c, min_tail_tpo)` | Phát hiện đuôi đơn (TPO=1) liên tục từ biên lưới tới POC — trả giá đỉnh đuôi hoặc `na` |
 | `f_count_tail_rows(counts_c, poc_row_c, from_bottom)` | Số hàng đuôi (dùng làm biên quét cho `f_detect_single_prints`) |
 | `f_detect_poor_hl(counts_c, buying_tail_h, selling_tail_l)` | Poor High/Low — biên có ≥2 TPO nhưng không có tail từ chối. Trả `[has_poor_low, has_poor_high]` |
@@ -74,5 +76,6 @@ Nhóm hàm `f_format_*` (v1.1) chỉ trả về string hiển thị **cơ bản*
 
 ## Changelog
 
+- **v1.2** (2026-11-25): Thêm `f_build_confirmed_grid` — rút từ hàm cục bộ cùng tên trong `market_profile.pine` v3.3 (trì hoãn hiển thị Tail/Single Print/Poor High-Low/Ledge do TPO Period hiện tại chưa đóng tạo ra), theo yêu cầu người dùng rà soát lại core/library toàn dự án, tránh lặp logic xử lý lưới TPO rải rác ngoài indicator. `market_profile.pine` v3.5 cập nhật `import .../market_profile_core/3`. Backup v1.1 tại `libraries/hist/market_profile_core_v1.1.pine`.
 - **v1.0** (2026-11-15): Phát hành lần đầu, tách từ `market_profile.pine` v2.3 (động cơ TPO incremental v2.0). Dùng ngay cho `market_profile.pine` v3.0 và `order_flow_profile_panel.pine` v2.0.
 - **v1.1** (2026-11-15): Thêm 3 hàm tiện ích (`f_check_level_tested`, `f_calc_ib_extensions`, `f_calc_band_position`) + 7 hàm định dạng dashboard (`f_format_signed_int`, `f_format_ib_state`, `f_format_tpo_imbalance`, `f_format_level_status`, `f_format_tails_summary`, `f_format_poor_hl_summary`, `f_format_special_patterns_summary`) — rút ra từ `market_profile.pine` v3.0 để indicator đó gọn hơn (v3.1). Backup v1.0 tại `libraries/hist/market_profile_core_v1.0.pine`.

@@ -1,0 +1,776 @@
+//@version=6
+// ─── Market Profile — Mind over Markets (Classic Light Edition) ───
+// Tác giả: TV Pine
+// Ngày tạo: 2026-11-14
+// Phiên bản: 3.3
+// Mô tả: Market Profile / TPO (Time Price Opportunity) theo phương pháp "Mind over Markets" —
+//        tính Initial Balance, Value Area (VAH/VAL/POC), Naked POC, Tails/Single Prints/Ledge/Spike,
+//        phân loại Day Type & Open Type, 80% VA Rule, Dashboard thống kê.
+// Lịch sử phiên bản đầy đủ: xem docs/market-profile.md (mục Changelog + "Thiết Kế").
+// v1.1: Sửa out-of-bounds tail khi POC ở hàng biên; vẽ đối tượng cập nhật tại chỗ thay vì tạo lại.
+// v1.2: Thêm nhãn pVAH/pVAL/pPOC trên price scale; tách khung Value Area 2 vùng trên/dưới POC.
+// v2.0: Viết lại động cơ TPO (incremental, hết O(N²) trên timeframe nhỏ); 1 TPO = 1 khung giờ
+//       cố định (TPO Period, không phải 1 nến chart) để POC/RF/IB nhất quán giữa mọi timeframe;
+//       thêm lưới thô riêng (shape_step) cho TPO Count/Tail/Poor High-Low/Single Prints/Ledge
+//       (lưới mịn price_step dành riêng cho POC/VAH/VAL) để tránh vỡ vụn trên mã mintick nhỏ
+//       nhưng biên độ phiên rộng (VN30F1M...).
+// v2.1: Gọn code (giảm comment dài dòng) + gọn dashboard (ẩn chẩn đoán theo toggle, text ngắn
+//       hơn) + thêm input vị trí dashboard (4 góc).
+// v2.2: VAH/POC/VAL chuyển thành Developing (plot stepline + fill, giữ đúng giá trị lịch sử
+//       từng bar) thay cho box/line tĩnh bị "viết lại" cả đoạn mỗi khi giá trị mới nhất đổi —
+//       áp dụng cho mọi phiên (cả phiên đã đóng), xem docs mục "Thiết Kế: Developing VA".
+// v2.3: Ẩn nhãn giá trị bên phải (price scale) của Developing VAH/POC/VAL — chỉ còn hiện trên
+//       pane; đổi shorttitle "MP Classic v6" → "MP". Thêm option vẽ đường (đứt/liền/chấm) nối
+//       nhãn pVAH/pVAL/pPOC (price scale) tới nến cuối bằng extend=extend.right (show_pva_line).
+// v3.0: Tách toàn bộ động cơ tính toán thuần (TPO incremental, POC/Value Area, TPO Count,
+//       Rotation Factor, Day Type/Open Type, Tails/Single Prints/Ledge/Late Spike, 80% VA
+//       Rule) ra library libraries/market_profile_core.pine (import anthonydang/
+//       market_profile_core/1) để dùng chung với order_flow_profile_panel.pine và các
+//       strategy Market Profile trong tương lai. UDT SessionProfile nay lấy từ library
+//       (mpcore.SessionProfile) — bỏ field poc_tpo_cnt_c (chỉ phục vụ chẩn đoán, chuyển
+//       thành biến local diag_poc_tpo_cnt_c) và 6 cờ alerted_* (chuyển thành var riêng của
+//       indicator, không thuộc "động cơ" chung). Hành vi/số liệu hiển thị KHÔNG đổi so với
+//       v2.3 — đây là refactor thuần, xem docs mục "Thiết Kế: Market Profile Core Library".
+// v3.1: Gọn tiếp phần còn lại — chuyển 3 công thức tiện ích (kiểm tra mức giá bị lấp cho
+//       Naked POC/Prev VAH/VAL/POC, 4 đường mở rộng IB, vị trí dải màu Day Type) và 7 hàm
+//       định dạng chuỗi dashboard (IB state, số có dấu, TPO imbalance, trạng thái mức giá,
+//       tóm tắt Tails/Poor High-Low/mô hình đặc biệt) sang library market_profile_core v1.1
+//       (import .../market_profile_core/2). File này giờ chỉ còn orchestration (gọi mpcore.*)
+//       + vẽ đối tượng + dashboard layout — không còn công thức/format string rải rác. Hành
+//       vi/số liệu hiển thị KHÔNG đổi so với v3.0, xem docs/market-profile-core.md.
+// v3.2: Thu hẹp Dashboard — 2 dòng Day Type/Open Type (prof.day_type/prof.open_type) vốn trả
+//       về chuỗi đầy đủ dài (vd "Open-Auction Out of Range (OAOR)", "Double-Distribution Trend
+//       Day") khiến cột giá trị của toàn bảng bị kéo rộng theo. Thêm 2 hàm rút gọn hiển thị
+//       f_short_day_type/f_short_open_type (chỉ là format string cho riêng dashboard của file
+//       này — không đụng tới library/động cơ tính toán), giữ chuỗi đầy đủ qua tooltip. Số
+//       liệu/logic tính toán KHÔNG đổi, chỉ gọn phần hiển thị.
+// v3.3: Trì hoãn hiển thị Tail/Single Print/Poor High-Low/Ledge khi phần hình thành đó do TPO
+//       Period HIỆN TẠI (chưa đóng, chưa đủ tpo_period_min phút) tạo ra — các hàng lưới thô mà
+//       lần chạm gần nhất là Period đang mở vẫn đang "tạm thời", có thể đổi tiếp khi Period đó
+//       còn tiếp diễn. Thêm hàm cục bộ f_build_confirmed_grid: nhân bản tpo_counts_c, trừ đi 1
+//       lượt chạm tại các hàng mà tpo_last_period_c == prof.last_period_id (Period đang mở),
+//       rồi dùng lưới "đã xác nhận" này làm input cho mpcore.f_count_tail_rows/
+//       f_detect_buying_tail/f_detect_selling_tail/f_detect_poor_hl/f_detect_single_prints/
+//       f_detect_ledge — thay cho tpo_counts_c (lưới live). Phần Tail/SP/Poor/Ledge đã được các
+//       Period ĐÃ ĐÓNG xác nhận vẫn hiện ngay (không trễ/không giật hình); chỉ phần mới hình
+//       thành/mở rộng thêm bởi Period đang chạy bị ẩn tới khi Period đó đóng (Period kế tiếp bắt
+//       đầu). poc_row_c, TPO Count above/below POC (dashboard) và Late Spike vẫn dùng lưới live
+//       — không thuộc phạm vi yêu cầu này. Không sửa library market_profile_core.pine (các file
+//       khác dùng chung thư viện không bị ảnh hưởng).
+indicator("Market Profile — Mind over Markets (Classic Light Edition)", shorttitle="MP", overlay=true, max_lines_count=500, max_boxes_count=500, max_labels_count=500)
+
+import anthonydang/market_profile_core/2 as mpcore
+
+// ============================================================================
+// 1. BẢNG CÀI ĐẶT TẮT/BẬT & THÔNG SỐ (INPUTS TOGGLE PANEL)
+// ============================================================================
+grp_toggle = "1. Bảng Điều Khiển Hiển Thị (Feature Toggles)"
+show_ib      = input.bool(true, "Hiển thị IB Lines & Extensions (1.5x, 2.0x)", group=grp_toggle)
+show_va      = input.bool(true, "Hiển thị Developing VAH / POC / VAL (bậc thang) & Khung Value Area", group=grp_toggle)
+show_npoc    = input.bool(true, "Hiển thị & Kéo dài các đường Naked POC (Virgin POC)", group=grp_toggle)
+show_prev_va = input.bool(true, "Hiển thị VAH / VAL / POC của Phiên Trước (Untested)", group=grp_toggle)
+show_pva_scale = input.bool(true, "Hiển thị nhãn pVAH/pVAL/pPOC bên Thanh Giá (Price Scale)", group=grp_toggle)
+show_pva_line  = input.bool(true, "Vẽ đường nối nhãn pVAH/pVAL/pPOC (Price Scale) tới nến cuối", group=grp_toggle)
+pva_line_opt   = input.string("Đứt nét", "Kiểu đường nối pVAH/pVAL/pPOC", options=["Đứt nét", "Liền nét", "Chấm chấm"], group=grp_toggle)
+show_tails   = input.bool(true, "Hiển thị Single Prints, Tails, Ledge & Spike", group=grp_toggle)
+show_poor    = input.bool(true, "Hiển thị nhãn Poor High / Poor Low", group=grp_toggle)
+show_dash    = input.bool(true, "Hiển thị Bảng Thống kê (Dashboard Table)", group=grp_toggle)
+dash_pos_opt = input.string("Trên Phải", "Vị trí Dashboard", options=["Trên Trái", "Trên Phải", "Dưới Trái", "Dưới Phải"], group=grp_toggle)
+show_diag    = input.bool(false, "Hiện Chẩn Đoán Dedup trên Dashboard (nâng cao)", group=grp_toggle)
+show_band    = input.bool(true, "Hiển thị Dải màu Day Type & Open Type ở Đáy Biểu đồ", group=grp_toggle)
+
+grp_param = "2. Thông Số Thuật Toán Market Profile"
+va_pct        = input.float(70.0, "Tỷ lệ Value Area (%)", minval=50.0, maxval=90.0, step=1.0, group=grp_param) / 100.0
+price_step    = input.float(0.1, "Bước giá lưới POC/VAH/VAL (Price Step)", minval=0.0001, step=0.01, group=grp_param)
+shape_step    = input.float(1.0, "Bước giá lưới Hình Dạng Profile (TPO Count/Tail/Poor/SP/Ledge)", minval=0.0001, step=0.1, group=grp_param)
+tpo_period_min= input.int(30, "Độ dài 1 TPO Period (phút) — chuẩn CBOT = 30", minval=1, maxval=240, group=grp_param)
+ib_periods_cnt= input.int(2, "Số khung TPO Period tính Initial Balance (Chuẩn 2×30p = 60 phút)", minval=1, maxval=12, group=grp_param)
+min_tail_tpo  = input.int(2, "Độ dài tối thiểu của Tail / Single Print (Số ô lưới Hình Dạng, tức shape_step)", minval=2, maxval=10, group=grp_param)
+max_npoc_cnt = input.int(15, "Số lượng đường Naked POC tối đa lưu trữ", minval=1, maxval=50, group=grp_param)
+
+grp_alert = "3. Cài Đặt Hệ Thống Cảnh Báo (Alerts Engine)"
+en_al_ib     = input.bool(true, "Cảnh báo Phá vỡ Initial Balance (IB Breakout)", group=grp_alert)
+en_al_tail   = input.bool(true, "Cảnh báo Xuất hiện Buying / Selling Tail", group=grp_alert)
+en_al_dd     = input.bool(true, "Cảnh báo Hình thành Double-Distribution Day", group=grp_alert)
+en_al_npoc   = input.bool(true, "Cảnh báo Chạm/Lấp đường Naked POC & Prev VAH/VAL", group=grp_alert)
+en_al_rule80 = input.bool(true, "Cảnh báo Kích hoạt Quy tắc 80% Value Area Rule", group=grp_alert)
+
+// ============================================================================
+// 2. BẢNG MÀU CLASSIC LIGHT-THEME (HIGH CONTRAST FOR WHITE BACKGROUND)
+// ============================================================================
+c_navy_poc     = color.rgb(26, 54, 93)       // Deep Navy (#1A365D) - Dùng cho Text/Border/Frame chung
+c_poc_line     = color.new(c_navy_poc, 30)   // Navy mờ nhẹ - Đường kẻ POC (vẫn rõ nhất trong 3 đường)
+c_va_edge_line = color.new(c_navy_poc, 55)   // Navy mờ nhiều hơn - Đường kẻ VAH / VAL
+c_va_above     = color.rgb(43, 108, 176, 92) // Xanh Slate mờ, trong suốt cao - Vùng Value Area TRÊN POC
+c_va_below     = color.rgb(183, 121, 31, 92) // Vàng Amber mờ, trong suốt cao - Vùng Value Area DƯỚI POC
+c_ib_line      = color.rgb(45, 55, 72)       // Charcoal Slate - Đường biên IB
+c_ib_ext       = color.rgb(113, 128, 150)    // Muted Gray - Đường mở rộng IB 1.5x, 2.0x
+
+c_npoc_color   = color.rgb(155, 44, 44)      // Crimson Rust (#9B2C2C) - Naked POC
+c_prev_va_col  = color.rgb(43, 108, 176)     // Classic Slate Blue (#2B6CB0) - Prev VAH/VAL
+c_poor_col     = color.rgb(183, 121, 31)     // Muted Amber (#B7791F) - Poor High/Low
+
+c_forest_buy   = color.rgb(27, 77, 62)       // Forest Green (#1B4D3E) - Buying Tail / Support
+c_forest_fill  = color.rgb(47, 133, 90, 82)  // Forest Green Fill
+c_burgundy_sel = color.rgb(139, 0, 0)        // Burgundy (#8B0000) - Selling Tail / Resistance
+c_burgundy_fil = color.rgb(155, 44, 44, 82)  // Burgundy Fill
+c_sp_fill      = color.rgb(183, 121, 31, 80) // Muted Amber Fill - Single Prints
+
+c_dt_trend     = color.rgb(27, 77, 62)       // Trend Day: Dark Green
+c_dt_dd        = color.rgb(74, 21, 75)       // Double Distribution: Dark Purple
+c_dt_neutral   = color.rgb(183, 121, 31)     // Neutral Day: Muted Amber
+c_dt_nontrend  = color.rgb(45, 55, 72)       // Nontrend Day: Charcoal Gray
+c_dt_normal    = color.rgb(26, 54, 93)       // Normal / Normal Variation: Deep Navy
+
+c_tbl_bg       = color.rgb(248, 250, 252)    // Trắng đục / Xám giấy cổ điển
+c_tbl_header   = color.rgb(226, 232, 240)    // Xám nhạt thanh tiêu đề
+c_tbl_border   = color.rgb(160, 174, 192)    // Viền mảnh
+c_tbl_text     = color.rgb(15, 23, 42)       // Chữ đen mực in đậm
+
+// ============================================================================
+// 3. ĐỊNH NGHĨA KIỂU DỮ LIỆU NGƯỜI DÙNG (PINE SCRIPT V6 UDT)
+// ============================================================================
+// SessionProfile (số liệu động cơ TPO/POC/VA/Day Type...) nay lấy từ library
+// (mpcore.SessionProfile) — xem libraries/market_profile_core.pine. Chỉ còn 2 UDT thuần
+// hiển thị giữ lại tại đây vì gắn với line/box/label riêng của indicator này.
+type NakedPOC
+    float price     = na
+    int   start_bar = na
+    line  ln        = na
+    label lb        = na
+
+type SessionDrawings
+    line  l_ib_h         = na
+    line  l_ib_l         = na
+    line  l_ib_ext_u15   = na
+    line  l_ib_ext_u20   = na
+    line  l_ib_ext_d15   = na
+    line  l_ib_ext_d20   = na
+    line  l_ledge        = na
+    box   b_buy_tail     = na
+    box   b_sell_tail    = na
+    box   b_sp_mid       = na
+    box   b_status_band  = na
+    label lb_spike       = na
+    label lb_poor_h      = na
+    label lb_poor_l      = na
+
+// ============================================================================
+// 4. KHỞI TẠO BIẾN TOÀN CỤC & MẢNG QUẢN LÝ
+// ============================================================================
+var mpcore.SessionProfile prof = mpcore.SessionProfile.new()
+var SessionDrawings draw             = SessionDrawings.new()
+var array<int>      tpo_counts       = array.new<int>()   // Lưới POC/VAH/VAL (mịn, price_step)
+var array<int>      tpo_last_period  = array.new<int>()   // Period cuối đã tính TPO cho từng hàng (lưới mịn)
+var int             base_row         = na                 // Chỉ số hàng tuyệt đối ứng với tpo_counts[0]
+var array<int>      tpo_counts_c     = array.new<int>()   // Lưới "Hình Dạng Profile" (thô, shape_step) —
+var array<int>      tpo_last_period_c= array.new<int>()   //   dùng riêng cho TPO Count/Tail/Poor/SP/Ledge
+var int             base_row_c       = na                 // Chỉ số hàng tuyệt đối ứng với tpo_counts_c[0]
+var array<NakedPOC> active_npocs     = array.new<NakedPOC>()
+
+// Cờ chống lặp cảnh báo (one-shot/phiên) — trước ở trong SessionProfile, nay tách riêng vì
+// không thuộc "động cơ" chung trong library (chỉ indicator này cần nhớ đã alert hay chưa).
+var bool alerted_ib_up     = false
+var bool alerted_ib_dn     = false
+var bool alerted_buy_tail  = false
+var bool alerted_sell_tail = false
+var bool alerted_dd_day    = false
+var bool alerted_rule_80   = false
+var int  diag_poc_tpo_cnt_c = 0 // Chẩn đoán dedup (show_diag): số TPO tại hàng POC-thô, luôn <= periods_in_sess
+
+// 2 lưới độc lập (xem docs mục "Thiết Kế: Lưới Kép"): step = POC/VAH/VAL (mịn); step_c = TPO
+// Count/Tail/Poor/SP/Ledge (thô — tránh vỡ vụn trên mã mintick nhỏ nhưng biên độ phiên rộng).
+float step   = math.max(syminfo.mintick, price_step)
+float step_c = math.max(syminfo.mintick, shape_step)
+
+// 1 TPO = 1 khung giờ cố định (TPO Period), không phải 1 nến chart — xem docs mục "Thiết Kế:
+// TPO Period". period_id tính theo "time" (giờ thực) nên giống nhau ở mọi timeframe.
+float period_ms = tpo_period_min * 60000.0
+
+var line  l_prev_vah  = na
+var line  l_prev_val  = na
+var line  l_prev_poc  = na
+var line  l_pva_vah   = na   // Đường nối nhãn pVAH (price scale) tới nến cuối, extend.right
+var line  l_pva_val   = na
+var line  l_pva_poc   = na
+pva_line_style = pva_line_opt == "Liền nét" ? line.style_solid : pva_line_opt == "Chấm chấm" ? line.style_dotted : line.style_dashed
+var label lb_prev_vah = na
+var label lb_prev_val = na
+var label lb_prev_poc = na
+
+bool trig_ib_up     = false
+bool trig_ib_dn     = false
+bool trig_buy_tail  = false
+bool trig_sell_tail = false
+bool trig_dd_day    = false
+bool trig_npoc_hit  = false
+bool trig_pva_hit   = false
+bool trig_rule_80   = false
+
+// Biến theo dõi Quy tắc 80% VA Rule xuyên suốt phiên
+var int bars_inside_prev_va = 0
+
+bool is_new_session = timeframe.change("D")
+
+if is_new_session
+    float last_vah = prof.vah
+    float last_val = prof.val
+    float last_poc = prof.poc
+    int   last_end = bar_index - 1
+
+    bars_inside_prev_va := 0
+    alerted_ib_up        := false
+    alerted_ib_dn        := false
+    alerted_buy_tail     := false
+    alerted_sell_tail    := false
+    alerted_dd_day       := false
+    alerted_rule_80      := false
+
+    if show_npoc and not na(last_poc) and not na(prof.start_bar)
+        line  new_ln = line.new(prof.start_bar, last_poc, bar_index, last_poc, color=c_npoc_color, style=line.style_dashed, width=1)
+        label new_lb = label.new(bar_index, last_poc, "nPOC " + str.tostring(last_poc, format.mintick), style=label.style_none, textcolor=c_npoc_color, size=size.tiny)
+        array.push(active_npocs, NakedPOC.new(last_poc, prof.start_bar, new_ln, new_lb))
+
+        if array.size(active_npocs) > max_npoc_cnt
+            NakedPOC oldest = array.shift(active_npocs)
+            line.delete(oldest.ln)
+            label.delete(oldest.lb)
+
+    line.delete(l_prev_vah)
+    line.delete(l_prev_val)
+    line.delete(l_prev_poc)
+    label.delete(lb_prev_vah)
+    label.delete(lb_prev_val)
+    label.delete(lb_prev_poc)
+    line.delete(l_pva_vah)
+    line.delete(l_pva_val)
+    line.delete(l_pva_poc)
+
+    if show_prev_va and not na(last_vah) and not na(last_val)
+        l_prev_vah  := line.new(last_end, last_vah, bar_index, last_vah, color=c_prev_va_col, style=line.style_dotted, width=1)
+        l_prev_val  := line.new(last_end, last_val, bar_index, last_val, color=c_prev_va_col, style=line.style_dotted, width=1)
+        l_prev_poc  := line.new(last_end, last_poc, bar_index, last_poc, color=c_navy_poc,    style=line.style_dotted, width=1)
+        lb_prev_vah := label.new(bar_index, last_vah, "pVAH (Open)", style=label.style_none, textcolor=c_prev_va_col, size=size.tiny)
+        lb_prev_val := label.new(bar_index, last_val, "pVAL (Open)", style=label.style_none, textcolor=c_prev_va_col, size=size.tiny)
+        lb_prev_poc := label.new(bar_index, last_poc, "pPOC (Open)", style=label.style_none, textcolor=c_navy_poc,    size=size.tiny)
+
+    // Đường nối nhãn pVAH/pVAL/pPOC (price scale) tới nến cuối — neo tại nến cuối cùng (không
+    // phải cuối phiên trước), cập nhật lại x1/x2 mỗi bar (xem mục 5) để luôn bám đúng nến mới
+    // nhất; extend.right giúp đoạn ngắn này vươn tới mép phải nơi nhãn price scale nằm.
+    if show_pva_scale and show_pva_line and not na(last_vah) and not na(last_val)
+        l_pva_vah := line.new(bar_index - 1, last_vah, bar_index, last_vah, color=c_prev_va_col, style=pva_line_style, width=1, extend=extend.right)
+        l_pva_val := line.new(bar_index - 1, last_val, bar_index, last_val, color=c_prev_va_col, style=pva_line_style, width=1, extend=extend.right)
+        l_pva_poc := line.new(bar_index - 1, last_poc, bar_index, last_poc, color=c_navy_poc,    style=pva_line_style, width=1, extend=extend.right)
+
+    prof := mpcore.SessionProfile.new(
+         start_bar    = bar_index,
+         start_time   = time,
+         open_price   = open,
+         close_price  = close,
+         sess_high    = high,
+         sess_low     = low,
+         prev_vah     = last_vah,
+         prev_val     = last_val,
+         prev_poc     = last_poc,
+         prev_end_bar = last_end,
+         p_vah_tested = false,
+         p_val_tested = false,
+         p_poc_tested = false,
+         ib_high      = high,
+         ib_low       = low,
+         ib_locked    = false,
+         rf_score     = 0
+     )
+    draw := SessionDrawings.new()
+    array.clear(tpo_counts)
+    array.clear(tpo_last_period)
+    array.clear(tpo_counts_c)
+    array.clear(tpo_last_period_c)
+    int this_period_id0 = int(math.floor((time - prof.start_time) / period_ms))
+    mpcore.f_process_bar_period(prof, this_period_id0, high, low)
+    base_row   := mpcore.f_add_bar_tpo(tpo_counts,   tpo_last_period,   prof, 0, this_period_id0, high, low, step,   true)
+    base_row_c := mpcore.f_add_bar_tpo(tpo_counts_c, tpo_last_period_c, prof, 0, this_period_id0, high, low, step_c, false)
+else
+    if not na(prof.start_bar)
+        prof.close_price  := close
+        prof.sess_high    := math.max(prof.sess_high, high)
+        prof.sess_low     := math.min(prof.sess_low, low)
+
+        int this_period_id = int(math.floor((time - prof.start_time) / period_ms))
+        mpcore.f_process_bar_period(prof, this_period_id, high, low)
+        base_row   := mpcore.f_add_bar_tpo(tpo_counts,   tpo_last_period,   prof, base_row,   this_period_id, high, low, step,   true)
+        base_row_c := mpcore.f_add_bar_tpo(tpo_counts_c, tpo_last_period_c, prof, base_row_c, this_period_id, high, low, step_c, false)
+
+        if prof.periods_in_sess <= ib_periods_cnt
+            prof.ib_high := math.max(prof.ib_high, high)
+            prof.ib_low  := math.min(prof.ib_low, low)
+            if prof.periods_in_sess == ib_periods_cnt
+                prof.ib_locked := true
+        else
+            prof.ib_locked := true
+            if not prof.ext_up_first and not prof.ext_dn_first
+                if high > prof.ib_high
+                    prof.ext_up_first := true
+                else if low < prof.ib_low
+                    prof.ext_dn_first := true
+
+// ============================================================================
+// 5. QUẢN LÝ NAKED POC & PREVIOUS VA MITIGATION
+// ============================================================================
+if array.size(active_npocs) > 0
+    for i = array.size(active_npocs) - 1 to 0
+        NakedPOC np = array.get(active_npocs, i)
+        if not show_npoc
+            line.delete(np.ln)
+            label.delete(np.lb)
+            array.remove(active_npocs, i)
+        else
+            line.set_x2(np.ln, bar_index)
+            label.set_x(np.lb, bar_index + 1)
+            if mpcore.f_check_level_tested(high, low, np.price)
+                line.set_style(np.ln, line.style_dotted)
+                label.delete(np.lb)
+                array.remove(active_npocs, i)
+                trig_npoc_hit := true
+                if en_al_npoc
+                    alert("[" + syminfo.ticker + "] NAKED POC TESTED: Giá vừa chạm và lấp đường Virgin POC tại " + str.tostring(np.price, format.mintick), alert.freq_once_per_bar)
+
+if not na(prof.prev_vah)
+    if not prof.p_vah_tested
+        if show_prev_va
+            line.set_x2(l_prev_vah, bar_index)
+            label.set_x(lb_prev_vah, bar_index + 1)
+        if mpcore.f_check_level_tested(high, low, prof.prev_vah)
+            prof.p_vah_tested := true
+            if show_prev_va
+                label.set_text(lb_prev_vah, "pVAH (Filled)")
+            if show_pva_scale and show_pva_line
+                line.set_color(l_pva_vah, c_ib_ext)
+            trig_pva_hit := true
+            if en_al_npoc
+                alert("[" + syminfo.ticker + "] PREV VAH TESTED: Giá vừa chạm pVAH tại " + str.tostring(prof.prev_vah, format.mintick), alert.freq_once_per_bar)
+
+    if not prof.p_val_tested
+        if show_prev_va
+            line.set_x2(l_prev_val, bar_index)
+            label.set_x(lb_prev_val, bar_index + 1)
+        if mpcore.f_check_level_tested(high, low, prof.prev_val)
+            prof.p_val_tested := true
+            if show_prev_va
+                label.set_text(lb_prev_val, "pVAL (Filled)")
+            if show_pva_scale and show_pva_line
+                line.set_color(l_pva_val, c_ib_ext)
+            trig_pva_hit := true
+            if en_al_npoc
+                alert("[" + syminfo.ticker + "] PREV VAL TESTED: Giá vừa chạm pVAL tại " + str.tostring(prof.prev_val, format.mintick), alert.freq_once_per_bar)
+
+    if not prof.p_poc_tested
+        if show_prev_va
+            line.set_x2(l_prev_poc, bar_index)
+            label.set_x(lb_prev_poc, bar_index + 1)
+        if mpcore.f_check_level_tested(high, low, prof.prev_poc)
+            prof.p_poc_tested := true
+            if show_prev_va
+                label.set_text(lb_prev_poc, "pPOC (Filled)")
+            if show_pva_scale and show_pva_line
+                line.set_color(l_pva_poc, c_ib_ext)
+
+// Luôn bám theo nến cuối cùng (bất kể đã lấp hay chưa) — khác đường "Phiên Trước" (show_prev_va)
+// vốn dừng kéo dài khi đã lấp để làm mốc lịch sử; đường nối nhãn price scale thì phải luôn dính
+// vào nến mới nhất để nhãn luôn có đường nối, không bị "treo" lại ở điểm lấp cũ.
+if show_pva_scale and show_pva_line
+    if not na(l_pva_vah)
+        line.set_xy1(l_pva_vah, bar_index - 1, prof.prev_vah)
+        line.set_xy2(l_pva_vah, bar_index, prof.prev_vah)
+    if not na(l_pva_val)
+        line.set_xy1(l_pva_val, bar_index - 1, prof.prev_val)
+        line.set_xy2(l_pva_val, bar_index, prof.prev_val)
+    if not na(l_pva_poc)
+        line.set_xy1(l_pva_poc, bar_index - 1, prof.prev_poc)
+        line.set_xy2(l_pva_poc, bar_index, prof.prev_poc)
+
+// Lưới "đã xác nhận" (confirmed grid) — dùng riêng cho Tail/Single Print/Poor High-Low/Ledge
+// (xem changelog v3.3): nhân bản counts_c, trừ đi 1 lượt chạm tại các hàng mà lần chạm gần nhất
+// là Period HIỆN TẠI (còn đang mở, chưa đóng) — để phần hình thành tạm thời đó không bị tính
+// vào Tail/SP/Poor/Ledge cho tới khi Period đóng (last_period_c của hàng đó khi ấy đã "cố định").
+f_build_confirmed_grid(array<int> counts_c, array<int> last_period_c, int cur_period_id) =>
+    array<int> confirmed = array.copy(counts_c)
+    int n_rows = array.size(confirmed)
+    if n_rows > 0
+        for r = 0 to n_rows - 1
+            if array.get(last_period_c, r) == cur_period_id
+                array.set(confirmed, r, array.get(confirmed, r) - 1)
+    confirmed
+
+// ============================================================================
+// 6. ĐỘNG CƠ TPO, VALUE AREA, POOR HIGH/LOW & 80% RULE (gọi library mpcore)
+// ============================================================================
+if not na(prof.start_bar) and array.size(tpo_counts) > 0
+    float grid_low  = base_row * step
+    prof.tick_step := step
+
+    // 6.1+6.2. Point of Control & Value Area (lưới mịn — price_step)
+    [poc_price, poc_row] = mpcore.f_calc_poc(tpo_counts, grid_low, step, prof.sess_high, prof.sess_low)
+    prof.poc := poc_price
+    [vah_price, val_price] = mpcore.f_calc_value_area(tpo_counts, poc_row, grid_low, step, prof.total_tpo, va_pct)
+    prof.vah := vah_price
+    prof.val := val_price
+
+    // 6.3+6.4: TPO Count/Tails/SP/Ledge/Poor High-Low — chạy trên lưới THÔ (tpo_counts_c,
+    // step_c), tách riêng khỏi POC/VAH/VAL (lưới mịn) để không bị vỡ vụn trên mã mintick nhỏ
+    // nhưng biên độ phiên rộng (VN30F1M...). poc_row_c chỉ là điểm neo nội bộ cho quét
+    // Tail/SP/Ledge — không phải đường POC hiển thị.
+    float grid_low_c = base_row_c * step_c
+    [poc_price_c, poc_row_c] = mpcore.f_calc_poc(tpo_counts_c, grid_low_c, step_c, prof.sess_high, prof.sess_low)
+    diag_poc_tpo_cnt_c := array.get(tpo_counts_c, poc_row_c) // Chẩn đoán dedup: luôn <= periods_in_sess
+
+    [above_cnt, below_cnt] = mpcore.f_calc_tpo_above_below(tpo_counts_c, poc_row_c)
+    prof.tpo_above_poc := above_cnt
+    prof.tpo_below_poc := below_cnt
+
+    // Lưới "đã xác nhận" — loại phần Period hiện tại (đang mở) ra khỏi Tail/SP/Poor/Ledge, xem
+    // f_build_confirmed_grid & changelog v3.3. poc_row_c/grid_low_c vẫn giữ nguyên từ lưới live.
+    array<int> confirmed_counts_c = f_build_confirmed_grid(tpo_counts_c, tpo_last_period_c, prof.last_period_id)
+
+    int buy_tail_rows  = mpcore.f_count_tail_rows(confirmed_counts_c, poc_row_c, true)
+    int sell_tail_rows = mpcore.f_count_tail_rows(confirmed_counts_c, poc_row_c, false)
+    prof.buying_tail_h  := mpcore.f_detect_buying_tail(confirmed_counts_c, poc_row_c, grid_low_c, step_c, min_tail_tpo)
+    prof.selling_tail_l := mpcore.f_detect_selling_tail(confirmed_counts_c, poc_row_c, grid_low_c, step_c, min_tail_tpo)
+
+    [has_poor_low, has_poor_high] = mpcore.f_detect_poor_hl(confirmed_counts_c, prof.buying_tail_h, prof.selling_tail_l)
+    prof.has_poor_low  := has_poor_low
+    prof.has_poor_high := has_poor_high
+
+    [has_sp_mid, sp_mid_bot, sp_mid_top] = mpcore.f_detect_single_prints(confirmed_counts_c, buy_tail_rows, sell_tail_rows, min_tail_tpo, grid_low_c, step_c)
+    prof.has_sp_mid := has_sp_mid
+    prof.sp_mid_bot := sp_mid_bot
+    prof.sp_mid_top := sp_mid_top
+
+    prof.ledge_price := mpcore.f_detect_ledge(confirmed_counts_c, grid_low_c, step_c)
+
+    [has_late_spike, spike_base] = mpcore.f_detect_late_spike(prof, ib_periods_cnt, step)
+    prof.has_late_spike := has_late_spike
+    prof.spike_base     := spike_base
+
+    // 6.5. Quy tắc 80% Value Area Rule (80% VA Rule Engine)
+    [status_80, trig_80, new_bars_inside] = mpcore.f_check_80_rule(prof, high, low, bars_inside_prev_va)
+    prof.rule_80_status := status_80
+    trig_rule_80        := trig_80
+    bars_inside_prev_va := new_bars_inside
+
+    if trig_rule_80 and not alerted_rule_80 and en_al_rule80
+        alerted_rule_80 := true
+        alert("[" + syminfo.ticker + "] 80% VALUE AREA RULE KÍCH HOẠT: Giá mở ngoài VA trước và đã chấp nhận bên trong qua 2 thanh nến liên tiếp!", alert.freq_once_per_bar)
+
+    // 6.6. Phân loại Day Type & Open Type
+    prof.day_type  := mpcore.f_classify_day_type(prof, ib_periods_cnt)
+    prof.open_type := mpcore.f_classify_open_type(prof)
+
+    // 6.7. Cảnh báo thông thường trong phiên
+    if prof.periods_in_sess > ib_periods_cnt
+        if en_al_ib and not alerted_ib_up and high > prof.ib_high
+            trig_ib_up      := true
+            alerted_ib_up   := true
+            alert("[" + syminfo.ticker + "] IB BREAKOUT UP: Phá vỡ IB High tại " + str.tostring(prof.ib_high, format.mintick), alert.freq_once_per_bar)
+
+        if en_al_ib and not alerted_ib_dn and low < prof.ib_low
+            trig_ib_dn      := true
+            alerted_ib_dn   := true
+            alert("[" + syminfo.ticker + "] IB BREAKDOWN: Xuyên thủng IB Low tại " + str.tostring(prof.ib_low, format.mintick), alert.freq_once_per_bar)
+
+        if en_al_tail and not alerted_buy_tail and not na(prof.buying_tail_h)
+            trig_buy_tail      := true
+            alerted_buy_tail   := true
+            alert("[" + syminfo.ticker + "] BUYING TAIL: Xuất hiện đuôi cầu mạnh từ đáy", alert.freq_once_per_bar)
+
+        if en_al_tail and not alerted_sell_tail and not na(prof.selling_tail_l)
+            trig_sell_tail      := true
+            alerted_sell_tail   := true
+            alert("[" + syminfo.ticker + "] SELLING TAIL: Xuất hiện đuôi cung mạnh từ đỉnh", alert.freq_once_per_bar)
+
+        if en_al_dd and not alerted_dd_day and prof.day_type == "Double-Distribution Trend Day"
+            trig_dd_day      := true
+            alerted_dd_day   := true
+            alert("[" + syminfo.ticker + "] DOUBLE-DISTRIBUTION DAY: Hình thành dải Single Prints!", alert.freq_once_per_bar)
+
+// ============================================================================
+// 7. ĐĂNG KÝ CÁC ĐIỀU KIỆN CẢNH BÁO CHUẨN TRADINGVIEW (ALERTCONDITIONS)
+// ============================================================================
+alertcondition(trig_ib_up,     title="1. Phá vỡ IB High (Bullish Extension)", message="[{{ticker}}] Market Profile: Phá vỡ IB High!")
+alertcondition(trig_ib_dn,     title="2. Phá vỡ IB Low (Bearish Extension)",  message="[{{ticker}}] Market Profile: Xuyên thủng IB Low!")
+alertcondition(trig_buy_tail,  title="3. Xuất hiện Buying Tail", message="[{{ticker}}] Market Profile: Hình thành Buying Tail!")
+alertcondition(trig_sell_tail, title="4. Xuất hiện Selling Tail", message="[{{ticker}}] Market Profile: Hình thành Selling Tail!")
+alertcondition(trig_dd_day,    title="5. Double-Distribution Day", message="[{{ticker}}] Market Profile: Double-Distribution Day hình thành!")
+alertcondition(trig_npoc_hit,  title="6. Chạm/Lấp Naked POC", message="[{{ticker}}] Market Profile: Giá đã chạm và lấp đường Naked POC!")
+alertcondition(trig_pva_hit,   title="7. Chạm pVAH/pVAL Phiên Trước", message="[{{ticker}}] Market Profile: Giá đã kiểm định VAH/VAL phiên trước!")
+alertcondition(trig_rule_80,   title="8. Quy tắc 80% Value Area Rule Kích Hoạt", message="[{{ticker}}] Market Profile: 80% VA Rule đã được kích hoạt xác nhận!")
+
+// ============================================================================
+// 7.1. NHÃN pVAH / pVAL / pPOC BÊN THANH GIÁ (PRICE SCALE — PHẢI BIỂU ĐỒ)
+// ============================================================================
+// Dùng plot() với display=display.price_scale để chỉ hiện nhãn + giá trị ngay
+// bên cạnh thanh giá (price scale), không vẽ thêm đường trên pane (đã có line.new riêng).
+// Lưu ý: cần bật "Indicator Last Value Label" trong Chart Settings > Scales (cài đặt chung
+// của TradingView, áp dụng cho mọi indicator) thì nhãn mới hiện ra trên thanh giá.
+// Màu chuyển sang xám nhạt (c_ib_ext) khi mức giá đã bị lấp (Filled); giữ màu gốc khi còn
+// nguyên (Open) — do title của plot() là chuỗi cố định, không thể đổi text "(Open)/(Filled)"
+// động ngay trong nhãn price scale như nhãn trên chart, nên dùng màu để thể hiện trạng thái.
+plot(show_pva_scale ? prof.prev_vah : na, title="pVAH", color=prof.p_vah_tested ? c_ib_ext : c_prev_va_col, display=display.price_scale)
+plot(show_pva_scale ? prof.prev_val : na, title="pVAL", color=prof.p_val_tested ? c_ib_ext : c_prev_va_col, display=display.price_scale)
+plot(show_pva_scale ? prof.prev_poc : na, title="pPOC", color=prof.p_poc_tested ? c_ib_ext : c_navy_poc,    display=display.price_scale)
+
+// ============================================================================
+// 7.2. DEVELOPING VAH / POC / VAL (đường bậc thang theo thời gian thực)
+// ============================================================================
+// plot() giữ nguyên giá trị LỊCH SỬ của từng bar (không như box/line.set_xy bị "viết lại" cả
+// đoạn đã qua mỗi khi giá trị mới nhất đổi) — nên dùng plot(style=stepline) là cách đúng để vẽ
+// Developing VA: thấy được VAH/POC/VAL đã dịch chuyển thế nào qua từng bar trong phiên, áp dụng
+// cho mọi phiên kể cả đã đóng (ngày Trend sẽ thấy POC trôi dần, ngày Nontrend POC ổn định sớm).
+// is_new_session ép về na để ngắt đường nối giữa phiên trước và phiên mới (tránh vẽ xuyên qua
+// giờ nghỉ/qua đêm).
+float dev_vah = is_new_session or not show_va ? na : prof.vah
+float dev_poc = is_new_session or not show_va ? na : prof.poc
+float dev_val = is_new_session or not show_va ? na : prof.val
+
+// display bỏ display.price_scale: không hiện nhãn giá trị bên phải (price scale), vẫn vẽ trên pane.
+dev_display = display.pane + display.status_line + display.data_window
+p_dev_vah = plot(dev_vah, title="VAH (Developing)", style=plot.style_stepline, color=c_va_edge_line, linewidth=1, display=dev_display)
+p_dev_poc = plot(dev_poc, title="POC (Developing)", style=plot.style_stepline, color=c_poc_line,     linewidth=2, display=dev_display)
+p_dev_val = plot(dev_val, title="VAL (Developing)", style=plot.style_stepline, color=c_va_edge_line, linewidth=1, display=dev_display)
+fill(p_dev_vah, p_dev_poc, color=c_va_above, title="VA Trên POC")
+fill(p_dev_poc, p_dev_val, color=c_va_below, title="VA Dưới POC")
+
+// ============================================================================
+// 8. VẼ ĐỐI TƯỢNG LÊN BIỂU ĐỒ (VISUALIZATION)
+// ============================================================================
+if not na(prof.start_bar)
+    int x1 = prof.start_bar
+    int x2 = bar_index
+    float ib_rng = prof.ib_high - prof.ib_low
+
+    // 8.1. IB Lines & Extensions — chỉ tạo mới 1 lần/phiên, các bar sau chỉ kéo dài/cập nhật
+    if show_ib
+        if na(draw.l_ib_h)
+            draw.l_ib_h := line.new(x1, prof.ib_high, x2, prof.ib_high, color=c_ib_line, style=line.style_dashed, width=1)
+            draw.l_ib_l := line.new(x1, prof.ib_low,  x2, prof.ib_low,  color=c_ib_line, style=line.style_dashed, width=1)
+        else
+            line.set_xy1(draw.l_ib_h, x1, prof.ib_high)
+            line.set_xy2(draw.l_ib_h, x2, prof.ib_high)
+            line.set_xy1(draw.l_ib_l, x1, prof.ib_low)
+            line.set_xy2(draw.l_ib_l, x2, prof.ib_low)
+
+        if ib_rng > 0
+            [ext_u15, ext_u20, ext_d15, ext_d20] = mpcore.f_calc_ib_extensions(prof.ib_high, prof.ib_low)
+
+            if na(draw.l_ib_ext_u15)
+                draw.l_ib_ext_u15 := line.new(x1, ext_u15, x2, ext_u15, color=c_ib_ext, style=line.style_dotted, width=1)
+                draw.l_ib_ext_u20 := line.new(x1, ext_u20, x2, ext_u20, color=c_ib_ext, style=line.style_dotted, width=1)
+                draw.l_ib_ext_d15 := line.new(x1, ext_d15, x2, ext_d15, color=c_ib_ext, style=line.style_dotted, width=1)
+                draw.l_ib_ext_d20 := line.new(x1, ext_d20, x2, ext_d20, color=c_ib_ext, style=line.style_dotted, width=1)
+            else
+                line.set_xy1(draw.l_ib_ext_u15, x1, ext_u15)
+                line.set_xy2(draw.l_ib_ext_u15, x2, ext_u15)
+                line.set_xy1(draw.l_ib_ext_u20, x1, ext_u20)
+                line.set_xy2(draw.l_ib_ext_u20, x2, ext_u20)
+                line.set_xy1(draw.l_ib_ext_d15, x1, ext_d15)
+                line.set_xy2(draw.l_ib_ext_d15, x2, ext_d15)
+                line.set_xy1(draw.l_ib_ext_d20, x1, ext_d20)
+                line.set_xy2(draw.l_ib_ext_d20, x2, ext_d20)
+
+    // 8.2. VAH/POC/VAL — xem mục 7.2 phía trên (plot+fill Developing VA)
+
+    // 8.3. Tails, Single Prints, Ledge, Late Spike — có thể xuất hiện/biến mất trong phiên
+    if show_tails
+        if not na(prof.buying_tail_h)
+            if na(draw.b_buy_tail)
+                draw.b_buy_tail := box.new(x1, prof.buying_tail_h, x2, prof.sess_low, border_color=c_forest_buy, border_width=1, border_style=line.style_dashed, bgcolor=c_forest_fill, text="Buying Tail", text_size=size.tiny, text_color=c_forest_buy, text_halign=text.align_right)
+            else
+                box.set_top(draw.b_buy_tail, prof.buying_tail_h)
+                box.set_bottom(draw.b_buy_tail, prof.sess_low)
+                box.set_right(draw.b_buy_tail, x2)
+        else if not na(draw.b_buy_tail)
+            box.delete(draw.b_buy_tail)
+            draw.b_buy_tail := na
+
+        if not na(prof.selling_tail_l)
+            if na(draw.b_sell_tail)
+                draw.b_sell_tail := box.new(x1, prof.sess_high, x2, prof.selling_tail_l, border_color=c_burgundy_sel, border_width=1, border_style=line.style_dashed, bgcolor=c_burgundy_fil, text="Selling Tail", text_size=size.tiny, text_color=c_burgundy_sel, text_halign=text.align_right)
+            else
+                box.set_top(draw.b_sell_tail, prof.sess_high)
+                box.set_bottom(draw.b_sell_tail, prof.selling_tail_l)
+                box.set_right(draw.b_sell_tail, x2)
+        else if not na(draw.b_sell_tail)
+            box.delete(draw.b_sell_tail)
+            draw.b_sell_tail := na
+
+        if prof.has_sp_mid and not na(prof.sp_mid_top)
+            if na(draw.b_sp_mid)
+                draw.b_sp_mid := box.new(x1, prof.sp_mid_top, x2, prof.sp_mid_bot, border_color=c_dt_neutral, border_width=1, border_style=line.style_dotted, bgcolor=c_sp_fill, text="Single Prints", text_size=size.tiny, text_color=c_tbl_text, text_halign=text.align_right)
+            else
+                box.set_top(draw.b_sp_mid, prof.sp_mid_top)
+                box.set_bottom(draw.b_sp_mid, prof.sp_mid_bot)
+                box.set_right(draw.b_sp_mid, x2)
+        else if not na(draw.b_sp_mid)
+            box.delete(draw.b_sp_mid)
+            draw.b_sp_mid := na
+
+        if not na(prof.ledge_price)
+            if na(draw.l_ledge)
+                draw.l_ledge := line.new(x1, prof.ledge_price, x2, prof.ledge_price, color=c_dt_dd, style=line.style_dashed, width=1)
+            else
+                line.set_xy1(draw.l_ledge, x1, prof.ledge_price)
+                line.set_xy2(draw.l_ledge, x2, prof.ledge_price)
+        else if not na(draw.l_ledge)
+            line.delete(draw.l_ledge)
+            draw.l_ledge := na
+
+        if prof.has_late_spike
+            if na(draw.lb_spike)
+                draw.lb_spike := label.new(x2, prof.sess_high, "Late Spike", style=label.style_label_down, color=c_dt_dd, textcolor=color.white, size=size.tiny)
+            else
+                label.set_xy(draw.lb_spike, x2, prof.sess_high)
+        else if not na(draw.lb_spike)
+            label.delete(draw.lb_spike)
+            draw.lb_spike := na
+
+    // 8.4. Nhãn Poor High / Poor Low — có thể xuất hiện/biến mất trong phiên
+    if show_poor
+        if prof.has_poor_high
+            if na(draw.lb_poor_h)
+                draw.lb_poor_h := label.new(x2, prof.sess_high, "Poor High", style=label.style_label_down, color=c_poor_col, textcolor=color.white, size=size.tiny)
+            else
+                label.set_xy(draw.lb_poor_h, x2, prof.sess_high)
+        else if not na(draw.lb_poor_h)
+            label.delete(draw.lb_poor_h)
+            draw.lb_poor_h := na
+
+        if prof.has_poor_low
+            if na(draw.lb_poor_l)
+                draw.lb_poor_l := label.new(x2, prof.sess_low, "Poor Low", style=label.style_label_up, color=c_poor_col, textcolor=color.white, size=size.tiny)
+            else
+                label.set_xy(draw.lb_poor_l, x2, prof.sess_low)
+        else if not na(draw.lb_poor_l)
+            label.delete(draw.lb_poor_l)
+            draw.lb_poor_l := na
+
+    // 8.5. Dải màu Day Type / Open Type — cập nhật vị trí, màu & nội dung text tại chỗ
+    if show_band and not na(prof.tick_step)
+        [band_top, band_bot] = mpcore.f_calc_band_position(prof.tick_step, prof.sess_high, prof.sess_low)
+        color band_col    = mpcore.f_get_daytype_color(prof.day_type, c_dt_trend, c_dt_dd, c_dt_neutral, c_dt_nontrend, c_dt_normal)
+        string band_txt   = prof.day_type + "  |  " + prof.open_type
+
+        if na(draw.b_status_band)
+            draw.b_status_band := box.new(
+                 left         = x1,
+                 top          = band_top,
+                 right        = x2,
+                 bottom       = band_bot,
+                 border_color = band_col,
+                 border_width = 1,
+                 bgcolor      = band_col,
+                 text         = band_txt,
+                 text_color   = color.white,
+                 text_size    = size.small,
+                 text_halign  = text.align_center
+             )
+        else
+            box.set_top(draw.b_status_band, band_top)
+            box.set_bottom(draw.b_status_band, band_bot)
+            box.set_right(draw.b_status_band, x2)
+            box.set_border_color(draw.b_status_band, band_col)
+            box.set_bgcolor(draw.b_status_band, band_col)
+            box.set_text(draw.b_status_band, band_txt)
+    else if not na(draw.b_status_band)
+        box.delete(draw.b_status_band)
+        draw.b_status_band := na
+
+// ============================================================================
+// 9. BẢNG THỐNG KÊ DASHBOARD (13 DÒNG, VỊ TRÍ TUỲ CHỌN qua dash_pos_opt)
+// ============================================================================
+// Rút gọn chuỗi Day Type/Open Type (mpcore.f_classify_* trả về tên đầy đủ, dùng cho band vẽ
+// trên chart — đủ chỗ) chỉ riêng cho dashboard, vì cột giá trị của CẢ bảng giãn theo chuỗi dài
+// nhất trong bảng. Giữ nguyên chuỗi gốc qua tooltip (hover) khi cần xem đầy đủ.
+f_short_day_type(string dt) =>
+    string r = dt == "Double-Distribution Trend Day" ? "DD Trend Day" :
+         dt == "Normal Variation Day" ? "Norm. Variation" :
+         dt == "Neutral Day (Center)" ? "Neutral (Center)" :
+         dt == "Neutral Day (Extreme)" ? "Neutral (Extreme)" : dt
+    r
+
+f_short_open_type(string ot) =>
+    string r = ot == "Open-Drive (OD)" ? "OD" :
+         ot == "Open-Test-Drive (OTD)" ? "OTD" :
+         ot == "Open-Rejection-Reverse (ORR)" ? "ORR" :
+         ot == "Open-Auction Out of Range (OAOR)" ? "OAOR" :
+         ot == "Open-Auction In Range (OAIR)" ? "OAIR" : ot
+    r
+
+dash_position = dash_pos_opt == "Trên Trái" ? position.top_left : dash_pos_opt == "Dưới Trái" ? position.bottom_left : dash_pos_opt == "Dưới Phải" ? position.bottom_right : position.top_right
+var table dash = table.new(dash_position, 2, 13, bgcolor=c_tbl_bg, border_color=c_tbl_border, border_width=1, frame_color=c_navy_poc, frame_width=1)
+
+if barstate.islast and show_dash
+    table.cell(dash, 0, 0, "MARKET PROFILE", bgcolor=c_navy_poc, text_color=color.white, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 0, "v3.3", bgcolor=c_navy_poc, text_color=color.white, text_size=size.small, text_halign=text.align_right)
+
+    color dt_col = mpcore.f_get_daytype_color(prof.day_type, c_dt_trend, c_dt_dd, c_dt_neutral, c_dt_nontrend, c_dt_normal)
+    table.cell(dash, 0, 1, "Day Type", bgcolor=c_tbl_header, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 1, f_short_day_type(prof.day_type), bgcolor=dt_col, text_color=color.white, text_size=size.small, text_halign=text.align_right, tooltip=prof.day_type)
+
+    table.cell(dash, 0, 2, "Open Type", bgcolor=c_tbl_bg, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 2, f_short_open_type(prof.open_type), bgcolor=c_tbl_bg, text_color=c_navy_poc, text_size=size.small, text_halign=text.align_right, tooltip=prof.open_type)
+
+    string ib_state = mpcore.f_format_ib_state(prof)
+    table.cell(dash, 0, 3, "IB", bgcolor=c_tbl_header, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 3, ib_state, bgcolor=c_tbl_header, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_right)
+
+    string rf_str = mpcore.f_format_signed_int(prof.rf_score) + (show_diag ? " (" + str.tostring(prof.periods_in_sess) + "P)" : "")
+    color  rf_col = prof.rf_score > 0 ? c_forest_buy : prof.rf_score < 0 ? c_burgundy_sel : c_tbl_text
+    table.cell(dash, 0, 4, "RF", bgcolor=c_tbl_bg, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 4, rf_str, bgcolor=c_tbl_bg, text_color=rf_col, text_size=size.small, text_halign=text.align_right)
+
+    // show_diag: "POC:X/Y" = X TPO tại hàng POC / Y Period — X phải luôn <= Y (kiểm tra dedup).
+    string tpo_imb = mpcore.f_format_tpo_imbalance(prof) +
+         (show_diag ? " (POC:" + str.tostring(diag_poc_tpo_cnt_c) + "/" + str.tostring(prof.periods_in_sess) + "P, " + str.tostring(array.size(tpo_counts_c)) + "h)" : "")
+    color  tpo_col = prof.tpo_below_poc > prof.tpo_above_poc ? c_forest_buy : prof.tpo_above_poc > prof.tpo_below_poc ? c_burgundy_sel : c_tbl_text
+    table.cell(dash, 0, 5, "TPO Count", bgcolor=c_tbl_header, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 5, tpo_imb, bgcolor=c_tbl_header, text_color=tpo_col, text_size=size.small, text_halign=text.align_right)
+
+    string va_str = str.tostring(prof.vah, format.mintick) + " | " + str.tostring(prof.poc, format.mintick) + " | " + str.tostring(prof.val, format.mintick)
+    table.cell(dash, 0, 6, "VAH/POC/VAL", bgcolor=c_tbl_bg, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 6, va_str, bgcolor=c_tbl_bg, text_color=c_navy_poc, text_size=size.small, text_halign=text.align_right)
+
+    string pva_str = na(prof.prev_vah) ? "—" :
+         mpcore.f_format_level_status(prof.prev_vah, prof.p_vah_tested) + " / " + mpcore.f_format_level_status(prof.prev_val, prof.p_val_tested)
+    table.cell(dash, 0, 7, "pVAH/pVAL", bgcolor=c_tbl_header, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 7, pva_str, bgcolor=c_tbl_header, text_color=c_prev_va_col, text_size=size.small, text_halign=text.align_right)
+
+    int npoc_cnt = array.size(active_npocs)
+    float nearest_npoc = na
+    float min_dist     = 1e10
+    if npoc_cnt > 0
+        for i = 0 to npoc_cnt - 1
+            NakedPOC np = array.get(active_npocs, i)
+            float d = math.abs(close - np.price)
+            if d < min_dist
+                min_dist     := d
+                nearest_npoc := np.price
+    string npoc_str = npoc_cnt > 0 ? str.tostring(npoc_cnt) + " @ " + str.tostring(nearest_npoc, format.mintick) : "Đã lấp hết"
+    table.cell(dash, 0, 8, "Naked POC", bgcolor=c_tbl_bg, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 8, npoc_str, bgcolor=c_tbl_bg, text_color=c_npoc_color, text_size=size.small, text_halign=text.align_right)
+
+    string poor_str = mpcore.f_format_poor_hl_summary(prof)
+    table.cell(dash, 0, 9, "Poor High/Low", bgcolor=c_tbl_header, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 9, poor_str, bgcolor=c_tbl_header, text_color=c_poor_col, text_size=size.small, text_halign=text.align_right)
+
+    table.cell(dash, 0, 10, "80% VA Rule", bgcolor=c_tbl_bg, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 10, prof.rule_80_status, bgcolor=c_tbl_bg, text_color=c_navy_poc, text_size=size.small, text_halign=text.align_right)
+
+    string tail_info = mpcore.f_format_tails_summary(prof)
+    table.cell(dash, 0, 11, "Tails", bgcolor=c_tbl_header, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 11, tail_info, bgcolor=c_tbl_header, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_right)
+
+    string spec_info = mpcore.f_format_special_patterns_summary(prof)
+    table.cell(dash, 0, 12, "Mô hình khác", bgcolor=c_tbl_bg, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 12, spec_info, bgcolor=c_tbl_bg, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_right)
+else if barstate.islast and not show_dash
+    table.clear(dash, 0, 0, 1, 12)

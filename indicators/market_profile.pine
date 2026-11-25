@@ -2,7 +2,7 @@
 // ─── Market Profile — Mind over Markets (Classic Light Edition) ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-11-14
-// Phiên bản: 3.2
+// Phiên bản: 3.5
 // Mô tả: Market Profile / TPO (Time Price Opportunity) theo phương pháp "Mind over Markets" —
 //        tính Initial Balance, Value Area (VAH/VAL/POC), Naked POC, Tails/Single Prints/Ledge/Spike,
 //        phân loại Day Type & Open Type, 80% VA Rule, Dashboard thống kê.
@@ -44,9 +44,21 @@
 //       f_short_day_type/f_short_open_type (chỉ là format string cho riêng dashboard của file
 //       này — không đụng tới library/động cơ tính toán), giữ chuỗi đầy đủ qua tooltip. Số
 //       liệu/logic tính toán KHÔNG đổi, chỉ gọn phần hiển thị.
+// v3.3: Trì hoãn hiển thị Tail/Single Print/Poor High-Low/Ledge do TPO Period HIỆN TẠI (chưa
+//       đóng) tạo ra — thêm hàm cục bộ f_build_confirmed_grid, dùng lưới "đã xác nhận" này thay
+//       cho tpo_counts_c (lưới live) khi gọi 6 hàm phát hiện mẫu hình của mpcore. Chi tiết xem
+//       comment trên hàm f_build_confirmed_grid và docs/market-profile.md mục "Thiết Kế: Lưới
+//       Xác Nhận".
+// v3.4: Sửa lỗi lưới xác nhận v3.3 — hàng đã có TPO count thực >= 2 (Period sau "fill" vào 1
+//       single print của Period trước) bị trừ nhầm thành 1, khiến Tail/SP hiện sai là còn
+//       nguyên. Xem comment trên hàm f_build_confirmed_grid.
+// v3.5: Chuyển hàm cục bộ f_build_confirmed_grid sang library market_profile_core v1.2
+//       (import .../market_profile_core/3) — theo yêu cầu người dùng rà soát lại core/library,
+//       tránh lặp logic xử lý lưới TPO rải rác ngoài indicator. Hành vi/số liệu hiển thị KHÔNG
+//       đổi so với v3.4, chỉ gọi mpcore.f_build_confirmed_grid thay bản viết tay riêng.
 indicator("Market Profile — Mind over Markets (Classic Light Edition)", shorttitle="MP", overlay=true, max_lines_count=500, max_boxes_count=500, max_labels_count=500)
 
-import anthonydang/market_profile_core/2 as mpcore
+import anthonydang/market_profile_core/3 as mpcore
 
 // ============================================================================
 // 1. BẢNG CÀI ĐẶT TẮT/BẬT & THÔNG SỐ (INPUTS TOGGLE PANEL)
@@ -402,21 +414,26 @@ if not na(prof.start_bar) and array.size(tpo_counts) > 0
     prof.tpo_above_poc := above_cnt
     prof.tpo_below_poc := below_cnt
 
-    int buy_tail_rows  = mpcore.f_count_tail_rows(tpo_counts_c, poc_row_c, true)
-    int sell_tail_rows = mpcore.f_count_tail_rows(tpo_counts_c, poc_row_c, false)
-    prof.buying_tail_h  := mpcore.f_detect_buying_tail(tpo_counts_c, poc_row_c, grid_low_c, step_c, min_tail_tpo)
-    prof.selling_tail_l := mpcore.f_detect_selling_tail(tpo_counts_c, poc_row_c, grid_low_c, step_c, min_tail_tpo)
+    // Lưới "đã xác nhận" — loại phần Period hiện tại (đang mở) ra khỏi Tail/SP/Poor/Ledge, xem
+    // mpcore.f_build_confirmed_grid & changelog v3.3/v3.5. poc_row_c/grid_low_c vẫn giữ nguyên
+    // từ lưới live.
+    array<int> confirmed_counts_c = mpcore.f_build_confirmed_grid(tpo_counts_c, tpo_last_period_c, prof.last_period_id)
 
-    [has_poor_low, has_poor_high] = mpcore.f_detect_poor_hl(tpo_counts_c, prof.buying_tail_h, prof.selling_tail_l)
+    int buy_tail_rows  = mpcore.f_count_tail_rows(confirmed_counts_c, poc_row_c, true)
+    int sell_tail_rows = mpcore.f_count_tail_rows(confirmed_counts_c, poc_row_c, false)
+    prof.buying_tail_h  := mpcore.f_detect_buying_tail(confirmed_counts_c, poc_row_c, grid_low_c, step_c, min_tail_tpo)
+    prof.selling_tail_l := mpcore.f_detect_selling_tail(confirmed_counts_c, poc_row_c, grid_low_c, step_c, min_tail_tpo)
+
+    [has_poor_low, has_poor_high] = mpcore.f_detect_poor_hl(confirmed_counts_c, prof.buying_tail_h, prof.selling_tail_l)
     prof.has_poor_low  := has_poor_low
     prof.has_poor_high := has_poor_high
 
-    [has_sp_mid, sp_mid_bot, sp_mid_top] = mpcore.f_detect_single_prints(tpo_counts_c, buy_tail_rows, sell_tail_rows, min_tail_tpo, grid_low_c, step_c)
+    [has_sp_mid, sp_mid_bot, sp_mid_top] = mpcore.f_detect_single_prints(confirmed_counts_c, buy_tail_rows, sell_tail_rows, min_tail_tpo, grid_low_c, step_c)
     prof.has_sp_mid := has_sp_mid
     prof.sp_mid_bot := sp_mid_bot
     prof.sp_mid_top := sp_mid_top
 
-    prof.ledge_price := mpcore.f_detect_ledge(tpo_counts_c, grid_low_c, step_c)
+    prof.ledge_price := mpcore.f_detect_ledge(confirmed_counts_c, grid_low_c, step_c)
 
     [has_late_spike, spike_base] = mpcore.f_detect_late_spike(prof, ib_periods_cnt, step)
     prof.has_late_spike := has_late_spike
@@ -680,7 +697,7 @@ var table dash = table.new(dash_position, 2, 13, bgcolor=c_tbl_bg, border_color=
 
 if barstate.islast and show_dash
     table.cell(dash, 0, 0, "MARKET PROFILE", bgcolor=c_navy_poc, text_color=color.white, text_size=size.small, text_halign=text.align_left)
-    table.cell(dash, 1, 0, "v3.2", bgcolor=c_navy_poc, text_color=color.white, text_size=size.small, text_halign=text.align_right)
+    table.cell(dash, 1, 0, "v3.5", bgcolor=c_navy_poc, text_color=color.white, text_size=size.small, text_halign=text.align_right)
 
     color dt_col = mpcore.f_get_daytype_color(prof.day_type, c_dt_trend, c_dt_dd, c_dt_neutral, c_dt_nontrend, c_dt_normal)
     table.cell(dash, 0, 1, "Day Type", bgcolor=c_tbl_header, text_color=c_tbl_text, text_size=size.small, text_halign=text.align_left)

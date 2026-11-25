@@ -10,7 +10,7 @@
 |---|---|---|---|
 | Global Markets Table | [indicators/global_markets_table.pine](../indicators/global_markets_table.pine) | 1.5 | [global-markets-table.md](global-markets-table.md) |
 | LSC Pattern | [indicators/lsc_pattern.pine](../indicators/lsc_pattern.pine) | 1.0 | [lsc-pattern.md](lsc-pattern.md) |
-| Market Profile (Mind over Markets) | [indicators/market_profile.pine](../indicators/market_profile.pine) | 3.4 | [market-profile.md](market-profile.md) |
+| Market Profile (Mind over Markets) | [indicators/market_profile.pine](../indicators/market_profile.pine) | 3.5 | [market-profile.md](market-profile.md) |
 | Order Flow & Market Profile Panel | [indicators/order_flow_profile_panel.pine](../indicators/order_flow_profile_panel.pine) | 1.14 | [order-flow-profile-panel.md](order-flow-profile-panel.md) |
 | Order Flow Bar | [indicators/order_flow_bar.pine](../indicators/order_flow_bar.pine) | 1.18 | [order-flow-bar.md](order-flow-bar.md) |
 | Order Flow Overlay | [indicators/order_flow_overlay.pine](../indicators/order_flow_overlay.pine) | 1.0 | [order-flow-overlay.md](order-flow-overlay.md) |
@@ -31,7 +31,7 @@
 | Tên | File Script | Version | Tài Liệu |
 |---|---|---|---|
 | SMC Core Library | [libraries/smc_core.pine](../libraries/smc_core.pine) | 1.3 | [smc-core.md](smc-core.md) |
-| Market Profile Core Library | [libraries/market_profile_core.pine](../libraries/market_profile_core.pine) | 1.1 | [market-profile-core.md](market-profile-core.md) |
+| Market Profile Core Library | [libraries/market_profile_core.pine](../libraries/market_profile_core.pine) | 1.2 | [market-profile-core.md](market-profile-core.md) |
 | Order Flow Core Library | [libraries/order_flow_core.pine](../libraries/order_flow_core.pine) | 1.0 | [order-flow-core.md](order-flow-core.md) |
 
 ## Không Tài Liệu Hóa (Có Chủ Đích)

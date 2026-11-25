@@ -1,9 +1,9 @@
 # Market Profile (Mind over Markets) — Tài Liệu
 
-> **Script**: [indicators/market_profile.pine](../indicators/market_profile.pine) (v3.2)
+> **Script**: [indicators/market_profile.pine](../indicators/market_profile.pine) (v3.5)
 > **Loại**: Indicator (overlay)
-> **Pine Script**: v6 — import [libraries/market_profile_core.pine](../libraries/market_profile_core.pine) (`anthonydang/market_profile_core/2`)
-> **Ngày tạo**: 2026-11-14 / **Cập nhật**: 2026-11-21
+> **Pine Script**: v6 — import [libraries/market_profile_core.pine](../libraries/market_profile_core.pine) (`anthonydang/market_profile_core/3`)
+> **Ngày tạo**: 2026-11-14 / **Cập nhật**: 2026-11-25
 
 ## Tổng Quan
 
@@ -63,7 +63,7 @@ Indicator Market Profile / TPO (Time Price Opportunity) theo phương pháp kinh
    
    Cả 2 lưới đều **chỉ cộng 1 lần cho mỗi `period_id`** (dò qua mảng `last_period` song song, tránh 1 khung 30 phút bị đếm nhiều lần nếu có nhiều nến chart rơi vào cùng khung đó) và mở rộng động (`array.unshift`/`array.push`) khi giá vượt biên hiện tại — không quét lại lịch sử phiên như bản v1.2 (O(N²), gây chậm nặng trên 1m/3m/5m). `prof.total_tpo` (dùng tính VA%) chỉ cộng từ lưới mịn (cờ `track_total`), tránh đếm trùng.
 5. **Rotation Factor**: chỉ cộng dồn 1 lần khi 1 TPO Period ĐÃ ĐÓNG (so sánh high/low gộp của Period vừa đóng với Period trước đó), không cộng mỗi nến chart (hàm `f_process_bar_period`).
-6. **Tails/Single Prints/Ledge/Spike**: trên **lưới thô** (`tpo_counts_c`), tìm `poc_row_c` nội bộ (cùng công thức tie-break, chỉ dùng làm điểm neo quét — không phải đường POC hiển thị) rồi quét từ đó ra 2 biên tìm dải TPO=1 liên tiếp (tail), dải TPO=1 ở giữa (single print), 2 hàng liền kề TPO≥3 kẹp giữa hàng TPO≤1 (ledge). Late Spike vẫn dùng lưới mịn (high/low gộp của 2 TPO Period cuối vượt VAH/VAL ≥2 `step`).
+6. **Tails/Single Prints/Ledge/Spike**: trên **lưới thô** (`tpo_counts_c`), tìm `poc_row_c` nội bộ (cùng công thức tie-break, chỉ dùng làm điểm neo quét — không phải đường POC hiển thị) rồi quét từ đó ra 2 biên tìm dải TPO=1 liên tiếp (tail), dải TPO=1 ở giữa (single print), 2 hàng liền kề TPO≥3 kẹp giữa hàng TPO≤1 (ledge). Riêng Tail/Single Print/Poor High-Low/Ledge chạy trên **lưới đã xác nhận** (`confirmed_counts_c`, từ v3.3) — xem mục "Thiết Kế: Lưới Xác Nhận" bên dưới — không phải `tpo_counts_c` trực tiếp. Late Spike vẫn dùng lưới mịn (high/low gộp của 2 TPO Period cuối vượt VAH/VAL ≥2 `step`).
 7. **Day Type / Open Type**: phân loại dựa trên tỷ lệ `s_range/ib_rng`, vị trí mở cửa trong IB, hướng mở rộng đầu tiên, `rf_score` (Rotation Factor).
 8. **80% VA Rule**: đếm số **nến chart** liên tiếp giá nằm trong VA phiên trước sau khi mở cửa ngoài VA đó — ⚠️ đây là phần DUY NHẤT còn đếm theo nến chart, chưa chuyển sang TPO Period (xem "Giới Hạn & Lưu Ý").
 9. **Developing VAH/POC/VAL** (từ v2.2): `plot(style=plot.style_stepline)` cho VAH/POC/VAL + `fill()` giữa 2 đường để tô 2 vùng — xem mục "Thiết Kế: Developing VA" bên dưới.
@@ -102,6 +102,31 @@ Vì Tail/Poor High-Low/Single Prints đều phụ thuộc chặt vào CÙNG `poc
 `prof.total_tpo` (dùng tính Value Area %) chỉ cộng từ lưới mịn — hàm `f_add_bar_tpo` có tham số `track_total` để tránh bị cộng trùng khi gọi 2 lần/bar (1 lần/lưới).
 
 **Cách tinh chỉnh `shape_step`**: nên đặt xấp xỉ 1/15 đến 1/30 biên độ dao động trung bình trong phiên của mã (để ra khoảng 15–30 hàng/phiên, giống mật độ TPO chart cổ điển). Bật toggle **"Hiện Chẩn Đoán Dedup trên Dashboard"** (`show_diag`, mặc định tắt để dashboard gọn) để dòng RF hiện thêm `(YP)` và dòng TPO Count hiện thêm `(POC:X/YP, Zh)`: `X` (TPO tại hàng POC-thô) phải luôn `<= Y` (số Period đã trôi qua) — nếu không, báo lại ngay vì đó là bug dedup thật. `Z` (số hàng lưới thô) nên nằm trong khoảng vài chục; quá lớn (hàng trăm) → tăng `shape_step`; quá nhỏ (dưới ~10) → giảm `shape_step`.
+
+## Thiết Kế: Lưới Xác Nhận (Confirmed Grid) Cho Tail/Single Print/Poor High-Low/Ledge
+
+**Vấn đề gặp phải**: lưới thô `tpo_counts_c` cộng dồn TPO ngay khi nến chạm tới, kể cả TPO Period **hiện tại còn đang mở** (chưa đủ `tpo_period_min` phút). Vì vậy 1 hàng giá ở biên có thể "vừa mới" được tính là TPO=1 (tail/single print) chỉ vì Period hiện tại chưa đóng — Tail/Single Print/Poor High-Low/Ledge hiện ra rồi có thể đổi ngay (mở rộng thêm, hoặc biến mất) khi Period đó còn tiếp diễn, gây cảm giác "giật hình"/không chính thức trên chart.
+
+**Cách sửa (v3.3)**: thêm hàm cục bộ `f_build_confirmed_grid(counts_c, last_period_c, cur_period_id)` trong `market_profile.pine` (không sửa library — các file khác dùng chung `mpcore` không bị ảnh hưởng): nhân bản `tpo_counts_c`, sau đó với MỌI hàng mà lần chạm gần nhất (`tpo_last_period_c[hàng]`) chính là `prof.last_period_id` (Period hiện tại, còn đang mở) thì trừ đi 1 lượt chạm đó trước khi đưa vào các hàm phát hiện mẫu hình:
+
+```pinescript
+array<int> confirmed_counts_c = f_build_confirmed_grid(tpo_counts_c, tpo_last_period_c, prof.last_period_id)
+mpcore.f_detect_buying_tail(confirmed_counts_c, ...)   // thay cho tpo_counts_c
+mpcore.f_detect_selling_tail(confirmed_counts_c, ...)
+mpcore.f_detect_poor_hl(confirmed_counts_c, ...)
+mpcore.f_detect_single_prints(confirmed_counts_c, ...)
+mpcore.f_detect_ledge(confirmed_counts_c, ...)
+```
+
+**Lỗi phát hiện sau đó (sửa ở v3.4)**: cách trừ 1 "vô điều kiện" ở trên (trừ cho MỌI hàng mà Period hiện tại chạm tới, bất kể count thực là bao nhiêu) có 1 lỗi — nếu 1 hàng ĐÃ được Period trước (đã đóng) xác nhận là single print (count=1), rồi Period kế tiếp (đang mở) "fill" vào đúng hàng đó (count thực tăng lên 2), lưới xác nhận vẫn trừ 1 ra còn 1 → vẫn đọc là single print, khiến Tail/SP của Period trước hiển thị SAI là còn nguyên dù thực tế đã bị fill (phá vỡ).
+
+**Fix v3.4**: `f_build_confirmed_grid` CHỈ ẩn (set về 0) hàng có **count thực = 1 VÀ** lần chạm duy nhất là Period hiện tại — tức hàng hoàn toàn MỚI, chưa Period nào khác từng chạm tới (đúng ý "chờ xác nhận hình thành" của yêu cầu gốc). Mọi hàng có count thực `>= 2` (dù Period hiện tại vừa chạm tới) đều giữ ĐÚNG số thực, hiện ngay lập tức — vì đó là 1 lượt "fill" đã xảy ra (sự kiện không thể đảo ngược), không có gì để chờ xác nhận thêm, và phải phá Tail/SP ngay khi phát hiện fill. Nói cách khác: *hình thành mới* (count=1, toàn bộ do Period đang mở) thì chờ; *fill/phá vỡ* (count≥2) thì hiện ngay, không chờ.
+
+Nhờ vậy: phần Tail/SP/Poor/Ledge đã được các Period **ĐÃ ĐÓNG** xác nhận hiển thị ngay (không trễ, không giật hình vì các hàng đó không bị trừ); phần **mới hình thành/mở rộng thêm** bởi Period đang chạy bị ẩn tới khi Period đó đóng; còn khi Period đang chạy **fill vào** 1 hàng đã từng là single print của Period trước, Tail/SP bị phá vỡ **ngay lập tức**, không chờ Period đóng.
+
+`poc_row_c` (điểm neo quét nội bộ), TPO Count above/below POC (dòng dashboard), và Late Spike **vẫn dùng lưới live** (`tpo_counts_c`) — không thuộc phạm vi trì hoãn này.
+
+**Đính chính (v3.5)**: `f_build_confirmed_grid` đã được **chuyển sang `market_profile_core.pine` v1.2** (`mpcore.f_build_confirmed_grid`) — khác với mô tả "không sửa library" ở mục "Cách sửa (v3.3)" phía trên, vốn đúng tại thời điểm v3.3/v3.4. Lý do chuyển: theo yêu cầu người dùng rà soát lại core/library toàn dự án, tránh lặp logic xử lý lưới TPO rải rác ngoài indicator — hàm này là pure, chỉ phụ thuộc dữ liệu do `mpcore.f_add_bar_tpo`/`SessionProfile` quản lý, không có lý do kỹ thuật để giữ cục bộ. Logic/công thức bên trong hàm **không đổi** so với bản fix v3.4 — xem [docs/market-profile-core.md](market-profile-core.md#changelog).
 
 ## Thiết Kế: Developing VA (thay cho Box Tĩnh)
 
@@ -161,6 +186,7 @@ Box/line tĩnh cũ (`draw.b_va_up/dn`, `draw.l_poc/vah/val`) đã bị xoá hoà
 - Day Type/Open Type được đánh giá lại liên tục trong phiên (không "đóng băng" cho đến cuối phiên) — là hành vi mong muốn (profile sống theo thời gian thực), không phải repaint vì không dùng dữ liệu tương lai.
 - Giới hạn vẽ: `max_lines_count=500`, `max_boxes_count=500`, `max_labels_count=500`.
 - **Phụ thuộc library ngoài** (từ v3.0): cần `import anthonydang/market_profile_core/1` — nếu library bị unpublish/xoá trên TradingView, script này sẽ không compile được. Xem mục "Thiết Kế: Market Profile Core Library" phía trên.
+- **Lưới Xác Nhận (từ v3.3, sửa lỗi ở v3.4)**: Tail/Single Print/Poor High-Low/Ledge chỉ ẩn phần **mới hình thành** (count thực = 1, do Period hiện tại đang mở tạo ra lần đầu) tới khi Period đó đóng — trễ tối đa gần `tpo_period_min` phút (mặc định 30 phút), đây là hành vi CHỦ ĐÍCH, không phải bug. Ngược lại, khi Period hiện tại **fill vào** 1 hàng đã được Period trước xác nhận là single print (count thực tăng lên ≥ 2), Tail/SP/Poor/Ledge liên quan bị phá vỡ và cập nhật lại **ngay lập tức**, không chờ Period đóng — xem mục "Thiết Kế: Lưới Xác Nhận" phía trên.
 
 ## Changelog
 
@@ -183,3 +209,6 @@ Box/line tĩnh cũ (`draw.b_va_up/dn`, `draw.l_poc/vah/val`) đã bị xoá hoà
 - **v3.0** (2026-11-15): Tách toàn bộ động cơ tính toán thuần (TPO incremental, POC/Value Area, TPO Count, Rotation Factor theo TPO Period, Day Type/Open Type, Tails/Single Prints/Ledge/Late Spike, 80% VA Rule) ra library `libraries/market_profile_core.pine`, publish lên TradingView và import (`anthonydang/market_profile_core/1 as mpcore`) để dùng chung với `order_flow_profile_panel.pine` (v2.0) — xem mục "Thiết Kế: Market Profile Core Library" phía trên. UDT `SessionProfile` nay lấy từ library; bỏ field chẩn đoán `poc_tpo_cnt_c` (chuyển thành biến local `diag_poc_tpo_cnt_c`) và 6 cờ `alerted_*` (chuyển thành `var bool` riêng ngoài UDT) khỏi UDT vì không thuộc "động cơ" chung. Đây là refactor thuần — hành vi/số liệu hiển thị không đổi so với v2.3.
 - **v3.1** (2026-11-15): Gọn tiếp phần orchestration còn lại — chuyển 3 công thức tiện ích (kiểm tra mức giá bị lấp cho Naked POC/Prev VAH/VAL/POC qua `mpcore.f_check_level_tested`, 4 đường mở rộng IB qua `mpcore.f_calc_ib_extensions`, vị trí dải màu Day Type qua `mpcore.f_calc_band_position`) và 7 hàm định dạng chuỗi dashboard (IB state, số có dấu, TPO imbalance, trạng thái mức giá, tóm tắt Tails/Poor High-Low/mô hình đặc biệt) sang `market_profile_core` v1.1 (`import anthonydang/market_profile_core/2`). File indicator giờ chỉ còn orchestration (gọi `mpcore.*`) + vẽ đối tượng + layout dashboard — không còn công thức/format string rải rác trong code. Hành vi/số liệu hiển thị không đổi so với v3.0.
 - **v3.2** (2026-11-21): Thu hẹp Dashboard — dòng "Open Type" (và "Day Type") trả về chuỗi đầy đủ dài (vd `Open-Auction Out of Range (OAOR)`, `Double-Distribution Trend Day`) khiến cột giá trị của cả bảng bị kéo rộng theo. Thêm 2 hàm hiển thị cục bộ `f_short_day_type`/`f_short_open_type` trong `market_profile.pine` (chỉ format chuỗi cho dashboard, không đụng tới `market_profile_core`) để rút gọn 2 dòng này; chuỗi đầy đủ vẫn xem được qua tooltip khi hover ô. Số liệu/logic tính toán không đổi.
+- **v3.3** (2026-11-24): Trì hoãn hiển thị Tail/Single Print/Poor High-Low/Ledge khi phần hình thành đó do TPO Period HIỆN TẠI (chưa đóng) tạo ra — tránh hiển thị mẫu hình "tạm thời" có thể đổi ngay khi Period đó còn tiếp diễn. Thêm hàm cục bộ `f_build_confirmed_grid` trong `market_profile.pine` tạo lưới `confirmed_counts_c` (nhân bản `tpo_counts_c`, trừ 1 lượt chạm tại các hàng mà Period hiện tại là lần chạm gần nhất) dùng làm input cho `mpcore.f_count_tail_rows`/`f_detect_buying_tail`/`f_detect_selling_tail`/`f_detect_poor_hl`/`f_detect_single_prints`/`f_detect_ledge` thay cho `tpo_counts_c` trực tiếp — xem mục "Thiết Kế: Lưới Xác Nhận" phía trên. Không sửa `market_profile_core.pine` (không ảnh hưởng `order_flow_profile_panel.pine`). `poc_row_c`, TPO Count above/below POC, và Late Spike vẫn dùng lưới live, không đổi.
+- **v3.4** (2026-11-24): Sửa lỗi lưới xác nhận v3.3 phát hiện qua thực tế dùng: cách trừ 1 "vô điều kiện" cho mọi hàng Period hiện tại chạm tới khiến 1 Tail/SP đã bị Period sau **fill vào** (phá vỡ thật) vẫn hiển thị sai là còn nguyên (vì count thực=2 bị trừ xuống còn 1, vẫn đọc là single print). `f_build_confirmed_grid` nay chỉ ẩn hàng có count thực = 1 **và** là Period hiện tại chạm lần đầu (hình thành mới, đúng ý chờ xác nhận); hàng có count thực ≥ 2 luôn hiện đúng số thực ngay lập tức (fill/phá vỡ không chờ xác nhận, vì không thể đảo ngược) — xem mục "Thiết Kế: Lưới Xác Nhận" phía trên.
+- **v3.5** (2026-11-25): Chuyển hàm cục bộ `f_build_confirmed_grid` sang `market_profile_core.pine` v1.2 (`import .../market_profile_core/3`), theo yêu cầu người dùng rà soát lại core/library toàn dự án — tránh lặp logic xử lý lưới TPO rải rác ngoài indicator. Hành vi/số liệu hiển thị không đổi so với v3.4, chỉ gọi `mpcore.f_build_confirmed_grid` thay bản viết tay riêng. Backup v3.4 tại `indicators/hist/market_profile_v3.4.pine`.

@@ -21,6 +21,7 @@ Dự án này dùng để phát triển các script Pine Script chạy trên Tra
 - Không dùng `mrdungx2603` (tài khoản cũ) cho import mới — nếu thấy `mrdungx2603` trong 1 dòng `import` ở code đang sửa/review, phải đổi sang `anthonydang` trong cùng lần làm việc đó.
 - Library `smc_core` hiện publish dưới `anthonydang`, title publish là **`smc_core`** (không phải "SMC Core Library") — version hiện tại trên TradingView: **3** (`anthonydang/smc_core/3`). Khi publish lại (ví dụ sau khi sửa bug trong `libraries/smc_core.pine`), version TradingView sẽ tăng lên — phải cập nhật số version này trong dòng `import` ở **mọi** file đang dùng, VÀ cập nhật lại 2 giá trị (title/version) ghi ở mục này.
 - Library `order_flow_core` hiện publish dưới `anthonydang`, title publish là **`order_flow_core`** — version hiện tại trên TradingView: **1** (`anthonydang/order_flow_core/1`). Dùng trong `indicators/order_flow_bar.pine` và `indicators/volume_profile_delta.pine`. Khi publish lại, áp dụng quy tắc cập nhật version giống `smc_core` ở mục trên.
+- Library `market_profile_core` hiện publish dưới `anthonydang`, title publish là **`market_profile_core`** — version hiện tại trên TradingView: **3** (`anthonydang/market_profile_core/3`). Dùng trong `indicators/market_profile.pine` (`/3`) và `indicators/order_flow_profile_panel.pine` (vẫn dùng `/1`, chưa cần hàm mới). Khi publish lại, áp dụng quy tắc cập nhật version giống `smc_core` ở mục trên.
 
 ## Cấu Trúc Thư Mục
 
