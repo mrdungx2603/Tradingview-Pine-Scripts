@@ -19,7 +19,8 @@ Dự án này dùng để phát triển các script Pine Script chạy trên Tra
 
 - **Account TradingView duy nhất dùng cho mọi `import username/library/version`: `anthonydang`.**
 - Không dùng `mrdungx2603` (tài khoản cũ) cho import mới — nếu thấy `mrdungx2603` trong 1 dòng `import` ở code đang sửa/review, phải đổi sang `anthonydang` trong cùng lần làm việc đó.
-- Library `smc_core` hiện publish dưới `anthonydang`, title publish là **`smc_core`** (không phải "SMC Core Library") — version hiện tại trên TradingView: **2** (`anthonydang/smc_core/2`). Khi publish lại (ví dụ sau khi sửa bug trong `libraries/smc_core.pine`), version TradingView sẽ tăng lên — phải cập nhật số version này trong dòng `import` ở **mọi** file đang dùng, VÀ cập nhật lại 2 giá trị (title/version) ghi ở mục này.
+- Library `smc_core` hiện publish dưới `anthonydang`, title publish là **`smc_core`** (không phải "SMC Core Library") — version hiện tại trên TradingView: **3** (`anthonydang/smc_core/3`). Khi publish lại (ví dụ sau khi sửa bug trong `libraries/smc_core.pine`), version TradingView sẽ tăng lên — phải cập nhật số version này trong dòng `import` ở **mọi** file đang dùng, VÀ cập nhật lại 2 giá trị (title/version) ghi ở mục này.
+- Library `order_flow_core` hiện publish dưới `anthonydang`, title publish là **`order_flow_core`** — version hiện tại trên TradingView: **1** (`anthonydang/order_flow_core/1`). Dùng trong `indicators/order_flow_bar.pine` và `indicators/volume_profile_delta.pine`. Khi publish lại, áp dụng quy tắc cập nhật version giống `smc_core` ở mục trên.
 
 ## Cấu Trúc Thư Mục
 
@@ -135,6 +136,7 @@ strategy(title="Tên Strategy", shorttitle="VIẾT_TẮT",
 | **`for start > end` chạy 1 lần** | `for r = 4 to 3` vẫn chạy 1 lần với r=4 (khác các ngôn ngữ khác) | Luôn bọc trong `if start <= end` guard |
 | **UDT trong `for`+`if`** | Không thể khai báo biến UDT bên trong `if` lồng trong `for` | Khai báo biến UDT ở scope `for`, dùng ternary cho giá trị: `float sh = cond ? val : na` |
 | **Inline comment trong array literal** | `// comment` bên trong `[]` của `request.security()` có thể gây lỗi parser | Tránh comment `//` trong array/tuple literal. Đưa comment ra ngoài hoặc dùng `/* */`. |
+| **Continuation của ternary nhiều dòng** | Dòng tiếp nối bắt đầu bằng `:` (vd `cond ? A \n : B`) với số khoảng trắng đầu dòng **chia hết cho 4** khiến Pine không nhận ra là dòng tiếp nối, báo lỗi "end of line without line continuation" — đã kiểm chứng thực tế (indent 8/40 lỗi, indent 17/34/38 chạy đúng), bất kể số đó lớn hơn indent của dòng khởi đầu bao nhiêu | Khi viết ternary nhiều dòng, luôn thụt dòng `:` tiếp theo bằng số khoảng trắng **không chia hết cho 4** (ví dụ thẳng theo cột sau dấu `?` hoặc dấu `(` gần nhất, miễn không rơi đúng bội số 4). Dùng `mcp-tv-validate-pine-script` để kiểm tra trước khi tin code đã đúng. |
 
 ## Pine Script v6 — Tính Năng Mới
 

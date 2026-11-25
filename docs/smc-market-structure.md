@@ -1,9 +1,9 @@
 # SMC Market Structure Indicator — Tài Liệu Hướng Dẫn
 
-> **Script**: [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) (v1.16)
-> **Script MTF**: [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) (v2.1)
-> **Library dùng chung**: [libraries/smc_core.pine](smc-core.md) (v1.2, `import anthonydang/smc_core/2 as smc`), chỉ bản MTF import. Bản base có state machine riêng trong file.
-> **Ngày tạo**: 2026-06-18 / **Cập nhật**: 2026-11-22
+> **Script**: [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) (v2.0)
+> **Script MTF**: [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine) (v2.2)
+> **Library dùng chung**: [libraries/smc_core.pine](smc-core.md) (v1.3, `import anthonydang/smc_core/3 as smc`) — cả bản base và bản MTF đều import từ v3.
+> **Ngày tạo**: 2026-06-18 / **Cập nhật**: 2026-11-24
 > **Pine Script**: v6
 > **Loại**: Indicator (overlay)
 
@@ -286,10 +286,10 @@ OB Mitigated (đã bị phá):
 └─────────────────────────────────────────────────────┘
 ```
 
-### UDT `OrderBlock`
+### UDT `OrderBlock` (export từ `smc_core`, xem [docs/smc-core.md](smc-core.md))
 
 ```pinescript
-type OrderBlock
+export type OrderBlock
     int    bar_origin       // bar index của candle gốc
     float  top              // giá high của candle origin
     float  bottom           // giá low của candle origin
@@ -674,10 +674,10 @@ Bảng MTF hiển thị trend (BULL/BEAR/WAIT) thật từ `SwingState.trend` k�
 
 ### So Sánh 2 Phiên Bản
 
-| | Base (v1.9) | MTF (v2.0) |
+| | Base (v2.0) | MTF (v2.2) |
 |---|---|---|
 | **File** | `indicators/smc_market_structure.pine` | `indicators/smc_market_structure_mtf.pine` |
-| **State machine** | Nằm trong file, chạy trên chart TF | Dùng `smc_core` qua `request.security()` wrapper cho mỗi TF phụ |
+| **State machine** | Dùng `smc_core` trực tiếp trên chart TF (không qua `request.security()`) | Dùng `smc_core` qua `request.security()` wrapper cho mỗi TF phụ |
 | **Input groups** | 11 | 12 (+ Multi-Timeframe) |
 | **request.security()** | 0 | 0–3 (tuỳ số TF bật, `"None"` để tắt từng slot) |
 | **Phù hợp** | Máy yếu, chart đơn giản | Phân tích đa khung thời gian |
@@ -685,6 +685,16 @@ Bảng MTF hiển thị trend (BULL/BEAR/WAIT) thật từ `SwingState.trend` k�
 ---
 
 ## Kế Hoạch Phát Triển
+
+### v2.0 (Đã Hoàn Thành — 2026-11-24)
+
+- [x] Migrate sang dùng library [`smc_core`](smc-core.md) (`import anthonydang/smc_core/3 as smc`) — trước đây file này tự chứa toàn bộ state machine riêng, tách biệt với bản MTF/strategy (xem ghi chú sai ở mục "v2.0 (2026-07-10)" bên dưới — lần migrate đó trên thực tế KHÔNG áp dụng cho file base).
+- [x] Thay 13 biến `var` rời rạc (trend, hh_bar, hh_price, ...) bằng 1 UDT `smc.SwingState`.
+- [x] Thay `type OrderBlock` viết tay bằng `smc.OrderBlock` (export từ `smc_core` v1.3) — trước đó bị lặp code y hệt với `strategies/smc_strategy.pine`.
+- [x] Thay hàm `imbalance_detection`/`bull_filled`/`bear_filled`/`get_imb_text_size`/`get_line_style`/`get_dashboard_pos` viết tay bằng hàm export tương ứng của `smc_core`.
+- [x] **Phát hiện và tránh 1 bug khi migrate**: UDT trong Pine là reference type — `smc.SwingState old_st = st` rồi `st := smc.f_process_bar(st)` chỉ alias cùng object, KHÔNG snapshot được giá trị trước khi chạy state machine (field nào bị hàm mutate thì đọc qua "old_st" vẫn ra giá trị MỚI). Khắc phục bằng cách snapshot từng field cần dùng ra biến nguyên thuỷ (int/float) trước khi gọi `smc.f_process_bar`. **Bug này vẫn còn tồn tại trong `smc_market_structure_mtf.pine` (tới v2.2)** — khiến nhánh vẽ label HH/HL/LL/LH khi swing mới được xác nhận không bao giờ chạy (điều kiện `old_st.cand_type != 0 and st.cand_type == 0` luôn sai). Chưa sửa trong lần làm việc này (ngoài phạm vi yêu cầu ban đầu — chỉ migrate base indicator); cần fix riêng ở `smc_market_structure_mtf.pine` sau — xem mục "v2.2 — Chỉ bản MTF" trong Changelog bên dưới (chỉ bump version import, không sửa bug này).
+- [x] Giữ nguyên cơ chế cache tăng dần (`tp_scanned`) cho Temp Pivot — không đổi sang cách quét lại toàn range mỗi bar như bản MTF, để tránh tốn hiệu năng trên range dài (Pivot Seed trên timeframe lớn).
+- [x] Backup bản trước khi sửa: `indicators/hist/smc_market_structure_v1.16.pine`.
 
 ### v1.16 (Đã Hoàn Thành — 2026-11-15)
 
@@ -730,18 +740,24 @@ Bảng MTF hiển thị trend (BULL/BEAR/WAIT) thật từ `SwingState.trend` k�
 - [x] Backup bản trước khi sửa: `indicators/hist/smc_market_structure_v1.8b.pine`.
 - [ ] Chưa làm: quét lại temp pivot mỗi bar, gom khối xác nhận HH/LL, gom bảng dashboard, bỏ `last_mitigated_idx`.
 
+### v2.2 — Chỉ bản MTF (Đã Hoàn Thành — 2026-11-24)
+
+- [x] Đổi `import anthonydang/smc_core/2` → `anthonydang/smc_core/3` — `smc_core` publish lại (thêm `OrderBlock`, `f_imbalance_detection`,...) nên mọi file import phải cập nhật version theo quy định `.claude/CLAUDE.md`, dù file này không dùng các hàm mới. **KHÔNG sửa bug aliasing UDT** `old_st = st` (xem Changelog v2.0 bản base phía trên) — ngoài phạm vi lần làm việc này.
+- [x] **Phát hiện và fix 1 lỗi compile có sẵn từ trước, không liên quan `smc_core`**: dòng continuation của ternary nhiều dòng (gán `pos_color_val`) có indent = 40 khoảng trắng — chia hết cho 4 — khiến Pine không nhận ra là dòng tiếp nối, báo lỗi "end of line without line continuation" khi validate qua `mcp-tv-validate-pine-script`. Đã kiểm chứng: lỗi xảy ra với indent chia hết cho 4 (8, 40), chạy đúng với indent không chia hết cho 4 (17, 34, 38) — xem mục "Cạm Bẫy Thường Gặp" mới trong `.claude/CLAUDE.md`. Sửa về indent 38 (giống cách hành văn đã dùng ở bản base).
+- [x] Backup v2.1 tại `indicators/hist/smc_market_structure_mtf_v2.1.pine`.
+
 ### v2.1 — Chỉ bản MTF (Đã Hoàn Thành — 2026-11-22)
 
 - [x] Đổi `import mrdungx2603/smc_core/1` → `anthonydang/smc_core/2` — gộp về 1 account TradingView duy nhất (theo yêu cầu người dùng, xem `.claude/CLAUDE.md` mục "Tài Khoản TradingView"). Base indicator không đổi (không import library).
 - [x] Đồng thời nhận fix bug `trigger_bar` ở `smc_core` v1.1 (xem [docs/smc-core.md](smc-core.md#changelog)) — kết quả HH/HL/LL/LH tính chính xác hơn, không phải regression.
 - [x] Backup bản trước khi sửa: `indicators/hist/smc_market_structure_mtf_v2.0.pine`.
 
-### v2.0 (Đã Hoàn Thành — 2026-07-10)
+### v2.0 — Chỉ MTF + Strategy (Đã Hoàn Thành — 2026-07-10)
 
 - [x] Tách UDT `SwingState` + state machine (`f_process_bar`, `f_seed_pivot`, `f_seed_session`, `f_find_extreme`...) ra thư viện dùng chung [`smc_core`](smc-core.md), dùng lại ở cả `smc_strategy.pine` và bản MTF.
-- [x] Base indicator: import `smc_core`, thay 13 biến `var` rời rạc bằng 1 UDT `SwingState` — giảm ~226 dòng (1080→854).
 - [x] MTF: viết lại hoàn toàn — chạy **state machine SMC thật** qua `request.security()` wrapper cho từng timeframe, thay cho "trend score" xấp xỉ từ 3 pivot (logic sai ở bản cũ) — giảm ~254 dòng (751→497).
 - [x] Backup các bản trước khi refactor vào `indicators/hist/` và `strategies/hist/`.
+- ⚠️ **Đính chính (2026-11-24)**: mục này TRƯỚC ĐÂY ghi nhầm là base indicator (`smc_market_structure.pine`) cũng đã migrate sang `smc_core` ở v2.0 này — thực tế KHÔNG đúng, file base vẫn tự chứa state machine riêng cho tới v1.16. Việc migrate base indicator thực sự chỉ xảy ra ở mục "v2.0 (2026-11-24)" phía trên.
 
 ### v1.4 (Đã Hoàn Thành — 2026-06-21)
 

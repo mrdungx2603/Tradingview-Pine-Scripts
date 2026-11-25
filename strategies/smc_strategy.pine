@@ -2,12 +2,16 @@
 // ─── SMC Strategy — Chiến lược giao dịch dựa trên Smart Money Concepts ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-06-21
-// Phiên bản: 2.1
+// Phiên bản: 2.2
 // Mô tả: Strategy backtest dựa trên SMC Market Structure, Order Blocks,
 //        Premium/Discount, với 3 chế độ entry, SL/TP linh hoạt, trailing stop.
 // Thay đổi v2.0: Import library smc_core, dùng UDT SwingState + pure state machine.
 // Thay đổi v2.1: Đổi import sang account anthonydang/smc_core/2 (gộp account, theo yêu cầu
 //        người dùng — xem .claude/CLAUDE.md mục "Tài Khoản TradingView").
+// Thay đổi v2.2: Đổi import sang anthonydang/smc_core/3 — thay type OrderBlock và hàm
+//        imbalance_detection viết tay riêng (lặp code y hệt với indicators/smc_market_structure.pine
+//        trước khi file đó migrate sang smc_core) bằng smc.OrderBlock và smc.f_imbalance_detection
+//        export từ smc_core v1.3. Bỏ luôn biến old_st không dùng tới (dead code).
 strategy(
     title="SMC Strategy",
     shorttitle="SMC_STRATEGY",
@@ -22,7 +26,7 @@ strategy(
 )
 
 // ─── Import Library ───
-import anthonydang/smc_core/2 as smc
+import anthonydang/smc_core/3 as smc
 
 // ╔══════════════════════════════════════════╗
 // ║              INPUTS — Strategy           ║
@@ -104,16 +108,7 @@ is_new_session = timeframe.isminutes and session.isfirstbar_regular
 // ║        ORDER BLOCK (OB) STATE            ║
 // ╚══════════════════════════════════════════╝
 
-type OrderBlock
-    int    bar_origin       // bar index của candle gốc
-    float  top              // giá high của candle origin
-    float  bottom           // giá low của candle origin
-    bool   is_bullish       // true = Demand OB, false = Supply OB
-    string source           // "FVG" | "OG" | "VI"
-    bool   is_mitigated     // đã bị mitigation chưa
-    int    bar_mitigation   // bar index lúc mitigation (na nếu chưa)
-
-var array<OrderBlock> ob_list           = array.new<OrderBlock>()
+var array<smc.OrderBlock> ob_list           = array.new<smc.OrderBlock>()
 var array<box>        ob_boxes          = array.new_box(0)
 var int               ob_bull_count      = 0
 var int               ob_bear_count      = 0
@@ -163,22 +158,6 @@ if not st.seeded
 
 float atr_val = ta.atr(200)
 
-imbalance_detection(bool show, bool usewidth, string method, float width, float top, float btm, bool condition) =>
-    var bool is_width = true
-    var int  count    = 0
-
-    if usewidth
-        float dist = top - btm
-        is_width := switch method
-            "Points" => dist > width
-            "%"      => dist / btm * 100 > width
-            "ATR"    => dist > atr_val * width
-
-    bool is_true = show and condition and is_width
-    count += is_true ? 1 : 0
-
-    [is_true, count]
-
 // ╔══════════════════════════════════════════╗
 // ║     STATE MACHINE & CANDIDATE HUNTING    ║
 // ╚══════════════════════════════════════════╝
@@ -196,9 +175,6 @@ choch_just_formed    := false
 choch_direction      := 0
 
 if st.seeded
-    // Lưu state cũ để detect sự kiện
-    smc.SwingState old_st = st
-
     // Chạy state machine qua library
     st := smc.f_process_bar(st)
 
@@ -231,40 +207,46 @@ if st.seeded
 float bull_gap_top = math.min(close, open)
 float bull_gap_btm = math.max(close[1], open[1])
 
-[bull_vi, bull_vi_count] = imbalance_detection(
+[bull_vi, bull_vi_count] = smc.f_imbalance_detection(
     show_vi, imb_usewidth, imb_width_method, imb_gapwidth,
     bull_gap_top, bull_gap_btm,
-    open > close[1] and high[1] > low and close > close[1] and open > open[1] and high[1] < bull_gap_top)
+    open > close[1] and high[1] > low and close > close[1] and open > open[1] and high[1] < bull_gap_top,
+    atr_val)
 
 float bear_gap_top = math.min(close[1], open[1])
 float bear_gap_btm = math.max(close, open)
 
-[bear_vi, bear_vi_count] = imbalance_detection(
+[bear_vi, bear_vi_count] = smc.f_imbalance_detection(
     show_vi, imb_usewidth, imb_width_method, imb_gapwidth,
     bear_gap_top, bear_gap_btm,
-    open < close[1] and low[1] < high and close < close[1] and open < open[1] and low[1] > bear_gap_btm)
+    open < close[1] and low[1] < high and close < close[1] and open < open[1] and low[1] > bear_gap_btm,
+    atr_val)
 
 // ─── Opening Gaps (OG) ───
-[bull_og, bull_og_count] = imbalance_detection(
+[bull_og, bull_og_count] = smc.f_imbalance_detection(
     show_og, imb_usewidth, imb_width_method, imb_gapwidth,
     bull_gap_top, bull_gap_btm,
-    low > high[1])
+    low > high[1],
+    atr_val)
 
-[bear_og, bear_og_count] = imbalance_detection(
+[bear_og, bear_og_count] = smc.f_imbalance_detection(
     show_og, imb_usewidth, imb_width_method, imb_gapwidth,
     bear_gap_top, bear_gap_btm,
-    high < low[1])
+    high < low[1],
+    atr_val)
 
 // ─── Fair Value Gaps (FVG) ───
-[bull_fvg, bull_fvg_count] = imbalance_detection(
+[bull_fvg, bull_fvg_count] = smc.f_imbalance_detection(
     show_fvg, imb_usewidth, imb_width_method, imb_gapwidth,
     low, high[2],
-    low > high[2] and close[1] > high[2] and not (bull_og or bull_og[1]))
+    low > high[2] and close[1] > high[2] and not (bull_og or bull_og[1]),
+    atr_val)
 
-[bear_fvg, bear_fvg_count] = imbalance_detection(
+[bear_fvg, bear_fvg_count] = smc.f_imbalance_detection(
     show_fvg, imb_usewidth, imb_width_method, imb_gapwidth,
     low[2], high,
-    high < low[2] and close[1] < low[2] and not (bear_og or bear_og[1]))
+    high < low[2] and close[1] < low[2] and not (bear_og or bear_og[1]),
+    atr_val)
 
 // ╔══════════════════════════════════════════╗
 // ║   ORDER BLOCK (OB) CREATION              ║
@@ -280,15 +262,15 @@ new_bear_ob_formed := false
 new_ob_list_idx    := na
 
 // ─── OB từ VI ───
-OrderBlock new_ob = OrderBlock.new(na, na, na, true, "", false, na)
+smc.OrderBlock new_ob = smc.OrderBlock.new(na, na, na, true, "", false, na)
 
 if show_ob and bull_vi
     if max_ob_active > 0 and array.size(ob_list) >= max_ob_active
-        OrderBlock oldest = array.shift(ob_list)
+        smc.OrderBlock oldest = array.shift(ob_list)
         if array.size(ob_boxes) > 0
             box dead = array.shift(ob_boxes)
             box.delete(dead)
-    new_ob := OrderBlock.new(bar_index - 1, high[1], low[1], true, "VI", false, na)
+    new_ob := smc.OrderBlock.new(bar_index - 1, high[1], low[1], true, "VI", false, na)
     array.push(ob_list, new_ob)
     ob_bull_count += 1
     if show_ob
@@ -301,11 +283,11 @@ if show_ob and bull_vi
 
 if show_ob and bear_vi
     if max_ob_active > 0 and array.size(ob_list) >= max_ob_active
-        OrderBlock oldest = array.shift(ob_list)
+        smc.OrderBlock oldest = array.shift(ob_list)
         if array.size(ob_boxes) > 0
             box dead = array.shift(ob_boxes)
             box.delete(dead)
-    new_ob := OrderBlock.new(bar_index - 1, high[1], low[1], false, "VI", false, na)
+    new_ob := smc.OrderBlock.new(bar_index - 1, high[1], low[1], false, "VI", false, na)
     array.push(ob_list, new_ob)
     ob_bear_count += 1
     if show_ob
@@ -319,11 +301,11 @@ if show_ob and bear_vi
 // ─── OB từ OG ───
 if show_ob and bull_og
     if max_ob_active > 0 and array.size(ob_list) >= max_ob_active
-        OrderBlock oldest = array.shift(ob_list)
+        smc.OrderBlock oldest = array.shift(ob_list)
         if array.size(ob_boxes) > 0
             box dead = array.shift(ob_boxes)
             box.delete(dead)
-    new_ob := OrderBlock.new(bar_index - 1, high[1], low[1], true, "OG", false, na)
+    new_ob := smc.OrderBlock.new(bar_index - 1, high[1], low[1], true, "OG", false, na)
     array.push(ob_list, new_ob)
     ob_bull_count += 1
     if show_ob
@@ -336,11 +318,11 @@ if show_ob and bull_og
 
 if show_ob and bear_og
     if max_ob_active > 0 and array.size(ob_list) >= max_ob_active
-        OrderBlock oldest = array.shift(ob_list)
+        smc.OrderBlock oldest = array.shift(ob_list)
         if array.size(ob_boxes) > 0
             box dead = array.shift(ob_boxes)
             box.delete(dead)
-    new_ob := OrderBlock.new(bar_index - 1, high[1], low[1], false, "OG", false, na)
+    new_ob := smc.OrderBlock.new(bar_index - 1, high[1], low[1], false, "OG", false, na)
     array.push(ob_list, new_ob)
     ob_bear_count += 1
     if show_ob
@@ -354,11 +336,11 @@ if show_ob and bear_og
 // ─── OB từ FVG ───
 if show_ob and bull_fvg
     if max_ob_active > 0 and array.size(ob_list) >= max_ob_active
-        OrderBlock oldest = array.shift(ob_list)
+        smc.OrderBlock oldest = array.shift(ob_list)
         if array.size(ob_boxes) > 0
             box dead = array.shift(ob_boxes)
             box.delete(dead)
-    new_ob := OrderBlock.new(bar_index - 2, high[2], low[2], true, "FVG", false, na)
+    new_ob := smc.OrderBlock.new(bar_index - 2, high[2], low[2], true, "FVG", false, na)
     array.push(ob_list, new_ob)
     ob_bull_count += 1
     if show_ob
@@ -371,11 +353,11 @@ if show_ob and bull_fvg
 
 if show_ob and bear_fvg
     if max_ob_active > 0 and array.size(ob_list) >= max_ob_active
-        OrderBlock oldest = array.shift(ob_list)
+        smc.OrderBlock oldest = array.shift(ob_list)
         if array.size(ob_boxes) > 0
             box dead = array.shift(ob_boxes)
             box.delete(dead)
-    new_ob := OrderBlock.new(bar_index - 2, high[2], low[2], false, "FVG", false, na)
+    new_ob := smc.OrderBlock.new(bar_index - 2, high[2], low[2], false, "FVG", false, na)
     array.push(ob_list, new_ob)
     ob_bear_count += 1
     if show_ob
@@ -403,7 +385,7 @@ if show_ob
     int ob_size = array.size(ob_list)
     if ob_size > 0
         for i = ob_size - 1 to 0
-            OrderBlock ob_chk = array.get(ob_list, i)
+            smc.OrderBlock ob_chk = array.get(ob_list, i)
             bool is_bull = ob_chk.is_bullish
             bool is_mit  = ob_chk.is_mitigated
             if not is_mit
@@ -434,7 +416,7 @@ if show_ob
     if array.size(ob_boxes) > 0 and array.size(ob_list) > 0
         int box_ct = math.min(array.size(ob_list), array.size(ob_boxes))
         for i = 0 to box_ct - 1
-            OrderBlock ob_ext = array.get(ob_list, i)
+            smc.OrderBlock ob_ext = array.get(ob_list, i)
             if not ob_ext.is_mitigated
                 box b_ext = array.get(ob_boxes, i)
                 box.set_right(b_ext, bar_index + 1)
@@ -469,7 +451,7 @@ detect_ob_retest(bool for_long) =>
     int sz = array.size(ob_list)
     if sz > 0
         for i = 0 to sz - 1
-            OrderBlock ob_rt = array.get(ob_list, i)
+            smc.OrderBlock ob_rt = array.get(ob_list, i)
             if not ob_rt.is_mitigated and ob_rt.bar_origin < bar_index
                 if for_long and ob_rt.is_bullish
                     // Long: giá chạm Demand OB zone (bottom → top)
@@ -528,7 +510,7 @@ if in_date_range and not in_trade and st.trend != 0
         int sz = array.size(ob_list)
         int nearest_bull = -1
         int min_dist = 999999
-        OrderBlock ob_n = OrderBlock.new(na, na, na, true, "", false, na)
+        smc.OrderBlock ob_n = smc.OrderBlock.new(na, na, na, true, "", false, na)
         if sz > 0
             for i = 0 to sz - 1
                 ob_n := array.get(ob_list, i)
@@ -597,7 +579,7 @@ if in_date_range and not in_trade and st.trend != 0
             int sz = array.size(ob_list)
             int nearest_bear = -1
             int min_dist = 999999
-            OrderBlock ob_n = OrderBlock.new(na, na, na, false, "", false, na)
+            smc.OrderBlock ob_n = smc.OrderBlock.new(na, na, na, false, "", false, na)
             if sz > 0
                 for i = 0 to sz - 1
                     ob_n := array.get(ob_list, i)

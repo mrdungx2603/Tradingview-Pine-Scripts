@@ -2,10 +2,10 @@
 
 ## Tổng Quan
 
-> **Yêu cầu hạ tầng**: indicator này `import anthonydang/smc_core/2 as smc` — library `smc_core`
-> đã publish dưới account `anthonydang`, title `smc_core`, version 2 (xem `.claude/CLAUDE.md`
-> mục "Tài Khoản TradingView"). Nếu version publish trên TradingView thay đổi, cần sửa lại số
-> version trong dòng `import` này.
+> **Yêu cầu hạ tầng**: indicator này `import anthonydang/smc_core/3 as smc` và
+> `import anthonydang/order_flow_core/1 as ofcore` — 2 library đã publish dưới account
+> `anthonydang` (xem `.claude/CLAUDE.md` mục "Tài Khoản TradingView"). Nếu version publish trên
+> TradingView thay đổi, cần sửa lại số version trong dòng `import` tương ứng.
 
 Indicator overlay vẽ **1 cụm hiển thị** neo tại 1 bar mốc trên chart, trôi theo `bar_index`,
 gồm 3 phần theo thứ tự trái→phải:
@@ -84,13 +84,14 @@ buyer/seller + cột delta giữa bằng Volume Profile (trái) + siêu nến (g
 - **`price_step` phải cố định xuyên suốt** — giống `order_flow_bar`, đổi giữa chừng làm bucket cũ trong buffer không còn tương thích.
 - **Buffer giới hạn `max_lookback_bars`** — chỉ ảnh hưởng Volume Profile/Delta (Last HL dựng lại từ buffer); siêu nến KHÔNG bị ảnh hưởng (đọc OHLC trực tiếp qua offset `[]`, chỉ bị giới hạn bởi lịch sử bar thật Pine còn giữ).
 - **Pivot Seed (Last HL) có thể không seed được** trong phiên đó — giống `order_flow_bar`, dùng Session Seed để tránh.
-- **Phụ thuộc library `smc_core`** — xem cảnh báo version ở mục Tổng Quan.
+- **Phụ thuộc library `smc_core` và `order_flow_core`** — xem cảnh báo version ở mục Tổng Quan.
 - **Giới hạn 500 box**: mỗi hàng trong `active_profile` dùng 3 box (Volume Profile + Delta màu + Delta text trong suốt) cộng 1 box siêu nến. Vượt quá ~166 hàng sẽ chạm `max_boxes_count=500`, TradingView tự xoá box cũ nhất (có thể mất ngẫu nhiên vài hàng, kể cả POC) — chọn `price_step` sao cho số hàng trong phạm vi tính < 166.
 - **Độ trễ reset đầu phiên**: giống `order_flow_bar`, `sess_profile`/`sess_start_bar` chỉ reset khi bar đầu phiên mới CONFIRM (`barstate.isconfirmed`) — trong lúc bar đó đang hình thành, Volume Profile/siêu nến Session vẫn còn lẫn dữ liệu phiên trước.
 - **Chưa compile thật trên TradingView** tại thời điểm viết — cần copy-paste vào Pine Editor để xác nhận không lỗi biên dịch trước khi dùng (đặc biệt thuật toán Value Area dùng `array.sort_indices`/`array.sum`/vòng `while`, chưa có tiền lệ trong repo).
 
 ## Changelog
 
+- **v1.5 (2026-11-24)**: Đổi `import anthonydang/smc_core/2` → `anthonydang/smc_core/3`, thêm `import anthonydang/order_flow_core/1 as ofcore`. Thay `type BarRowVol`/`RowProfile` và hàm `f_bucket_bar_rows`/`f_push_bar_buffer`/`f_merge_into_profile`/`f_build_profile_from_buffer` viết tay riêng (lặp code y hệt với `indicators/order_flow_bar.pine`) bằng bản export từ [order_flow_core](order-flow-core.md) v1.0 — không đổi hành vi hiển thị. Backup v1.4 tại `indicators/hist/volume_profile_delta_v1.4.pine`.
 - **v1.4 (2026-11-24)**: Theo phản hồi người dùng sau khi test v1.3 — viền box Delta dính vào nhau (cùng màu nền nên không thấy ranh giới giữa hàng), và chữ delta lệch lên trên so với tâm bar.
   - Thêm input `delta_border_color` (mặc định đen 20% trong suốt) — tách viền box Delta khỏi `delta_pos_color`/`delta_neg_color` (trước đó border_color = bgcolor nên vô hình).
   - Bỏ `label.new` (anchor theo baseline, canh giữa chiều dọc không chính xác — nguyên nhân chữ lệch lên) — đổi lại dùng `box.new(text=...)` (như `order_flow_bar.pine`), nhưng tách riêng 1 box trong suốt (không phải box Delta màu) đặt NGAY SAU tip của bar để chữ vẫn canh giữa chính xác theo `top`/`bottom` MÀ không nằm trong vùng màu của bar.

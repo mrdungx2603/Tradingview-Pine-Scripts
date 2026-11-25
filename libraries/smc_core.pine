@@ -2,12 +2,17 @@
 // ─── SMC Core Library — UDT + State Machine cho SMC Market Structure ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-07-10
-// Phiên bản: 1.2
+// Phiên bản: 1.3
 // Mô tả: Library chứa UDT SwingState và các pure function cho state machine SMC.
 //        Dùng chung cho indicator, strategy và MTF indicator.
-//        Tất cả hàm đều pure — không var, không request.*, không plot/line/box/label.
+//        Tất cả hàm đều pure — không var cấp top-level (var cục bộ trong hàm vẫn OK vì Pine
+//        giữ state riêng theo call site), không request.*, không plot/line/box/label.
 // Title publish trên TradingView: "smc_core" (đổi từ "SMC Core Library" ở v1.1 — khớp đúng tên
 // dùng trong mọi dòng import, account anthonydang).
+// Thay đổi v1.3: Đồng bộ lại với indicators/smc_market_structure.pine v1.16 (bản tham chiếu
+//        mới nhất) — bổ sung export type OrderBlock và các hàm pure f_imbalance_detection,
+//        f_bull_filled, f_bear_filled, f_get_imb_text_size. Các hàm này trước đó bị lặp code
+//        y hệt giữa indicators/smc_market_structure.pine và strategies/smc_strategy.pine.
 library(title="smc_core", overlay=false)
 
 // ╔══════════════════════════════════════════╗
@@ -36,6 +41,19 @@ export type SwingState
     float last_pl_val
     int   event          // 0=không có, 1=BoS Bull, -1=BoS Bear, 2=CHoCH Bear, -2=CHoCH Bull
                          // (được set khi breakout xảy ra, caller dùng để vẽ line + label)
+
+// ╔══════════════════════════════════════════╗
+// ║        UDT — ORDER BLOCK                ║
+// ╚══════════════════════════════════════════╝
+
+export type OrderBlock
+    int    bar_origin       // bar index của candle gốc (origin)
+    float  top              // giá high của candle origin
+    float  bottom           // giá low của candle origin
+    bool   is_bullish       // true = Demand OB (Tăng), false = Supply OB (Giảm)
+    string source           // "FVG" | "OG" | "VI"
+    bool   is_mitigated     // đã bị mitigation chưa
+    int    bar_mitigation   // bar index lúc mitigation (na nếu chưa)
 
 // ╔══════════════════════════════════════════╗
 // ║     HÀM KHỞI TẠO & HELPER               ║
@@ -286,3 +304,68 @@ export f_process_bar(SwingState s) =>
                 s.trend     := 1
                 s.cand_type := 0
         s
+
+// ╔══════════════════════════════════════════╗
+// ║   IMBALANCE DETECTION (FVG / OG / VI)   ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Phát hiện imbalance và đếm số lần xuất hiện ───
+// atr_val do caller tính sẵn (ta.atr(...)) và truyền vào — hàm pure không tự gọi ta.atr.
+export f_imbalance_detection(bool show, bool usewidth, string method, float width, float top, float btm, bool condition, float atr_val) =>
+    var bool is_width = true
+    var int  count    = 0
+
+    if usewidth
+        float dist = top - btm
+        is_width := switch method
+            "Points" => dist > width
+            "%"      => dist / btm * 100 > width
+            "ATR"    => dist > atr_val * width
+            => true
+
+    bool is_true = show and condition and is_width
+    count += is_true ? 1 : 0
+
+    [is_true, count]
+
+// ─── Phát hiện Bullish Imbalance bị lấp (filled) ───
+export f_bull_filled(bool condition, float btm) =>
+    var array<float> btms  = array.new_float(0)
+    var int          count = 0
+
+    if condition
+        array.unshift(btms, btm)
+
+    int size = array.size(btms)
+    if size > 0
+        for i = size - 1 to 0
+            float value = array.get(btms, i)
+            if low < value
+                array.remove(btms, i)
+                count += 1
+    count
+
+// ─── Phát hiện Bearish Imbalance bị lấp (filled) ───
+export f_bear_filled(bool condition, float top) =>
+    var array<float> tops  = array.new_float(0)
+    var int          count = 0
+
+    if condition
+        array.unshift(tops, top)
+
+    int size = array.size(tops)
+    if size > 0
+        for i = size - 1 to 0
+            float value = array.get(tops, i)
+            if high > value
+                array.remove(tops, i)
+                count += 1
+    count
+
+// ─── Chuyển đổi string → kích thước chữ (dashboard imbalance) ───
+export f_get_imb_text_size(string size_name) =>
+    switch size_name
+        "Tiny"   => size.tiny
+        "Small"  => size.small
+        "Normal" => size.normal
+        => size.tiny

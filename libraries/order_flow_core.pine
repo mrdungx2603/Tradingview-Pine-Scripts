@@ -1,0 +1,108 @@
+//@version=6
+// ─── Order Flow Core Library — Footprint Bucketing + Row Profile dùng chung ───
+// Tác giả: TV Pine
+// Ngày tạo: 2026-11-24
+// Phiên bản: 1.0
+// Mô tả: Tách các hàm pure dựng "row profile" (buy/sell volume theo hàng giá price_step) từ
+//        request.footprint() — trước đó bị lặp code y hệt giữa indicators/order_flow_bar.pine
+//        và indicators/volume_profile_delta.pine. Dùng chung UDT BarRowVol (buffer theo bar,
+//        phục vụ rebuild profile cho mode "Last HL") và RowProfile (profile cộng dồn theo hàng).
+//        Toàn bộ hàm đều pure — không var, không plot/line/box/label.
+library(title="order_flow_core", overlay=false)
+
+// ╔══════════════════════════════════════════╗
+// ║        UDT — ROW PROFILE                 ║
+// ╚══════════════════════════════════════════╝
+
+// Profile cộng dồn theo hàng giá (row_id tuyệt đối = floor(giá/price_step)).
+export type RowProfile
+    array<int>   row_ids
+    array<float> buys
+    array<float> sells
+
+// ╔══════════════════════════════════════════╗
+// ║        UDT — BAR ROW VOL                 ║
+// ╚══════════════════════════════════════════╝
+
+// 1 phần tử circular buffer: bucket row_ids/buys/sells của 1 bar đã đóng — dùng để rebuild
+// RowProfile cho 1 khoảng [left_bar, right_bar] bất kỳ (mode "Last HL").
+export type BarRowVol
+    int          bar_idx
+    array<int>   row_ids
+    array<float> buys
+    array<float> sells
+
+// ╔══════════════════════════════════════════╗
+// ║        HÀM BUCKET FOOTPRINT              ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Bucket volume_row của 1 bar theo price_step ───
+// row_id tuyệt đối (floor(giá/step), không tương đối theo base động) để profile dùng lại trực
+// tiếp. fp_ còn na (vd bar 0) -> gọi .rows() thẳng sẽ runtime error; chặn bằng short-circuit `and`.
+export f_bucket_bar_rows(footprint fp_, float step) =>
+    array<int>   row_ids = array.new<int>()
+    array<float> buys    = array.new<float>()
+    array<float> sells   = array.new<float>()
+    if not na(fp_) and not na(fp_.rows())
+        array<volume_row> rows_arr = fp_.rows()
+        int n_rows = array.size(rows_arr)
+        if n_rows > 0
+            for i = 0 to n_rows - 1
+                volume_row row          = array.get(rows_arr, i)
+                float      row_price    = row.up_price()
+                int        row_id       = int(math.floor(row_price / step))
+                float      row_buy      = row.buy_volume()
+                float      row_sell     = row.sell_volume()
+                int        existing_idx = array.indexof(row_ids, row_id)
+                if existing_idx >= 0
+                    array.set(buys, existing_idx, array.get(buys, existing_idx) + row_buy)
+                    array.set(sells, existing_idx, array.get(sells, existing_idx) + row_sell)
+                else
+                    array.push(row_ids, row_id)
+                    array.push(buys, row_buy)
+                    array.push(sells, row_sell)
+    [row_ids, buys, sells]
+
+// ╔══════════════════════════════════════════╗
+// ║        HÀM BUFFER & PROFILE              ║
+// ╚══════════════════════════════════════════╝
+
+// ─── Đẩy bucket của 1 bar vào circular buffer, giữ tối đa `cap` phần tử gần nhất ───
+// Caller chịu trách nhiệm chỉ gọi khi nến đã đóng — push lúc nến chưa đóng sẽ lặp dữ liệu.
+export f_push_bar_buffer(array<BarRowVol> buf, int bar_idx, array<int> row_ids, array<float> buys, array<float> sells, int cap) =>
+    BarRowVol item = BarRowVol.new(bar_idx, row_ids, buys, sells)
+    array.push(buf, item)
+    if array.size(buf) > cap
+        array.shift(buf)
+
+// ─── Gộp 1 cặp row_ids/buys/sells vào `profile` ───
+// Mutate trực tiếp — Pine truyền UDT theo tham chiếu, caller không cần gán lại kết quả.
+export f_merge_into_profile(RowProfile profile, array<int> row_ids, array<float> buys, array<float> sells) =>
+    int n_rows = array.size(row_ids)
+    if n_rows > 0
+        for i = 0 to n_rows - 1
+            int   row_id       = array.get(row_ids, i)
+            float row_buy      = array.get(buys, i)
+            float row_sell     = array.get(sells, i)
+            int   existing_idx = array.indexof(profile.row_ids, row_id)
+            if existing_idx >= 0
+                array.set(profile.buys, existing_idx, array.get(profile.buys, existing_idx) + row_buy)
+                array.set(profile.sells, existing_idx, array.get(profile.sells, existing_idx) + row_sell)
+            else
+                array.push(profile.row_ids, row_id)
+                array.push(profile.buys, row_buy)
+                array.push(profile.sells, row_sell)
+
+// ─── Dựng lại RowProfile từ buffer cho 1 khoảng [left_bar, right_bar] (mode "Last HL") ───
+// Biên na (vd chưa seed xong) -> trả rỗng ngay, không duyệt. Biên nằm ngoài buffer còn lưu
+// (bị shift do cap của f_push_bar_buffer) tự "clip" — không cần xử lý riêng.
+export f_build_profile_from_buffer(array<BarRowVol> buf, int left_bar, int right_bar) =>
+    RowProfile result = RowProfile.new(array.new<int>(), array.new<float>(), array.new<float>())
+    if not na(left_bar) and not na(right_bar)
+        int n = array.size(buf)
+        if n > 0
+            for i = 0 to n - 1
+                BarRowVol item = array.get(buf, i)
+                if item.bar_idx >= left_bar and item.bar_idx <= right_bar
+                    f_merge_into_profile(result, item.row_ids, item.buys, item.sells)
+    result

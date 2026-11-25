@@ -2,7 +2,7 @@
 // ─── SMC Market Structure Indicator + Multi-Timeframe — Phân tích cấu trúc thị trường theo SMC ───
 // Tác giả: TV Pine
 // Ngày tạo: 2026-06-18
-// Phiên bản: 2.1
+// Phiên bản: 2.2
 // Mô tả: Mở rộng từ bản base, bổ sung bảng Multi-Timeframe hiển thị trend của 3 khung
 //        thời gian khác nhau. Phát hiện cấu trúc xu hướng (HH/HL, LL/LH),
 //        Break of Structure (BoS), Change of Character (CHoCH), Premium/Discount.
@@ -10,6 +10,17 @@
 //        chạy state machine SMC thật trên từng TF. Logic MTF chính xác (HH/HL/LH/LL).
 // Thay đổi v2.1: Đổi import sang account anthonydang/smc_core/2 (gộp account, theo yêu cầu
 //        người dùng — xem .claude/CLAUDE.md mục "Tài Khoản TradingView").
+// Thay đổi v2.2: Đổi import sang anthonydang/smc_core/3 — smc_core publish lại (thêm OrderBlock,
+//        f_imbalance_detection,...) nên MỌI file import phải cập nhật version theo quy định
+//        .claude/CLAUDE.md, dù file này không dùng các hàm mới. KHÔNG sửa bug aliasing UDT
+//        "old_st = st" phát hiện khi rà soát smc_core (xem docs/smc-core.md Changelog v1.3,
+//        docs/smc-market-structure.md Changelog v2.0) — ngoài phạm vi lần làm việc này.
+//        Nhân lúc sửa, phát hiện + fix lỗi compile có sẵn từ trước (không liên quan smc_core):
+//        dòng continuation của ternary nhiều dòng (gán pos_color_val) có indent = 40 khoảng
+//        trắng — CHIA HẾT cho 4 — khiến Pine KHÔNG nhận ra là dòng tiếp nối, báo lỗi "end of
+//        line without line continuation". Chỉ xảy ra khi indent continuation là số chia hết
+//        cho 4 (đã test; indent lẻ như 34/38 hoạt động đúng) — xem thêm mục "Cạm Bẫy Thường
+//        Gặp" trong .claude/CLAUDE.md.
 indicator(
     title="SMC Market Structure + MTF",
     shorttitle="SMC_STRUCTURE_MTF",
@@ -19,7 +30,7 @@ indicator(
 )
 
 // ─── Import Library ───
-import anthonydang/smc_core/2 as smc
+import anthonydang/smc_core/3 as smc
 
 // ╔══════════════════════════════════════════╗
 // ║              INPUTS                      ║
@@ -398,7 +409,7 @@ if show_dashboard and barstate.islast
         text_color=color.white, text_size=size.small)
 
     color pos_color_val = (st.trend == 1) ? (pos_pct_val > 50 ? color.green : color.red)
-                                        : (pos_pct_val > 50 ? color.red   : color.green)
+                                      : (pos_pct_val > 50 ? color.red   : color.green)
 
     table.cell(smc_table, 0, 3, row3_col1,
         text_color=color.white, text_size=size.small)

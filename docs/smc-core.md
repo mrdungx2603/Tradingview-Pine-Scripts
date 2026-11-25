@@ -1,12 +1,11 @@
 # SMC Core Library — Tài Liệu
 
-> **Script**: [libraries/smc_core.pine](../libraries/smc_core.pine) (v1.2)
+> **Script**: [libraries/smc_core.pine](../libraries/smc_core.pine) (v1.3)
 > **Loại**: Library (`library(overlay=false)`)
 > **Pine Script**: v6
-> **Ngày tạo**: 2026-07-10 / **Cập nhật**: 2026-11-22
-> **Publish trên TradingView**: account `anthonydang`, title `smc_core`, version hiện tại **2** — mọi `import` trong dự án đều dùng `anthonydang/smc_core/2 as smc` (xem `.claude/CLAUDE.md` mục "Tài Khoản TradingView").
-> **Dùng trong**: [strategies/smc_strategy.pine](../strategies/smc_strategy.pine), [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine), [indicators/order_flow_bar.pine](../indicators/order_flow_bar.pine).
-> ⚠️ **`indicators/smc_market_structure.pine` KHÔNG import library này** — tự có bản state machine viết tay riêng (bản gốc/tham chiếu, xem mục Changelog v1.1 bên dưới), không bị ảnh hưởng bởi thay đổi trong file này.
+> **Ngày tạo**: 2026-07-10 / **Cập nhật**: 2026-11-24
+> **Publish trên TradingView**: account `anthonydang`, title `smc_core`, version hiện tại **3** — mọi `import` trong dự án đều dùng `anthonydang/smc_core/3 as smc` (xem `.claude/CLAUDE.md` mục "Tài Khoản TradingView").
+> **Dùng trong**: [indicators/smc_market_structure.pine](../indicators/smc_market_structure.pine) (từ v2.0), [strategies/smc_strategy.pine](../strategies/smc_strategy.pine), [indicators/smc_market_structure_mtf.pine](../indicators/smc_market_structure_mtf.pine), [indicators/order_flow_bar.pine](../indicators/order_flow_bar.pine), [indicators/volume_profile_delta.pine](../indicators/volume_profile_delta.pine).
 
 ## Tổng Quan
 
@@ -30,6 +29,17 @@ Library tách phần **lõi state machine SMC Market Structure** (phát hiện H
 | `last_ph_bar`/`last_ph_val`, `last_pl_bar`/`last_pl_val` | — | Pivot gần nhất, dùng khi seed bằng Pivot Seed |
 | `event` | `int` | `1`=BoS Bull, `-1`=BoS Bear, `2`=CHoCH Bear, `-2`=CHoCH Bull, `0`=không có — reset mỗi bar, caller đọc để vẽ/trigger entry |
 
+### `OrderBlock` (thêm ở v1.3)
+
+| Field | Kiểu | Ý Nghĩa |
+|---|---|---|
+| `bar_origin` | `int` | Bar index của candle gốc tạo ra OB |
+| `top`/`bottom` | `float`/`float` | High/Low của candle gốc — biên zone của OB |
+| `is_bullish` | `bool` | `true`=Demand OB (Tăng), `false`=Supply OB (Giảm) |
+| `source` | `string` | Nguồn hình thành: `"FVG"`, `"OG"`, hoặc `"VI"` |
+| `is_mitigated` | `bool` | Đã bị giá quét qua (mitigation) chưa |
+| `bar_mitigation` | `int` | Bar index lúc mitigation xảy ra (`na` nếu chưa) |
+
 ## Hàm Xuất (`export`)
 
 | Hàm | Mô Tả |
@@ -41,6 +51,10 @@ Library tách phần **lõi state machine SMC Market Structure** (phát hiện H
 | `f_seed_pivot(s, ph, pl, pivot_len)` | Seed cấu trúc ban đầu bằng `ta.pivothigh`/`ta.pivotlow` — so sánh bar pivot High/Low gần nhất để suy ra trend ban đầu |
 | `f_seed_session(s)` | Seed bằng bar đầu phiên (dùng cho timeframe phút) — `trend=0`, chờ breakout xác nhận |
 | `f_process_bar(s)` | **State machine chính** — chạy 1 bar, nhận state vào, trả state mới. Phát hiện BoS (giá phá cùng chiều trend), CHoCH (phá ngược chiều → đổi trend), cập nhật HH/HL hoặc LL/LH tương ứng. Ghi sự kiện vào `s.event`. |
+| `f_imbalance_detection(show, usewidth, method, width, top, btm, condition, atr_val)` *(v1.3)* | Phát hiện 1 imbalance (FVG/OG/VI) theo điều kiện `condition` truyền vào + lọc độ rộng tối thiểu (`Points`/`%`/`ATR`, dùng `atr_val` do caller tính sẵn). Trả `[is_true, count]`. |
+| `f_bull_filled(condition, btm)` *(v1.3)* | Đếm số Bullish imbalance đã bị giá lấp (`low` chạm xuống dưới đáy gap) — dùng cho dashboard tần suất/đã lấp. |
+| `f_bear_filled(condition, top)` *(v1.3)* | Đếm số Bearish imbalance đã bị giá lấp (`high` chạm lên trên đỉnh gap). |
+| `f_get_imb_text_size(string)` *(v1.3)* | Chuyển `"Tiny"/"Small"/"Normal"` → `size.*`, dùng cho dashboard imbalance. |
 
 ## Logic Chính (`f_process_bar`)
 
@@ -52,18 +66,26 @@ Máy trạng thái 3 nhánh theo `trend`:
 
 ## Dùng Trong
 
-- `strategies/smc_strategy.pine` — dùng `SwingState` cho entry/exit signal (BoS/CHoCH) và tính Premium/Discount zone.
-- `indicators/smc_market_structure_mtf.pine` — dùng qua wrapper `f_run_smc()` chạy bên trong `request.security()` cho từng khung thời gian phụ (xem [docs/smc-market-structure.md](smc-market-structure.md#cách-hoạt-động-v20--state-machine-thật-trên-từng-tf)).
-- `indicators/order_flow_bar.pine` — dùng `SwingState` để xác định biên leg Higher Low/Lower High gần nhất cho mode "Last HL" (xem [docs/order-flow-bar.md](order-flow-bar.md)). Reseed lại mỗi phiên mới (khác cách dùng trong 2 file trên).
-- **Không dùng trong** `indicators/smc_market_structure.pine` — file này có bản state machine viết tay riêng (bản gốc/tham chiếu mà `f_process_bar()` của library này được refactor từ đó), không import library.
+- `indicators/smc_market_structure.pine` *(từ v2.0)* — dùng `SwingState` cho state machine chính, `OrderBlock` cho pool OB, `f_imbalance_detection`/`f_bull_filled`/`f_bear_filled`/`f_get_imb_text_size` cho FVG/OG/VI + dashboard. Đây là bản tham chiếu gốc mà `f_process_bar()` được refactor từ đó (xem [docs/smc-market-structure.md](smc-market-structure.md)).
+- `strategies/smc_strategy.pine` *(từ v2.2)* — dùng `SwingState` cho entry/exit signal (BoS/CHoCH) và tính Premium/Discount zone, `OrderBlock` cho pool OB, `f_imbalance_detection` cho FVG/OG/VI.
+- `indicators/smc_market_structure_mtf.pine` — dùng qua wrapper `f_run_smc()` chạy bên trong `request.security()` cho từng khung thời gian phụ (xem [docs/smc-market-structure.md](smc-market-structure.md#cách-hoạt-động-v20--state-machine-thật-trên-từng-tf)). ⚠️ Có bug aliasing UDT khi snapshot state cũ — xem Changelog v1.3 bên dưới.
+- `indicators/order_flow_bar.pine`, `indicators/volume_profile_delta.pine` — dùng `SwingState` để xác định biên leg Higher Low/Lower High gần nhất cho mode "Last HL" (xem [docs/order-flow-bar.md](order-flow-bar.md)). Reseed lại mỗi phiên mới (khác cách dùng ở các file trên).
 
 ## Giới Hạn & Lưu Ý
 
 - `f_find_extreme` dùng vòng `for` tuyến tính theo khoảng `start_bar..end_bar` — range quá dài (seed bằng Pivot Seed trên timeframe lớn với lịch sử dài) có thể tốn tính toán hơn nếu gọi nhiều lần/bar.
 - Mọi hàm pure nên được giữ nguyên tính pure khi mở rộng — không thêm `var`/vẽ trực tiếp vào library để các script dùng chung không bị ảnh hưởng tác dụng phụ ngoài ý muốn.
+- `f_imbalance_detection`, `f_bull_filled`, `f_bear_filled` vẫn dùng `var` cục bộ bên trong hàm (counter/array tích lũy theo thời gian) — đây KHÔNG vi phạm tính pure theo định nghĩa của library này (không có `var`/state ở cấp top-level script); Pine giữ state `var` cục bộ riêng theo từng call site, nên gọi hàm ở nhiều nơi khác nhau (vd Bullish/Bearish, FVG/OG/VI) vẫn cho kết quả độc lập đúng như bản gốc trước khi tách.
 
 ## Changelog
 
+- **v1.3** (2026-11-24): Đồng bộ lại với `indicators/smc_market_structure.pine` v1.16 (bản tham chiếu mới nhất) theo yêu cầu người dùng — rà soát toàn bộ core/library trong dự án.
+  - **Rà soát state machine**: so sánh từng nhánh `f_process_bar()`/`f_seed_pivot()`/`f_seed_session()`/`f_find_extreme()` với bản gốc `indicators/smc_market_structure.pine` v1.16 — khớp chính xác 100%, không phát hiện lệch/bug mới.
+  - **Thêm `export type OrderBlock`** — trước đó định nghĩa trùng lặp y hệt giữa `indicators/smc_market_structure.pine` và `strategies/smc_strategy.pine`.
+  - **Thêm `f_imbalance_detection`, `f_bull_filled`, `f_bear_filled`, `f_get_imb_text_size`** — tách từ các hàm cùng tên (không export) trong `indicators/smc_market_structure.pine`, trước đó `imbalance_detection` bị lặp code y hệt ở `strategies/smc_strategy.pine`. Riêng `f_imbalance_detection` đổi chữ ký: nhận thêm tham số `atr_val` (caller tự tính `ta.atr(...)` rồi truyền vào) vì hàm export không được tự ý tham chiếu biến ngoài scope như bản local cũ.
+  - Backup v1.2 tại `libraries/hist/smc_core_v1.2.pine`.
+  - Đã publish lên TradingView (account `anthonydang`, title `smc_core`) → version **3**. Đã migrate `indicators/smc_market_structure.pine` sang `anthonydang/smc_core/3 as smc` (xem [docs/smc-market-structure.md](smc-market-structure.md) mục Changelog v2.0). `strategies/smc_strategy.pine` dự kiến cập nhật ở bước kế tiếp.
+  - **Phát hiện bug khi migrate `smc_market_structure.pine`** (không nằm trong `smc_core` nhưng liên quan trực tiếp tới cách dùng library): UDT trong Pine là reference type — pattern `smc.SwingState old_st = st` rồi `st := smc.f_process_bar(st)` chỉ copy tham chiếu (alias cùng object), KHÔNG snapshot giá trị trước khi state machine mutate field. Field nào bị `f_process_bar()` thay đổi trong chính lần gọi đó thì đọc qua "old_st" vẫn ra giá trị MỚI chứ không phải giá trị cũ. `indicators/smc_market_structure_mtf.pine` v2.1 (đã publish) dùng đúng pattern này để detect "swing vừa được xác nhận" (`old_st.cand_type != 0 and st.cand_type == 0`) — điều kiện này luôn sai vì `cand_type` chính là field bị mutate, khiến nhánh vẽ label HH/HL/LL/LH khi swing mới xác nhận không bao giờ chạy trên bản MTF đã publish. Khi migrate `smc_market_structure.pine`, đã tránh lỗi này bằng cách snapshot từng field cần dùng ra biến nguyên thuỷ (int/float) trước khi gọi `f_process_bar()`. **Chưa fix bug ở `smc_market_structure_mtf.pine`** — ngoài phạm vi yêu cầu ban đầu, cần làm riêng.
 - **v1.2** (2026-11-22): Theo yêu cầu người dùng — gộp về 1 account TradingView duy nhất, đồng bộ version thật đã publish.
   - Đổi `library(title="SMC Core Library", ...)` → `library(title="smc_core", ...)` — khớp đúng title thật đã publish trên TradingView.
   - Cập nhật `import` ở `strategies/smc_strategy.pine` và `indicators/smc_market_structure_mtf.pine` từ `mrdungx2603/smc_core/1` → `anthonydang/smc_core/2` (gộp về cùng account với `order_flow_bar.pine`); `order_flow_bar.pine` cũng cập nhật version từ `/1` → `/2`.

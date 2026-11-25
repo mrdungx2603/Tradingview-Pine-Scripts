@@ -1,10 +1,10 @@
 # SMC Strategy — Tài Liệu
 
-> **Script**: [strategies/smc_strategy.pine](../strategies/smc_strategy.pine) (v2.1)
+> **Script**: [strategies/smc_strategy.pine](../strategies/smc_strategy.pine) (v2.2)
 > **Loại**: Strategy (overlay, backtest)
 > **Pine Script**: v6
-> **Ngày tạo**: 2026-06-21 / **Cập nhật**: 2026-11-22
-> **Library dùng**: [smc_core](smc-core.md) v1.2 (`import anthonydang/smc_core/2 as smc`)
+> **Ngày tạo**: 2026-06-21 / **Cập nhật**: 2026-11-24
+> **Library dùng**: [smc_core](smc-core.md) v1.3 (`import anthonydang/smc_core/3 as smc`)
 > **Liên quan**: [docs/smc-market-structure.md](smc-market-structure.md) (khái niệm SMC, BoS/CHoCH/FVG/OG/VI/OB)
 
 ## Tổng Quan
@@ -42,7 +42,7 @@ Dùng chung engine với indicator base qua `smc_core` (`f_seed_pivot`/`f_seed_s
 
 ### 2. Order Block (OB) — Tạo & Mitigation
 
-Giống cơ chế trong indicator base: OB tạo từ nến origin của FVG/OG/VI (xem bảng "OB Creation" trong [smc-market-structure.md](smc-market-structure.md#order-blocks-ob)), FIFO khi vượt `max_ob_active`, mitigation khi giá quay lại chạm vùng OB.
+Giống cơ chế trong indicator base: OB tạo từ nến origin của FVG/OG/VI (xem bảng "OB Creation" trong [smc-market-structure.md](smc-market-structure.md#order-blocks-ob)), FIFO khi vượt `max_ob_active`, mitigation khi giá quay lại chạm vùng OB. Từ v2.2, dùng UDT `smc.OrderBlock` export từ [smc_core](smc-core.md) thay cho `type OrderBlock` viết tay riêng.
 
 ### 3. Premium / Discount Zone
 
@@ -88,6 +88,7 @@ Khi lợi nhuận hiện tại ≥ 30% khoảng risk ban đầu, dời SL theo H
 
 ## Changelog
 
+- **v2.2** (2026-11-24): Đổi `import anthonydang/smc_core/2` → `anthonydang/smc_core/3`. Thay `type OrderBlock` và hàm `imbalance_detection` viết tay riêng (lặp code y hệt với `indicators/smc_market_structure.pine` trước khi file đó migrate sang `smc_core`) bằng `smc.OrderBlock` và `smc.f_imbalance_detection` export từ `smc_core` v1.3 — không đổi hành vi entry/exit. Bỏ biến `old_st` không dùng tới (dead code từ v2.0). Backup v2.1 tại `strategies/hist/smc_strategy_v2.1.pine`.
 - **v1.0** (2026-06-21): Phát hành lần đầu, state machine viết trực tiếp trong strategy.
 - **v2.0** (2026-07-10): Import library `smc_core`, thay state machine nội bộ bằng UDT `SwingState` dùng chung — giảm ~198 dòng (897→699), không đổi hành vi entry/exit.
 - **v2.1** (2026-11-22): Đổi `import mrdungx2603/smc_core/1` → `anthonydang/smc_core/2` — gộp về 1 account TradingView duy nhất (theo yêu cầu người dùng, xem `.claude/CLAUDE.md` mục "Tài Khoản TradingView"). Đồng thời nhận fix bug `trigger_bar` ở `smc_core` v1.1 (xem [docs/smc-core.md](smc-core.md#changelog)) — kết quả HH/HL/LL/LH tính chính xác hơn, không phải regression. Backup v2.0 tại `strategies/hist/smc_strategy_v2.0.pine`.

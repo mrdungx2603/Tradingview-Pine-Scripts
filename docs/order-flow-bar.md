@@ -2,10 +2,10 @@
 
 ## Tổng Quan
 
-> **Yêu cầu hạ tầng**: indicator này `import anthonydang/smc_core/2 as smc` — library `smc_core`
-> đã publish dưới account `anthonydang`, title `smc_core`, version 2 (xem `.claude/CLAUDE.md`
-> mục "Tài Khoản TradingView"). Nếu version publish trên TradingView thay đổi, cần sửa lại số
-> version trong dòng `import` này.
+> **Yêu cầu hạ tầng**: indicator này `import anthonydang/smc_core/3 as smc` và
+> `import anthonydang/order_flow_core/1 as ofcore` — 2 library đã publish dưới account
+> `anthonydang` (xem `.claude/CLAUDE.md` mục "Tài Khoản TradingView"). Nếu version publish trên
+> TradingView thay đổi, cần sửa lại số version trong dòng `import` tương ứng.
 
 Indicator overlay vẽ **1 thanh order flow** dạng cánh (wing) neo tại 1 bar mốc trên chart.
 Mỗi hàng giá (cao `price_step`) có 1 box buyer kéo sang phải (volume mua) và 1 box seller kéo
@@ -79,12 +79,13 @@ tính được chọn.
 - **`price_step` phải cố định xuyên suốt**: `row_id` được tính trực tiếp từ `price_step` hiện tại và lưu nguyên vào buffer; đổi `price_step` giữa chừng sẽ làm các bucket cũ trong buffer (tính theo step cũ) không còn tương thích với bucket mới, gây lệch khi dựng lại profile. Đổi `price_step` nên đi kèm xoá/làm mới chart (hoặc chờ buffer tự xoay hết dữ liệu cũ).
 - **Buffer giới hạn `max_lookback_bars`**: `of_buffer` chỉ giữ tối đa `max_lookback_bars` bar gần nhất; nếu leg Last HL dài vượt quá số bar còn lưu trong buffer, phần dữ liệu cũ hơn bị **clip tự nhiên** (không còn trong buffer, không raise lỗi) — profile dựng được sẽ thiếu phần đó. Session không dùng buffer này (tính độc lập, không bị clip).
 - **Pivot Seed (Last HL) có thể không seed được**: `seed_mode = "Pivot Seed"` cần `ta.pivothigh`/`ta.pivotlow` cùng xác nhận đúng lúc trong vài bar đầu phiên; nếu không rơi đúng lúc, trạng thái SMC có thể không seed xong trong suốt phiên đó → `last_hl_profile` rỗng (không vẽ) cho tới phiên sau. `seed_mode = "Session Seed"` không gặp giới hạn này.
-- **Phụ thuộc library `smc_core`**: file dùng `import anthonydang/smc_core/2 as smc` — library đã publish thật dưới account `anthonydang`, title `smc_core`, version 2. Nếu `smc_core` được publish lại (version tăng lên), cần sửa số version trong dòng `import` này. Mode "Session" không phụ thuộc `smc_core`, không bị ảnh hưởng.
+- **Phụ thuộc library `smc_core` và `order_flow_core`**: file dùng `import anthonydang/smc_core/3 as smc` và `import anthonydang/order_flow_core/1 as ofcore` — cả 2 đã publish thật dưới account `anthonydang`. Nếu 1 trong 2 library được publish lại (version tăng lên), cần sửa số version trong dòng `import` tương ứng. Mode "Session" không phụ thuộc `smc_core` (vẫn phụ thuộc `order_flow_core` để bucket/gộp profile), không bị ảnh hưởng bởi thay đổi trong `smc_core`.
 - **Giới hạn 500 box/500 label** (cấu hình `max_boxes_count`/`max_labels_count` trong `indicator()`): mỗi hàng giá trong `active_profile` dùng **2 box** (buyer + seller). Nếu số hàng trong phạm vi tính vượt quá **250 hàng** (ví dụ `price_step` quá nhỏ so với range giá của phạm vi đang tính), tổng số box sẽ vượt `max_boxes_count=500` — TradingView tự xoá box cũ nhất để giữ dưới giới hạn, có thể làm **mất ngẫu nhiên 1 vài hàng (kể cả hàng POC)** mà không báo lỗi. Nên chọn `price_step` sao cho `(range giá của phạm vi tính) / price_step < 250`.
 - Chỉ so sánh pivot/leg SMC gần nhất; không hiển thị lịch sử nhiều leg.
 
 ## Changelog
 
+- **v1.18 (2026-11-24)**: Đổi `import anthonydang/smc_core/2` → `anthonydang/smc_core/3`, thêm `import anthonydang/order_flow_core/1 as ofcore`. Thay `type BarRowVol`/`RowProfile` và hàm `f_bucket_bar_rows`/`f_push_bar_buffer`/`f_merge_into_profile`/`f_build_profile_from_buffer` viết tay riêng (lặp code y hệt với `indicators/volume_profile_delta.pine`) bằng bản export từ [order_flow_core](order-flow-core.md) v1.0 — không đổi hành vi hiển thị. Backup v1.17 tại `indicators/hist/order_flow_bar_v1.17.pine`.
 - **v1.17 (2026-11-22)**: Theo yêu cầu người dùng — thêm mode phạm vi tính thứ 3.
   - Thêm option `"Last HL (Đến Hiện Tại)"` vào `mode_calc` (bên cạnh "Session"/"Last HL") — dùng chung state machine SMC + biên trái (`hl_bar`/`lh_bar`) với "Last HL", nhưng biên phải đổi thành `bar_index` hiện tại thay vì `hh_bar`/`ll_bar` đã xác nhận — phản ánh swing đang hình thành (chưa chốt thành HH/LL mới), sát giá hiện tại hơn.
   - Thêm cờ `is_lasthl_mode` (gộp `mode_calc == "Last HL" or mode_calc == "Last HL (Đến Hiện Tại)"`) để chạy chung state machine + rebuild `last_hl_profile` cho cả 2 mode — chỉ biến `lasthl_right_bar` khác nhau theo mode.
