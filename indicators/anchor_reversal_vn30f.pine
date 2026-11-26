@@ -57,10 +57,12 @@ i_killzoneOnly = input.bool(true, "Alert chỉ cho Tier 1", group=grp_sess, tool
 // 7. Momentum 3 nến
 i_useMom     = input.bool(false, "Bật momentum 3 nến cùng chiều", group=grp_mom, tooltip="Ba nến hợp lệ liên tiếp cùng chiều tạo momentum. Nến đóng cửa phía ngược vùng momentum thì momentum bị tiêu diệt.")
 i_momAtrMult = input.float(1.0, "Biên độ 3 nến ≥ ATR × hệ số", minval=0.1, step=0.1, group=grp_mom, tooltip="Biên độ của vùng momentum (high cao nhất − low thấp nhất của 3 nến) phải ≥ ATR nhân hệ số này. Dưới ngưỡng thì không tạo momentum.")
+i_momVizMode   = input.string("Line", "Kiểu vẽ momentum", options=["Line", "Box"], group=grp_mom, tooltip="Line: hai đường High và Low. Box: một hộp từ High đến Low. Độc lập với kiểu vẽ chain ở nhóm Hiển thị.")
+i_momLineStyle = input.string("Dotted", "Nét đường / viền momentum", options=["Solid", "Dashed", "Dotted"], group=grp_mom, tooltip="Kiểu nét khi momentum đang hiệu lực. Khi kết thúc: valid nét đứt, bị thay thế nét liền, giống chain.")
 
 // 8. Hiển thị
-i_vizMode     = input.string("Line", "Kiểu vẽ chain & momentum", options=["Line", "Box"], group=grp_disp, tooltip="Line: hai đường High và Low. Box: một hộp từ High đến Low.")
-i_lineStyle   = input.string("Dashed", "Nét đường / viền", options=["Solid", "Dashed", "Dotted"], group=grp_disp, tooltip="Kiểu nét khi vẽ đường H/L hoặc viền hộp đang hiệu lực.")
+i_vizMode     = input.string("Line", "Kiểu vẽ chain", options=["Line", "Box"], group=grp_disp, tooltip="Line: hai đường High và Low. Box: một hộp từ High đến Low. Momentum có setting riêng ở nhóm 7.")
+i_lineStyle   = input.string("Dashed", "Nét đường / viền chain", options=["Solid", "Dashed", "Dotted"], group=grp_disp, tooltip="Kiểu nét khi vẽ đường H/L hoặc viền hộp của chain đang hiệu lực.")
 i_colLong     = input.color(color.green, "Màu LONG", group=grp_disp, tooltip="Màu cho chain giảm (chờ Long) và momentum tăng.")
 i_colShort    = input.color(color.red, "Màu SHORT", group=grp_disp, tooltip="Màu cho chain tăng (chờ Short) và momentum giảm.")
 i_showLabels  = input.bool(true, "Hiện nhãn BODY/ABS và tín hiệu", group=grp_disp, tooltip="Tắt để ẩn nhãn loại nến (BODY/ABS) và nhãn tín hiệu xác nhận LONG/SHORT.")
@@ -554,11 +556,11 @@ if i_useMom and barstate.isconfirmed
         mom_lo        := mom_lo_run
         mom_first_bar := bar_index - 2
         mom_chg       := true
-        if i_vizMode == "Line"
-            mom_lh := line.new(bar_index - 2, mom_hi_run, bar_index, mom_hi_run, color=mom_dir_run == 1 ? i_colLong : i_colShort, style=f_line_style(i_lineStyle), extend=extend.none)
-            mom_ll := line.new(bar_index - 2, mom_lo_run, bar_index, mom_lo_run, color=mom_dir_run == 1 ? i_colLong : i_colShort, style=f_line_style(i_lineStyle), extend=extend.none)
+        if i_momVizMode == "Line"
+            mom_lh := line.new(bar_index - 2, mom_hi_run, bar_index, mom_hi_run, color=mom_dir_run == 1 ? i_colLong : i_colShort, style=f_line_style(i_momLineStyle), extend=extend.none)
+            mom_ll := line.new(bar_index - 2, mom_lo_run, bar_index, mom_lo_run, color=mom_dir_run == 1 ? i_colLong : i_colShort, style=f_line_style(i_momLineStyle), extend=extend.none)
         else
-            mom_box := box.new(bar_index - 2, mom_hi_run, bar_index, mom_lo_run, border_color=mom_dir_run == 1 ? i_colLong : i_colShort, bgcolor=color.new(mom_dir_run == 1 ? i_colLong : i_colShort, 88), border_style=f_line_style(i_lineStyle))
+            mom_box := box.new(bar_index - 2, mom_hi_run, bar_index, mom_lo_run, border_color=mom_dir_run == 1 ? i_colLong : i_colShort, bgcolor=color.new(mom_dir_run == 1 ? i_colLong : i_colShort, 88), border_style=f_line_style(i_momLineStyle))
 
     // (d) Cập nhật hình vẽ momentum đang hiệu lực, chỉ khi vùng đổi hoặc ở bar cuối
     if mom_on and (mom_chg or barstate.islast)

@@ -258,7 +258,7 @@ Quota: giới hạn 500 box, 500 line, 500 label. Dùng FIFO khi vượt, giốn
 
 ---
 
-Chế độ hiển thị chọn bằng `i_vizMode`:
+Chế độ hiển thị của chain chọn bằng `i_vizMode`. Momentum có setting riêng `i_momVizMode` và `i_momLineStyle` (nhóm 7), dùng cùng quy tắc kết thúc:
 - **Line** (mặc định): hai đường High và Low như mô tả ở trên.
 - **Box**: một hộp từ High đến Low, kéo dài đến nến hiện tại. Khi kết thúc: valid thì viền nét đứt, invalid thì viền nét liền. Chế độ Box không có chữ x. Momentum cũng dùng chung quy tắc.
 
@@ -340,8 +340,10 @@ Nhóm theo chức năng, đúng thứ tự hiển thị trong setting. Mỗi inp
 | | `i_killzoneOnly` | true | Alert chỉ cho Tier 1 |
 | 7. Momentum 3 nến | `i_useMom` | false | Bật momentum 3 nến cùng chiều |
 | | `i_momAtrMult` | 1.0 | Biên độ 3 nến ≥ ATR × hệ số |
-| 8. Hiển thị | `i_vizMode` | Line | Line (hai đường H/L) hoặc Box (một hộp) |
-| | `i_lineStyle` | Dashed | Nét đường / viền: Solid, Dashed, Dotted |
+| | `i_momVizMode` | Line | Kiểu vẽ momentum: Line hoặc Box, độc lập với chain |
+| | `i_momLineStyle` | Dotted | Nét đường / viền momentum khi đang hiệu lực |
+| 8. Hiển thị | `i_vizMode` | Line | Kiểu vẽ chain: Line (hai đường H/L) hoặc Box (một hộp) |
+| | `i_lineStyle` | Dashed | Nét đường / viền chain: Solid, Dashed, Dotted |
 | | `i_colLong` | xanh | Màu LONG |
 | | `i_colShort` | đỏ | Màu SHORT |
 | | `i_showLabels` | true | Hiện nhãn BODY/ABS và tín hiệu |
@@ -468,6 +470,7 @@ Các câu còn lại đã được trả lời trong quá trình thiết kế.
 
 ## Changelog
 
+- **Chưa lên version** (2026-11-26): momentum có setting hiển thị riêng (`i_momVizMode`, `i_momLineStyle`), tách khỏi chain. Mặc định momentum nét chấm để phân biệt với chain.
 - **Chưa lên version** (2026-11-26): tối ưu hiệu năng, không đổi tín hiệu.
   - Sàn volume: giữ một mảng volume đã sắp xếp, chèn/xoá bằng tìm kiếm nhị phân và đọc phân vị theo chỉ số. Trước đó `array.percentile_nearest_rank` sắp xếp lại khoảng 5.100 phần tử ở mỗi bar hợp lệ.
   - SMA volume: dùng tổng trượt thay cho `array.slice` + `array.avg` ở mỗi bar.
