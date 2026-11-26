@@ -90,48 +90,34 @@ bool del_invalid = del_view or i_hideInvalid         // xoá cả chain invalid
 // ═══════════════════════════════════════════════════════════
 // THỐNG KÊ TRADE THAM KHẢO
 // ═══════════════════════════════════════════════════════════
-var array<float>  st_r    = array.new<float>()
-var array<string> st_type = array.new<string>()
-var array<string> st_dir  = array.new<string>()
-var array<string> st_tier = array.new<string>()
+// 7 nhóm: 0 Tổng, 1 BODY, 2 ABS, 3 Tier 1, 4 Tier 2, 5 LONG, 6 SHORT.
+// Cộng dồn khi trade tham khảo đóng, nên bảng không phải quét lại toàn bộ lịch sử ở mỗi tick.
+var array<int>   g_n   = array.new<int>(7, 0)
+var array<int>   g_w   = array.new<int>(7, 0)
+var array<int>   g_t2  = array.new<int>(7, 0)
+var array<int>   g_s   = array.new<int>(7, 0)
+var array<float> g_sum = array.new<float>(7, 0.0)
 
-f_gstats(string key) =>
-    int n = 0
-    int w = 0
-    int t2 = 0
-    int s = 0
-    float sum_r = 0.0
-    int sz = array.size(st_r)
-    if sz > 0
-        for i = 0 to sz - 1
-            string t_type = array.get(st_type, i)
-            string t_dir  = array.get(st_dir, i)
-            string t_tier = array.get(st_tier, i)
-            float r_i     = array.get(st_r, i)
-            bool m = key == "ALL" or key == t_type or key == t_dir or key == t_tier
-            if m
-                n += 1
-                sum_r += r_i
-                if r_i > 0
-                    w += 1
-                if r_i >= 2
-                    t2 += 1
-                if r_i < 0
-                    s += 1
-    float wr    = n > 0 ? 100.0 * w / n : na
-    float t2r   = n > 0 ? 100.0 * t2 / n : na
-    float sr    = n > 0 ? 100.0 * s / n : na
-    float avg_r = n > 0 ? sum_r / n : na
-    [n, wr, t2r, sr, avg_r]
+f_stat_add(int g, float r) =>
+    array.set(g_n, g, array.get(g_n, g) + 1)
+    array.set(g_w, g, array.get(g_w, g) + (r > 0 ? 1 : 0))
+    array.set(g_t2, g, array.get(g_t2, g) + (r >= 2 ? 1 : 0))
+    array.set(g_s, g, array.get(g_s, g) + (r < 0 ? 1 : 0))
+    array.set(g_sum, g, array.get(g_sum, g) + r)
+    true
 
-f_stat_row(table tbl, int row, string key, string lbl) =>
-    [n, wr, t2r, sr, avg_r] = f_gstats(key)
+f_stat_row(table tbl, int row, int g, string lbl) =>
+    int n = array.get(g_n, g)
+    string wr  = n > 0 ? str.tostring(100.0 * array.get(g_w, g) / n, "#") + "%" : "-"
+    string t2r = n > 0 ? str.tostring(100.0 * array.get(g_t2, g) / n, "#") + "%" : "-"
+    string sr  = n > 0 ? str.tostring(100.0 * array.get(g_s, g) / n, "#") + "%" : "-"
+    string avr = n > 0 ? str.tostring(array.get(g_sum, g) / n, "#.00") + "R" : "-"
     table.cell(tbl, 0, row, lbl, text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
     table.cell(tbl, 1, row, str.tostring(n), text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
-    table.cell(tbl, 2, row, na(wr) ? "-" : str.tostring(wr, "#") + "%", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
-    table.cell(tbl, 3, row, na(t2r) ? "-" : str.tostring(t2r, "#") + "%", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
-    table.cell(tbl, 4, row, na(sr) ? "-" : str.tostring(sr, "#") + "%", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
-    table.cell(tbl, 5, row, na(avg_r) ? "-" : str.tostring(avg_r, "#.00") + "R", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(tbl, 2, row, wr, text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(tbl, 3, row, t2r, text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(tbl, 4, row, sr, text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(tbl, 5, row, avr, text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
 
 // ═══════════════════════════════════════════════════════════
 // HÀM HỖ TRỢ HIỂN THỊ
@@ -141,6 +127,27 @@ f_pos(string s) =>
 
 f_line_style(string s) =>
     s == "Solid" ? line.style_solid : s == "Dotted" ? line.style_dotted : line.style_dashed
+
+// Vị trí chèn đầu tiên của v trong mảng đã sắp xếp tăng dần (lower bound).
+f_lower_bound(array<float> a, float v) =>
+    int lo = 0
+    int hi = array.size(a)
+    while lo < hi
+        int mid = int((lo + hi) / 2)
+        if array.get(a, mid) < v
+            lo := mid + 1
+        else
+            hi := mid
+    lo
+
+// "HH:mm" → số phút từ 00:00.
+f_parse_hhmm(string s) =>
+    array<string> p = str.split(s, ":")
+    int(str.tonumber(array.get(p, 0))) * 60 + int(str.tonumber(array.get(p, 1)))
+
+// Chuỗi Entry/SL/TP tham khảo. Chỉ gọi khi có xác nhận, không dựng chuỗi ở mọi bar.
+f_ref_txt(float entry, float sl, float risk, int dir, bool wide) =>
+    "E " + str.tostring(entry, format.mintick) + "  SL " + str.tostring(sl, format.mintick) + "  TP1 " + str.tostring(entry + dir * risk, format.mintick) + "  TP2 " + str.tostring(entry + dir * 2 * risk, format.mintick) + (wide ? "  [WIDE SL]" : "")
 
 // Đóng hình vẽ của chain hoặc momentum tại x_end.
 // keep = 1: giữ đường High, bỏ Low. keep = -1: giữ Low, bỏ High. keep = 0: dừng cả hai, không bỏ.
@@ -188,8 +195,7 @@ f_close_visual(line lh, line ll, box bx, int x_start, int x_end, int keep, bool 
 // THỜI GIAN (múi giờ VN)
 // ═══════════════════════════════════════════════════════════
 int mod_now = hour(time, "Asia/Ho_Chi_Minh") * 60 + minute(time, "Asia/Ho_Chi_Minh")
-array<string> cut_parts = str.split(i_cutoff, ":")
-int cut_mod = int(str.tonumber(array.get(cut_parts, 0))) * 60 + int(str.tonumber(array.get(cut_parts, 1)))
+var int cut_mod = f_parse_hhmm(i_cutoff)
 bool is_valid      = (mod_now > ATO_MOD and mod_now <= 690) or (mod_now >= 780 and mod_now < ATC_MOD)
 bool is_tier1      = (mod_now >= 555 and mod_now <= 630) or (mod_now >= 810 and mod_now <= 860)
 bool before_cutoff = mod_now <= cut_mod
@@ -208,20 +214,29 @@ if is_valid
 // ═══════════════════════════════════════════════════════════
 // SÀN VOLUME ĐỘNG (phân vị q của L phiên, bar hợp lệ)
 // ═══════════════════════════════════════════════════════════
-var array<float> vol_hist = array.new<float>()
+// Giữ thêm một mảng đã sắp xếp. Chèn và xoá bằng tìm kiếm nhị phân, phân vị đọc trực tiếp theo chỉ số
+// (nearest-rank), không sắp xếp lại toàn bộ mảng ở mỗi bar. SMA dùng tổng trượt thay cho slice + avg.
+var array<float> vol_hist   = array.new<float>()
+var array<float> vol_sorted = array.new<float>()
+var float vol_sum     = 0.0
 var float sma_vol_v   = na
 var float vol_floor_v = na
-int vol_cap = i_volSessions * MIN_BARS_SESSION
-int n_h = array.size(vol_hist)
+int   vol_cap = math.max(i_volSessions * MIN_BARS_SESSION, i_volLen + 1)
+int   n_h     = array.size(vol_hist)
+float v_in    = nz(volume)
 if is_valid
     // Tham chiếu tính trước khi đưa volume bar hiện tại vào lịch sử
     if n_h >= i_volLen
-        sma_vol_v := array.avg(array.slice(vol_hist, n_h - i_volLen, n_h))
+        sma_vol_v := vol_sum / i_volLen
     if n_h >= MIN_BARS_SESSION
-        vol_floor_v := array.percentile_nearest_rank(vol_hist, i_volPctile)
-    array.push(vol_hist, volume)
-    if array.size(vol_hist) > vol_cap
-        array.shift(vol_hist)
+        vol_floor_v := array.get(vol_sorted, math.max(int(math.ceil(i_volPctile / 100.0 * n_h)) - 1, 0))
+    array.push(vol_hist, v_in)
+    array.insert(vol_sorted, f_lower_bound(vol_sorted, v_in), v_in)
+    vol_sum += v_in
+    if n_h + 1 > i_volLen
+        vol_sum -= array.get(vol_hist, n_h - i_volLen)
+    if n_h + 1 > vol_cap
+        array.remove(vol_sorted, f_lower_bound(vol_sorted, array.shift(vol_hist)))
 
 // ═══════════════════════════════════════════════════════════
 // SMC: cấu trúc từ smc_core v3 (swing và CHoCH)
@@ -327,15 +342,10 @@ if tr_on
     if na(tr_res) and tr_timeout
         tr_res := tr_tp1_hit ? 1.0 : tr_close_r
     if not na(tr_res)
-        array.push(st_r, tr_res)
-        array.push(st_type, tr_type)
-        array.push(st_dir, tr_dir == 1 ? "LONG" : "SHORT")
-        array.push(st_tier, tr_tier)
-        if array.size(st_r) > 2000
-            array.shift(st_r)
-            array.shift(st_type)
-            array.shift(st_dir)
-            array.shift(st_tier)
+        f_stat_add(0, tr_res)
+        f_stat_add(tr_type == "BODY" ? 1 : 2, tr_res)
+        f_stat_add(tr_tier == "T1" ? 3 : 4, tr_res)
+        f_stat_add(tr_dir == 1 ? 5 : 6, tr_res)
         tr_on := false
         tr_tp1_hit := false
 
@@ -357,7 +367,6 @@ float sig_risk = math.abs(close - sig_sl)
 bool sig_wide = sig_risk > i_maxRiskPts
 string sig_tier = is_tier1 ? "T1" : "T2"
 string sig_name = sig_dir == 1 ? "LONG" : "SHORT"
-string ref_txt = "E " + str.tostring(close, format.mintick) + "  SL " + str.tostring(sig_sl, format.mintick) + "  TP1 " + str.tostring(close + sig_dir * sig_risk, format.mintick) + "  TP2 " + str.tostring(close + sig_dir * 2 * sig_risk, format.mintick) + (sig_wide ? "  [WIDE SL]" : "")
 
 if confirmed_bull or confirmed_bear
     ch_on := false
@@ -384,7 +393,7 @@ if confirmed_bull or confirmed_bear
         tr_tp2 := close + sig_dir * 2 * sig_risk
         tr_tp1_hit := false
     if i_showTrade
-        label.new(bar_index, sig_sl, ref_txt, color=color.new(color.gray, 20), style=confirmed_bull ? label.style_label_up : label.style_label_down, textcolor=color.white, size=size.tiny)
+        label.new(bar_index, sig_sl, f_ref_txt(close, sig_sl, sig_risk, sig_dir, sig_wide), color=color.new(color.gray, 20), style=confirmed_bull ? label.style_label_up : label.style_label_down, textcolor=color.white, size=size.tiny)
 
 // Bước 3: vô hiệu chain khi nến ĐÓNG ngoài vùng về phía tiếp diễn (không theo số nến)
 // Chain giảm (chờ Long): đóng dưới đáy vùng. Chain tăng (chờ Short): đóng trên đỉnh vùng.
@@ -457,8 +466,9 @@ if cand_dir != 0 and can_signal
     if i_showLabels
         label.new(bar_index, cand_dir == -1 ? low : high, cand_type, color=color.new(color.gray, 70), style=cand_dir == -1 ? label.style_label_up : label.style_label_down, textcolor=color.white, size=size.tiny)
 
-// Bước 5: cập nhật đường H/L hoặc hộp của chain đang mở
-if ch_on
+// Bước 5: cập nhật đường H/L hoặc hộp của chain đang mở.
+// Chỉ khi vùng vừa đổi (anchor mới/gộp) hoặc ở bar cuối. Khi chain kết thúc, f_close_visual tự đặt điểm cuối.
+if ch_on and (anchor_evt or barstate.islast)
     if not na(ch_lh)
         line.set_xy1(ch_lh, ch_first_bar, ch_zh)
         line.set_xy2(ch_lh, bar_index, ch_zh)
@@ -490,6 +500,7 @@ var int    mom_first_bar = 0
 int  mom_bar_dir = close > open ? 1 : close < open ? -1 : 0
 bool mom_kill_up = false
 bool mom_kill_dn = false
+bool mom_chg     = false
 
 if i_useMom and barstate.isconfirmed
     // (a) Đếm chuỗi nến cùng chiều liên tiếp; bar không hợp lệ làm đứt chuỗi
@@ -515,11 +526,13 @@ if i_useMom and barstate.isconfirmed
                 mom_kill_up := true
             else if close > mom_hi
                 mom_hi := high
+                mom_chg := true
         else
             if close > mom_hi
                 mom_kill_dn := true
             else if close < mom_lo
                 mom_lo := low
+                mom_chg := true
         if mom_kill_up or mom_kill_dn
             mom_on := false
             // Valid: giữ phía bị phá vỡ (mom_kill_dn = giữ High)
@@ -540,14 +553,15 @@ if i_useMom and barstate.isconfirmed
         mom_hi        := mom_hi_run
         mom_lo        := mom_lo_run
         mom_first_bar := bar_index - 2
+        mom_chg       := true
         if i_vizMode == "Line"
             mom_lh := line.new(bar_index - 2, mom_hi_run, bar_index, mom_hi_run, color=mom_dir_run == 1 ? i_colLong : i_colShort, style=f_line_style(i_lineStyle), extend=extend.none)
             mom_ll := line.new(bar_index - 2, mom_lo_run, bar_index, mom_lo_run, color=mom_dir_run == 1 ? i_colLong : i_colShort, style=f_line_style(i_lineStyle), extend=extend.none)
         else
             mom_box := box.new(bar_index - 2, mom_hi_run, bar_index, mom_lo_run, border_color=mom_dir_run == 1 ? i_colLong : i_colShort, bgcolor=color.new(mom_dir_run == 1 ? i_colLong : i_colShort, 88), border_style=f_line_style(i_lineStyle))
 
-    // (d) Cập nhật hình vẽ momentum đang hiệu lực
-    if mom_on
+    // (d) Cập nhật hình vẽ momentum đang hiệu lực, chỉ khi vùng đổi hoặc ở bar cuối
+    if mom_on and (mom_chg or barstate.islast)
         if not na(mom_lh)
             line.set_xy1(mom_lh, mom_first_bar, mom_hi)
             line.set_xy2(mom_lh, bar_index, mom_hi)
@@ -577,48 +591,50 @@ alertcondition(mom_alert_dn, title="Momentum Giảm Bị Tiêu Diệt", message=
 // ═══════════════════════════════════════════════════════════
 // BẢNG DEBUG BAR CUỐI (chỉ hiển thị, không đổi logic)
 // ═══════════════════════════════════════════════════════════
-int dbg_h_vn = hour(time, "Asia/Ho_Chi_Minh")
-int dbg_m_vn = minute(time, "Asia/Ho_Chi_Minh")
-string dbg_time_s  = (dbg_h_vn < 10 ? "0" : "") + str.tostring(dbg_h_vn) + ":" + (dbg_m_vn < 10 ? "0" : "") + str.tostring(dbg_m_vn)
-string dbg_atr_s   = na(atr_v) ? "-" : str.tostring(atr_v, format.mintick)
-string dbg_req_s   = na(atr_v) ? "-" : str.tostring(atr_v * i_bodyAtrMult, format.mintick)
-string dbg_body_s  = str.tostring(body, format.mintick)
-string dbg_ratio_s = rng_ok ? str.tostring(body / rng, "#.00") : "-"
-string dbg_volx_s  = na(sma_vol_v) ? "-" : str.tostring(volume / sma_vol_v, "#.00")
-string dbg_vol_s   = str.tostring(volume, format.volume)
-string dbg_flr_s   = na(vol_floor_v) ? "chưa đủ dữ liệu" : str.tostring(vol_floor_v, format.volume)
-string dbg_rat_s   = na(atr_v) or not rng_ok ? "-" : str.tostring(rng / atr_v, "#.00")
-string dbg_sw_s    = (na(swing_low) ? "-" : str.tostring(swing_low, format.mintick)) + " / " + (na(swing_high) ? "-" : str.tostring(swing_high, format.mintick))
-string dbg_c1      = na(atr_v) ? "chưa có ATR" : body > atr_v * i_bodyAtrMult ? "OK" : "FAIL"
-string dbg_c2      = body >= i_bodyMinPts ? "OK" : "FAIL"
-string dbg_c3      = rng_ok and body / rng >= i_bodyRatio ? "OK" : "FAIL"
-string dbg_c4a     = na(sma_vol_v) ? "chưa có SMA" : volume >= sma_vol_v * i_volMult ? "OK" : "FAIL"
-string dbg_c4b     = na(vol_floor_v) ? "chưa đủ dữ liệu" : volume >= vol_floor_v ? "OK" : "FAIL"
-string dbg_abs_s   = na(atr_v) ? "chưa có ATR" : rng <= atr_v * i_absSpreadAtr ? "OK" : "FAIL"
-string dbg_swp_s   = i_absRequireSweep ? (abs_bear_dir or abs_bull_dir ? "OK" : "chưa quét swing") : "không bắt buộc"
-string dbg_res_s   = cand_dir == 0 ? "không phải anchor" : cand_type + " " + (cand_dir == -1 ? "GIẢM" : "TĂNG")
-
-var table dbg = table.new(position.bottom_left, 3, 12, bgcolor=C_DASH_BG, border_width=1, border_color=color.gray)
-
-// 12 dòng x 3 cột, phẳng theo thứ tự hàng: [r*3 + c]
-array<string> dbg_cells = array.from(
-     "Điều kiện", "Giá trị", "Kết quả",
-     "Giờ bar (VN)", dbg_time_s, is_valid ? "trong phiên" : "NGOÀI phiên",
-     "Killzone / cutoff", is_tier1 ? "Tier 1" : "Tier 2", before_cutoff ? "trước " + i_cutoff : "SAU " + i_cutoff,
-     "ATR(" + str.tostring(i_atrLen) + ")", dbg_atr_s, "BODY cần > " + dbg_req_s,
-     "C1 Thân", dbg_body_s, dbg_c1 + " (cần > ATR×" + str.tostring(i_bodyAtrMult, "#.0") + ")",
-     "C2 Thân sàn", dbg_body_s, dbg_c2 + " (≥ " + str.tostring(i_bodyMinPts, "#.0") + ")",
-     "C3 Thân/range", dbg_ratio_s, dbg_c3 + " (≥ " + str.tostring(i_bodyRatio, "#.00") + ")",
-     "C4a Vol/SMA", dbg_volx_s, dbg_c4a + " (≥ " + str.tostring(i_volMult, "#.0") + ")",
-     "C4b Volume", dbg_vol_s, dbg_c4b + " (sàn " + dbg_flr_s + ")",
-     "ABS range/ATR", dbg_rat_s, dbg_abs_s + " (≤ " + str.tostring(i_absSpreadAtr, "#.0") + ")",
-     "Swing L / H", dbg_sw_s, "quét: " + dbg_swp_s,
-     "Kết quả nến", "", dbg_res_s)
-
-if i_showDebug and barstate.islast
+// Toàn bộ chuỗi debug dựng bên trong hàm, nên không tốn chi phí ở các bar khác hoặc khi tắt debug.
+f_draw_dbg(table t) =>
+    int    h_vn    = math.floor(mod_now / 60)
+    int    m_vn    = mod_now % 60
+    string time_s  = (h_vn < 10 ? "0" : "") + str.tostring(h_vn) + ":" + (m_vn < 10 ? "0" : "") + str.tostring(m_vn)
+    string atr_s   = na(atr_v) ? "-" : str.tostring(atr_v, format.mintick)
+    string req_s   = na(atr_v) ? "-" : str.tostring(atr_v * i_bodyAtrMult, format.mintick)
+    string body_s  = str.tostring(body, format.mintick)
+    string ratio_s = rng_ok ? str.tostring(body / rng, "#.00") : "-"
+    string volx_s  = na(sma_vol_v) ? "-" : str.tostring(volume / sma_vol_v, "#.00")
+    string vol_s   = str.tostring(volume, format.volume)
+    string flr_s   = na(vol_floor_v) ? "chưa đủ dữ liệu" : str.tostring(vol_floor_v, format.volume)
+    string rat_s   = na(atr_v) or not rng_ok ? "-" : str.tostring(rng / atr_v, "#.00")
+    string sw_s    = (na(swing_low) ? "-" : str.tostring(swing_low, format.mintick)) + " / " + (na(swing_high) ? "-" : str.tostring(swing_high, format.mintick))
+    string c1      = na(atr_v) ? "chưa có ATR" : body > atr_v * i_bodyAtrMult ? "OK" : "FAIL"
+    string c2      = body >= i_bodyMinPts ? "OK" : "FAIL"
+    string c3      = rng_ok and body / rng >= i_bodyRatio ? "OK" : "FAIL"
+    string c4a     = na(sma_vol_v) ? "chưa có SMA" : volume >= sma_vol_v * i_volMult ? "OK" : "FAIL"
+    string c4b     = na(vol_floor_v) ? "chưa đủ dữ liệu" : volume >= vol_floor_v ? "OK" : "FAIL"
+    string abs_s   = na(atr_v) ? "chưa có ATR" : rng <= atr_v * i_absSpreadAtr ? "OK" : "FAIL"
+    string swp_s   = i_absRequireSweep ? (abs_bear_dir or abs_bull_dir ? "OK" : "chưa quét swing") : "không bắt buộc"
+    string res_s   = cand_dir == 0 ? "không phải anchor" : cand_type + " " + (cand_dir == -1 ? "GIẢM" : "TĂNG")
+    // 12 dòng x 3 cột, phẳng theo thứ tự hàng: [r*3 + c]
+    array<string> cells = array.from(
+         "Điều kiện", "Giá trị", "Kết quả",
+         "Giờ bar (VN)", time_s, is_valid ? "trong phiên" : "NGOÀI phiên",
+         "Killzone / cutoff", is_tier1 ? "Tier 1" : "Tier 2", before_cutoff ? "trước " + i_cutoff : "SAU " + i_cutoff,
+         "ATR(" + str.tostring(i_atrLen) + ")", atr_s, "BODY cần > " + req_s,
+         "C1 Thân", body_s, c1 + " (cần > ATR×" + str.tostring(i_bodyAtrMult, "#.0") + ")",
+         "C2 Thân sàn", body_s, c2 + " (≥ " + str.tostring(i_bodyMinPts, "#.0") + ")",
+         "C3 Thân/range", ratio_s, c3 + " (≥ " + str.tostring(i_bodyRatio, "#.00") + ")",
+         "C4a Vol/SMA", volx_s, c4a + " (≥ " + str.tostring(i_volMult, "#.0") + ")",
+         "C4b Volume", vol_s, c4b + " (sàn " + flr_s + ")",
+         "ABS range/ATR", rat_s, abs_s + " (≤ " + str.tostring(i_absSpreadAtr, "#.0") + ")",
+         "Swing L / H", sw_s, "quét: " + swp_s,
+         "Kết quả nến", "", res_s)
     for r = 0 to 11
         for c = 0 to 2
-            table.cell(dbg, c, r, array.get(dbg_cells, r * 3 + c), text_color=color.white, bgcolor=C_DASH_BG, text_size=size.tiny)
+            table.cell(t, c, r, array.get(cells, r * 3 + c), text_color=color.white, bgcolor=C_DASH_BG, text_size=size.tiny)
+    true
+
+var table dbg = table.new(position.bottom_left, 3, 12, bgcolor=C_DASH_BG, border_width=1, border_color=color.gray)
+if i_showDebug and barstate.islast
+    f_draw_dbg(dbg)
 
 // ═══════════════════════════════════════════════════════════
 // BẢNG THỐNG KÊ (chỉ cập nhật bar cuối)
@@ -645,11 +661,11 @@ if i_showDash and barstate.islast
     table.cell(dash, 3, 7, "TP2", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
     table.cell(dash, 4, 7, "SL", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
     table.cell(dash, 5, 7, "Avg R", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
-    f_stat_row(dash, 8, "ALL", "Tổng")
-    f_stat_row(dash, 9, "BODY", "BODY")
-    f_stat_row(dash, 10, "ABS", "ABS")
-    f_stat_row(dash, 11, "T1", "Tier 1")
-    f_stat_row(dash, 12, "T2", "Tier 2")
-    f_stat_row(dash, 13, "LONG", "LONG")
-    f_stat_row(dash, 14, "SHORT", "SHORT")
+    f_stat_row(dash, 8, 0, "Tổng")
+    f_stat_row(dash, 9, 1, "BODY")
+    f_stat_row(dash, 10, 2, "ABS")
+    f_stat_row(dash, 11, 3, "Tier 1")
+    f_stat_row(dash, 12, 4, "Tier 2")
+    f_stat_row(dash, 13, 5, "LONG")
+    f_stat_row(dash, 14, 6, "SHORT")
     table.cell(dash, 0, 15, "Win = R>0. Trade tham khảo; trade [WIDE SL] không được tính.", text_color=color.gray, bgcolor=C_DASH_BG, text_size=size.tiny)

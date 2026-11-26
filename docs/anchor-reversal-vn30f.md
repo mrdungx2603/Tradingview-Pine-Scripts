@@ -468,6 +468,13 @@ Các câu còn lại đã được trả lời trong quá trình thiết kế.
 
 ## Changelog
 
+- **Chưa lên version** (2026-11-26): tối ưu hiệu năng, không đổi tín hiệu.
+  - Sàn volume: giữ một mảng volume đã sắp xếp, chèn/xoá bằng tìm kiếm nhị phân và đọc phân vị theo chỉ số. Trước đó `array.percentile_nearest_rank` sắp xếp lại khoảng 5.100 phần tử ở mỗi bar hợp lệ.
+  - SMA volume: dùng tổng trượt thay cho `array.slice` + `array.avg` ở mỗi bar.
+  - Bảng thống kê: cộng dồn 7 nhóm khi trade đóng, thay cho quét lại tối đa 2.000 trade × 7 dòng ở mỗi tick realtime.
+  - Đường/hộp chain và momentum: chỉ cập nhật khi vùng đổi hoặc ở bar cuối, thay cho mỗi bar.
+  - Chuỗi Entry/SL/TP và toàn bộ chuỗi bảng debug chỉ dựng khi cần. Giờ cutoff chỉ đọc một lần.
+  - Đã đối chiếu sàn volume và SMA mới với cách tính cũ bằng mô phỏng Python: 114.119 lần so sánh, 0 sai lệch.
 - **v1.1** (2026-11-26): Bản chính thức, đánh dấu sau khi người dùng xác nhận.
   - Vô hiệu chain theo giá (nến đóng ngoài vùng phía tiếp diễn), bỏ giới hạn 5 nến. Xoá `i_confirmBars`.
   - Momentum 3 nến cùng chiều (tuỳ chọn `i_useMom`), tiêu diệt theo cùng nguyên tắc.
