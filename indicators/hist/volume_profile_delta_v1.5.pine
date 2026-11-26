@@ -1,0 +1,504 @@
+//@version=6
+// Volume Profile + Delta — Volume Profile, Siêu Nến & Delta Bar Theo Phạm Vi
+//
+// Vẽ 1 cụm hiển thị neo tại 1 bar mốc, trôi theo bar_index, gồm 3 phần theo thứ tự trái→phải:
+//   1. Volume Profile: histogram ngang, mỗi hàng giá (cao price_step) có 1 box kéo trái, độ dài
+//      tỷ lệ volume (buy+sell) của hàng đó so với hàng lớn nhất. Highlight màu riêng (chỉ qua
+//      viền/nền box, không nhãn text) cho POC (volume lớn nhất) và Value Area High/Low (VAH/VAL
+//      — biên trên/dưới của vùng giá chứa va_percent% volume, tính từ POC mở rộng ra 2 phía).
+//   2. Candlestick tổng hợp ("siêu nến"): 1 nến duy nhất đại diện OHLC của CẢ phạm vi tính (không
+//      phải nến thật của chart) — open = giá mở đầu phạm vi, high/low = cao/thấp nhất trong toàn
+//      phạm vi, close = giá đóng cuối phạm vi (hoặc giá hiện tại nếu phạm vi chưa kết thúc). Màu
+//      kiểu hollow candle cổ điển: tăng = nền trắng/viền đen, giảm = nền đen/viền đen.
+//   3. Delta Bar Chart: mỗi hàng giá có 1 box kéo phải, độ dài tỷ lệ |buy - sell| so với delta
+//      lớn nhất trong phạm vi, màu xanh dương nếu dương (dư mua), đỏ nếu âm (dư bán).
+//
+// Dùng chung 3 phạm vi tính (mode_calc) với order_flow_bar.pine: Session, Last HL (leg Higher
+// Low→Higher High/Lower High→Lower Low gần nhất ĐÃ XÁC NHẬN theo SMC), Last HL (Đến Hiện Tại)
+// (giống Last HL nhưng biên phải kéo đến bar hiện tại). Dữ liệu buy/sell volume lấy từ
+// request.footprint() Tầng 1 (ticks_per_row=1) — bucket theo price_step, lưu buffer theo bar.
+// OHLC siêu nến lấy trực tiếp từ open/high/low/close của chart (không qua footprint) nên KHÔNG
+// bị giới hạn bởi max_lookback_bars — chỉ Volume Profile/Delta mới bị giới hạn này.
+//
+// Chỉ dùng footprint Tầng 1 cho Volume Profile/Delta — symbol/tài khoản không hỗ trợ tick data
+// sẽ KHÔNG vẽ 2 phần này (siêu nến vẫn vẽ được vì chỉ cần OHLC, không cần footprint).
+//
+// Ngày tạo: 2026-11-24
+// Phiên bản: 1.5
+// Thay đổi v1.5: Đổi import smc_core sang /3, thêm import order_flow_core/1 — thay type
+//        BarRowVol/RowProfile và hàm f_bucket_bar_rows/f_push_bar_buffer/f_merge_into_profile/
+//        f_build_profile_from_buffer viết tay riêng (lặp code y hệt với
+//        indicators/order_flow_bar.pine) bằng bản export từ order_flow_core.
+
+// Cần library smc_core/order_flow_core đã Publish thật trên TradingView, nếu không script lỗi
+// compile ở import.
+import anthonydang/smc_core/3 as smc
+import anthonydang/order_flow_core/1 as ofcore
+
+indicator(
+    title="Volume Profile + Delta",
+    shorttitle="VP_DELTA",
+    overlay=true,
+    max_lines_count=500,
+    max_labels_count=500,
+    max_boxes_count=500
+)
+
+// f_calc_range_ohlc bên dưới đọc open/high/low/close qua offset [] BIẾN THIÊN (series, không
+// phải literal) — Pine tự suy luận kích thước buffer lịch sử dựa trên offset lớn nhất gặp được,
+// suy luận này có thể SAI/quá nhỏ khi chạy Bar Replay (lỗi "requested historical offset beyond
+// the historical buffer's limit"). Ép cứng buffer tối thiểu 5000 bar để an toàn với mọi offset
+// hợp lý (độ dài 1 session/1 leg SMC thực tế không vượt quá).
+max_bars_back(open, 5000)
+max_bars_back(high, 5000)
+max_bars_back(low, 5000)
+max_bars_back(close, 5000)
+
+// ===== PHẠM VI TÍNH =====
+mode_calc = input.string(
+    defval="Session",
+    title="Chế độ Phạm Vi",
+    options=["Session", "Last HL", "Last HL (Đến Hiện Tại)"],
+    group="Phạm Vi Tính"
+)
+
+// "Last HL" và "Last HL (Đến Hiện Tại)" dùng chung state machine SMC — chỉ khác biên phải.
+bool is_lasthl_mode = mode_calc == "Last HL" or mode_calc == "Last HL (Đến Hiện Tại)"
+
+price_step = input.float(
+    defval=1.0,
+    title="Bước Giá (Price Step)",
+    minval=0.01,
+    group="Phạm Vi Tính"
+)
+
+// Cap cho circular buffer of_buffer — chỉ ảnh hưởng Volume Profile/Delta, không ảnh hưởng siêu nến.
+max_lookback_bars = input.int(
+    defval=500,
+    title="Max Lookback Bars",
+    minval=1,
+    group="Phạm Vi Tính"
+)
+
+va_percent = input.float(
+    defval=70.0,
+    title="Value Area %",
+    minval=1.0,
+    maxval=100.0,
+    group="Phạm Vi Tính"
+)
+
+// ===== SMC (Last HL) =====
+pivot_length = input.int(
+    defval=10,
+    title="Pivot Length",
+    minval=1,
+    group="SMC (Last HL)"
+)
+
+seed_mode = input.string(
+    defval="Pivot Seed",
+    title="Seed Mode",
+    options=["Pivot Seed", "Session Seed"],
+    group="SMC (Last HL)"
+)
+
+// ===== HIỂN THỊ =====
+// Mặc định 30 (lớn hơn order_flow_bar) — Volume Profile kéo trái CỘNG siêu nến CỘNG khoảng trống
+// chiếm nhiều không gian bên trái hơn 1 cánh seller đơn thuần.
+anchor_offset_bars = input.int(
+    defval=30,
+    title="Offset Bar Gốc",
+    minval=0,
+    group="Hiển Thị"
+)
+
+profile_max_bars = input.int(
+    defval=20,
+    title="Max Độ Rộng Volume Profile (Bars)",
+    minval=1,
+    group="Hiển Thị"
+)
+
+candle_half_width_bars = input.int(
+    defval=2,
+    title="Nửa Độ Rộng Siêu Nến (Bars)",
+    minval=1,
+    group="Hiển Thị"
+)
+
+delta_max_bars = input.int(
+    defval=20,
+    title="Max Độ Rộng Delta Bar (Bars)",
+    minval=1,
+    group="Hiển Thị"
+)
+
+gap_profile_bars = input.int(
+    defval=2,
+    title="Khoảng Trống Profile-Nến (Bars)",
+    minval=0,
+    group="Hiển Thị"
+)
+
+gap_delta_bars = input.int(
+    defval=2,
+    title="Khoảng Trống Nến-Delta (Bars)",
+    minval=0,
+    group="Hiển Thị"
+)
+
+// Khoảng cách (bars) từ tip của bar delta đến điểm bắt đầu chữ — chừa khoảng trống để chữ không
+// dính vào bar màu.
+delta_text_offset_bars = input.int(
+    defval=2,
+    title="Khoảng Cách Chữ Delta - Tip (Bars)",
+    minval=0,
+    group="Hiển Thị"
+)
+
+profile_color = input.color(
+    defval=color.new(color.gray, 40),
+    title="Màu Volume Profile",
+    group="Hiển Thị"
+)
+
+profile_border_color = input.color(
+    defval=color.new(color.gray, 50),
+    title="Màu Viền Volume Profile",
+    group="Hiển Thị"
+)
+
+poc_color = input.color(
+    defval=color.blue,
+    title="Màu POC",
+    group="Hiển Thị"
+)
+
+va_edge_color = input.color(
+    defval=color.orange,
+    title="Màu VAL/VAH",
+    group="Hiển Thị"
+)
+
+candle_up_color = input.color(
+    defval=color.white,
+    title="Màu Nến Tăng",
+    group="Hiển Thị"
+)
+
+candle_down_color = input.color(
+    defval=color.black,
+    title="Màu Nến Giảm",
+    group="Hiển Thị"
+)
+
+candle_border_color = input.color(
+    defval=color.black,
+    title="Màu Viền/Bóng Nến",
+    group="Hiển Thị"
+)
+
+delta_pos_color = input.color(
+    defval=color.blue,
+    title="Màu Delta Dương (Dư Mua)",
+    group="Hiển Thị"
+)
+
+delta_neg_color = input.color(
+    defval=color.red,
+    title="Màu Delta Âm (Dư Bán)",
+    group="Hiển Thị"
+)
+
+// Tách riêng khỏi delta_pos_color/delta_neg_color — viền cùng màu nền khiến các hàng liền kề
+// dính vào nhau, không phân biệt được ranh giới.
+delta_border_color = input.color(
+    defval=color.new(color.black, 20),
+    title="Màu Viền Delta Bar",
+    group="Hiển Thị"
+)
+
+delta_text_color = input.color(
+    defval=color.white,
+    title="Màu Chữ Delta",
+    group="Hiển Thị"
+)
+
+delta_text_size = input.string(
+    defval="Normal",
+    title="Cỡ Chữ Delta",
+    options=["Tiny", "Small", "Normal", "Large"],
+    group="Hiển Thị"
+)
+
+show_delta_text = input.bool(
+    defval=true,
+    title="Hiện Giá Trị Delta",
+    group="Hiển Thị"
+)
+
+// ===== FOOTPRINT TẦNG 1 =====
+// request.footprint() chỉ gọi được 1 lần/script — tham số cố định, không expose input.
+footprint fp = request.footprint(ticks_per_row=1, va_percent=70, imbalance_percent=300)
+
+// Account/sàn không hỗ trợ tick data -> fp/fp.rows() na. Không raise lỗi, coi như chưa có dữ liệu.
+bool has_footprint_data = not na(fp) and not na(fp.rows()) and array.size(fp.rows()) > 0
+
+// has_footprint_data chỉ phản ánh bar hiện tại — dùng trực tiếp để gate vẽ sẽ làm Volume
+// Profile/Delta nhấp nháy. has_fp_ever sticky: bật true 1 lần rồi giữ nguyên.
+var bool has_fp_ever = false
+if has_footprint_data
+    has_fp_ever := true
+
+// ===== CIRCULAR BUFFER LƯU BUCKET THEO BAR =====
+var array<ofcore.BarRowVol> of_buffer = array.new<ofcore.BarRowVol>()
+
+// ===== SESSION ACCUMULATOR — CỘNG DỒN 1 CHIỀU, RESET MỖI NGÀY =====
+var ofcore.RowProfile sess_profile   = ofcore.RowProfile.new(array.new<int>(), array.new<float>(), array.new<float>())
+var int               sess_start_bar = na
+
+// ===== SMC STATE MACHINE (Last HL) — RESEED MỖI PHIÊN =====
+var smc.SwingState of_smc_state = smc.f_init_state()
+
+// timeframe.change()/ta.pivothigh/ta.pivotlow PHẢI gọi vô điều kiện mỗi bar.
+bool is_new_session = timeframe.change("D")
+float smc_ph = ta.pivothigh(pivot_length, pivot_length)
+float smc_pl = ta.pivotlow(pivot_length, pivot_length)
+
+// ===== BUCKET VOLUME CỦA BAR HIỆN TẠI =====
+[bar_row_ids, bar_buys, bar_sells] = ofcore.f_bucket_bar_rows(fp, price_step)
+
+// Chỉ push/gộp khi nến đã đóng — tránh lặp dữ liệu nhiều lần trong 1 nến đang hình thành.
+if barstate.isconfirmed
+    ofcore.f_push_bar_buffer(of_buffer, bar_index, bar_row_ids, bar_buys, bar_sells, max_lookback_bars)
+
+    if is_new_session
+        array.clear(sess_profile.row_ids)
+        array.clear(sess_profile.buys)
+        array.clear(sess_profile.sells)
+        sess_start_bar := bar_index
+    ofcore.f_merge_into_profile(sess_profile, bar_row_ids, bar_buys, bar_sells)
+
+    if is_lasthl_mode
+        if is_new_session
+            of_smc_state := smc.f_init_state()
+
+        if not of_smc_state.seeded
+            if seed_mode == "Pivot Seed"
+                of_smc_state := smc.f_seed_pivot(of_smc_state, smc_ph, smc_pl, pivot_length)
+            else if seed_mode == "Session Seed"
+                of_smc_state := smc.f_seed_session(of_smc_state)
+        else
+            of_smc_state := smc.f_process_bar(of_smc_state)
+
+// Biên trái luôn là điểm swing gốc (HL/LH) — giống nhau cho cả 2 mode Last HL.
+int lasthl_left_bar = of_smc_state.trend == 1 ? of_smc_state.hl_bar : of_smc_state.trend == -1 ? of_smc_state.lh_bar : na
+
+// "Last HL": leg đã HOÀN THÀNH (hh_bar/ll_bar). "Last HL (Đến Hiện Tại)": kéo tới bar_index.
+int lasthl_right_bar = mode_calc == "Last HL (Đến Hiện Tại)" ? bar_index
+     : of_smc_state.trend == 1 ? of_smc_state.hh_bar : of_smc_state.trend == -1 ? of_smc_state.ll_bar : na
+
+// Chỉ rebuild ở bar cuối (vẽ lại toàn bộ mỗi lần, chạy trên bar lịch sử chỉ lãng phí).
+ofcore.RowProfile last_hl_profile = ofcore.RowProfile.new(array.new<int>(), array.new<float>(), array.new<float>())
+if is_lasthl_mode and barstate.islast
+    last_hl_profile := ofcore.f_build_profile_from_buffer(of_buffer, lasthl_left_bar, lasthl_right_bar)
+
+ofcore.RowProfile active_profile = mode_calc == "Session" ? sess_profile : last_hl_profile
+
+// Biên trái/phải dùng chung cho cả Volume Profile VÀ siêu nến — đảm bảo 2 phần luôn khớp phạm vi.
+int range_left_bar  = mode_calc == "Session" ? sess_start_bar : lasthl_left_bar
+int range_right_bar = mode_calc == "Session" ? bar_index : lasthl_right_bar
+
+// ===== POC / VALUE AREA (VAL/VAH) =====
+// Pure, na-safe: profile rỗng -> trả na cho poc/val/vah. Trả row_id (giá trị tuyệt đối), không phải index.
+f_calc_poc_val_vah(ofcore.RowProfile profile, float va_pct) =>
+    int   n             = array.size(profile.row_ids)
+    int   poc_row       = na
+    int   val_row       = na
+    int   vah_row       = na
+    float max_row_total = 0.0
+    if n > 0
+        array<float> totals = array.new<float>(n)
+        for i = 0 to n - 1
+            array.set(totals, i, array.get(profile.buys, i) + array.get(profile.sells, i))
+        // Value Area cần duyệt theo thứ tự GIÁ (row_id), nhưng row_ids không đảm bảo đã sắp xếp
+        // (được push theo thứ tự gặp trong footprint/buffer) — sort_indices để lấy thứ tự đúng
+        // mà không cần sort từng array buys/sells riêng.
+        array<int>   sorted_idx  = array.sort_indices(profile.row_ids, order.ascending)
+        array<int>   sorted_rows = array.new<int>(n)
+        array<float> sorted_tot  = array.new<float>(n)
+        for i = 0 to n - 1
+            int src_idx = array.get(sorted_idx, i)
+            array.set(sorted_rows, i, array.get(profile.row_ids, src_idx))
+            array.set(sorted_tot, i, array.get(totals, src_idx))
+        int   best_idx = 0
+        float best_val = array.get(sorted_tot, 0)
+        if n > 1
+            for i = 1 to n - 1
+                float tv = array.get(sorted_tot, i)
+                if tv > best_val
+                    best_val := tv
+                    best_idx := i
+        max_row_total := best_val
+        float total_volume = array.sum(sorted_tot)
+        float target = total_volume * va_pct / 100.0
+        float cum   = best_val
+        int   lower = best_idx
+        int   upper = best_idx
+        int   guard = 0
+        // Thuật toán Value Area chuẩn: mở rộng từ POC ra 2 phía, mỗi bước cộng hàng liền kề có
+        // volume lớn hơn (trên hoặc dưới), tới khi đạt va_pct% tổng volume hoặc hết hàng 2 bên.
+        while cum < target and (lower > 0 or upper < n - 1) and guard < n
+            guard += 1
+            float below_val = lower > 0 ? array.get(sorted_tot, lower - 1) : -1.0
+            float above_val = upper < n - 1 ? array.get(sorted_tot, upper + 1) : -1.0
+            if above_val >= below_val
+                upper += 1
+                cum += above_val
+            else
+                lower -= 1
+                cum += below_val
+        poc_row := array.get(sorted_rows, best_idx)
+        val_row := array.get(sorted_rows, lower)
+        vah_row := array.get(sorted_rows, upper)
+    [poc_row, val_row, vah_row, max_row_total]
+
+// Chỉ tính ở bar cuối (cùng lý do hiệu năng như last_hl_profile).
+int   poc_row_id    = na
+int   val_row_id    = na
+int   vah_row_id    = na
+float max_row_total = 0.0
+if barstate.islast
+    // Pine không hỗ trợ tuple reassignment trực tiếp ([a,b,c,d] := f()) — dùng biến tạm `=` rồi gán `:=`.
+    [poc_tmp, val_tmp, vah_tmp, max_tmp] = f_calc_poc_val_vah(active_profile, va_percent)
+    poc_row_id    := poc_tmp
+    val_row_id    := val_tmp
+    vah_row_id    := vah_tmp
+    max_row_total := max_tmp
+
+// ===== OHLC SIÊU NẾN THEO PHẠM VI =====
+// Đọc trực tiếp high/low/open/close theo offset từ bar hiện tại — không qua buffer volume, nên
+// không bị clip bởi max_lookback_bars (chỉ bị giới hạn bởi số bar lịch sử thật Pine còn giữ).
+f_calc_range_ohlc(int left_bar, int right_bar) =>
+    float o = na
+    float h = na
+    float l = na
+    float c = na
+    if not na(left_bar) and not na(right_bar)
+        o := open[bar_index - left_bar]
+        c := close[bar_index - right_bar]
+        h := high[bar_index - left_bar]
+        l := low[bar_index - left_bar]
+        if right_bar > left_bar
+            for i = left_bar + 1 to right_bar
+                float hi = high[bar_index - i]
+                float lo = low[bar_index - i]
+                if hi > h
+                    h := hi
+                if lo < l
+                    l := lo
+    [o, h, l, c]
+
+float range_open  = na
+float range_high  = na
+float range_low   = na
+float range_close = na
+if barstate.islast
+    [o_tmp, h_tmp, l_tmp, c_tmp] = f_calc_range_ohlc(range_left_bar, range_right_bar)
+    range_open  := o_tmp
+    range_high  := h_tmp
+    range_low   := l_tmp
+    range_close := c_tmp
+
+// ===== VẼ =====
+var array<box>  of_boxes = array.new<box>()
+var array<line> of_lines = array.new<line>()
+
+f_clear_drawings(array<box> boxes, array<line> lines) =>
+    int n_boxes = array.size(boxes)
+    if n_boxes > 0
+        for i = 0 to n_boxes - 1
+            box.delete(array.get(boxes, i))
+    array.clear(boxes)
+    int n_lines = array.size(lines)
+    if n_lines > 0
+        for i = 0 to n_lines - 1
+            line.delete(array.get(lines, i))
+    array.clear(lines)
+
+// Vẽ 3 phần theo đúng thứ tự trái→phải: Volume Profile | Siêu Nến | Delta Bar Chart, canh tâm
+// quanh anchor_bar. Siêu nến vẽ được dù không có footprint (chỉ cần OHLC); Volume Profile/Delta
+// cần has_fp_ever.
+f_draw_panel(ofcore.RowProfile profile, int anchor_bar, float o, float h, float l, float c) =>
+    f_clear_drawings(of_boxes, of_lines)
+    bool has_candle   = not na(o) and not na(h) and not na(l) and not na(c)
+    int  candle_left  = anchor_bar - candle_half_width_bars
+    int  candle_right = anchor_bar + candle_half_width_bars
+    if has_candle
+        bool  is_up         = c >= o
+        color candle_bg     = is_up ? candle_up_color : candle_down_color
+        float candle_top    = math.max(o, c)
+        float candle_bottom = math.min(o, c)
+        box   candle_box    = box.new(left=candle_left, top=candle_top, right=candle_right, bottom=candle_bottom,
+             border_color=candle_border_color, bgcolor=candle_bg, xloc=xloc.bar_index)
+        array.push(of_boxes, candle_box)
+        line upper_wick = line.new(x1=anchor_bar, y1=h, x2=anchor_bar, y2=candle_top, color=candle_border_color, xloc=xloc.bar_index)
+        line lower_wick = line.new(x1=anchor_bar, y1=l, x2=anchor_bar, y2=candle_bottom, color=candle_border_color, xloc=xloc.bar_index)
+        array.push(of_lines, upper_wick)
+        array.push(of_lines, lower_wick)
+
+    int n_rows = array.size(profile.row_ids)
+    if has_fp_ever and n_rows > 0 and max_row_total > 0
+        int profile_anchor_x = candle_left - gap_profile_bars
+        int delta_anchor_x   = candle_right + gap_delta_bars
+        delta_label_size = switch delta_text_size
+            "Tiny"   => size.tiny
+            "Small"  => size.small
+            "Normal" => size.normal
+            "Large"  => size.large
+            => size.normal
+        for i = 0 to n_rows - 1
+            int    row_id         = array.get(profile.row_ids, i)
+            float  row_bot        = row_id * price_step
+            float  row_top        = (row_id + 1) * price_step
+            float  buy_v          = array.get(profile.buys, i)
+            float  sell_v         = array.get(profile.sells, i)
+            float  total_v        = buy_v + sell_v
+            float  vol_ratio      = total_v / max_row_total
+            int    vol_bars       = int(math.round(vol_ratio * profile_max_bars))
+            float  delta_v        = buy_v - sell_v
+            float  abs_ratio      = math.abs(delta_v) / max_row_total
+            int    delta_bars     = int(math.round(abs_ratio * delta_max_bars))
+            bool   is_poc         = not na(poc_row_id) and row_id == poc_row_id
+            bool   is_va_edge     = not is_poc and ((not na(val_row_id) and row_id == val_row_id) or (not na(vah_row_id) and row_id == vah_row_id))
+            color  profile_border = is_poc ? poc_color : is_va_edge ? va_edge_color : profile_border_color
+            color  profile_bg     = is_poc ? poc_color : is_va_edge ? va_edge_color : profile_color
+            box    profile_box    = box.new(left=profile_anchor_x - vol_bars, top=row_top, right=profile_anchor_x, bottom=row_bot,
+                 border_color=profile_border, bgcolor=profile_bg, xloc=xloc.bar_index)
+            array.push(of_boxes, profile_box)
+
+            string delta_sign_str = delta_v > 0 ? "+" : ""
+            string delta_text_str = show_delta_text ? delta_sign_str + str.tostring(delta_v, format.volume) : ""
+            color  delta_bg       = delta_v > 0 ? delta_pos_color : delta_v < 0 ? delta_neg_color : color.new(color.gray, 85)
+            int    delta_tip_x    = delta_anchor_x + delta_bars
+            box    delta_box      = box.new(left=delta_anchor_x, top=row_top, right=delta_tip_x, bottom=row_bot,
+                 border_color=delta_border_color, bgcolor=delta_bg, xloc=xloc.bar_index)
+            array.push(of_boxes, delta_box)
+
+            // Chữ delta dùng box.new(text=...) — KHÔNG dùng label.new (anchor theo baseline, canh
+            // giữa chiều dọc không chính xác, bị lệch lên trên) — box.new canh giữa text CHÍNH XÁC
+            // theo top/bottom (đã dùng ổn trong order_flow_bar.pine). Box riêng, trong suốt, đặt
+            // CÁCH tip của bar màu delta_text_offset_bars để chữ không dính vào bar.
+            int    text_box_left  = delta_tip_x + delta_text_offset_bars
+            box    delta_text_box = box.new(left=text_box_left, top=row_top, right=text_box_left + 1, bottom=row_bot,
+                 border_color=color(na), bgcolor=color(na),
+                 text=delta_text_str, text_color=delta_text_color, text_size=delta_label_size, text_halign=text.align_left,
+                 xloc=xloc.bar_index)
+            array.push(of_boxes, delta_text_box)
+
+// Vẽ lại mỗi tick nhưng chỉ ở bar cuối — f_draw_panel xoá-vẽ-lại toàn bộ mỗi lần gọi.
+if barstate.islast
+    f_draw_panel(active_profile, bar_index + anchor_offset_bars, range_open, range_high, range_low, range_close)
+
+plot(na)

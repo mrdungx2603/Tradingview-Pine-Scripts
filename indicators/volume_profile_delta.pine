@@ -24,11 +24,17 @@
 // sẽ KHÔNG vẽ 2 phần này (siêu nến vẫn vẽ được vì chỉ cần OHLC, không cần footprint).
 //
 // Ngày tạo: 2026-11-24
-// Phiên bản: 1.5
+// Phiên bản: 1.6
 // Thay đổi v1.5: Đổi import smc_core sang /3, thêm import order_flow_core/1 — thay type
 //        BarRowVol/RowProfile và hàm f_bucket_bar_rows/f_push_bar_buffer/f_merge_into_profile/
 //        f_build_profile_from_buffer viết tay riêng (lặp code y hệt với
 //        indicators/order_flow_bar.pine) bằng bản export từ order_flow_core.
+// Thay đổi v1.6: Thêm Dải IB (Initial Balance) — có thể ẩn/hiện, vẽ 1 đường dọc (độ rộng
+//        2-4 px, màu tùy chọn, mặc định xanh) ngay bên trái siêu nến, kéo từ IB Low đến IB
+//        High, để so sánh trực quan vị trí giao dịch hiện tại so với IB. IB tính theo đúng
+//        chuẩn market_profile_core.pine/market_profile.pine (gộp high/low của N TPO Period
+//        đầu phiên thật, mặc định N=2 × 30 phút = 60 phút, rồi khóa lại) — tính theo PHIÊN
+//        THẬT trên chart, độc lập với mode_calc (Session/Last HL/Last HL Đến Hiện Tại).
 
 // Cần library smc_core/order_flow_core đã Publish thật trên TradingView, nếu không script lỗi
 // compile ở import.
@@ -238,6 +244,52 @@ show_delta_text = input.bool(
     group="Hiển Thị"
 )
 
+// ===== INITIAL BALANCE (IB) =====
+// IB tính theo PHIÊN THẬT trên chart (timeframe.change("D")), độc lập với mode_calc — xem
+// chuẩn trong libraries/market_profile_core.pine / indicators/market_profile.pine.
+show_ib = input.bool(
+    defval=true,
+    title="Hiển Thị Dải IB (Initial Balance)",
+    group="Initial Balance (IB)"
+)
+
+ib_period_min = input.int(
+    defval=30,
+    title="Độ Dài 1 TPO Period (Phút)",
+    minval=1,
+    maxval=240,
+    group="Initial Balance (IB)"
+)
+
+ib_periods_cnt = input.int(
+    defval=2,
+    title="Số TPO Period Tính IB (Chuẩn 2×30p = 60 Phút)",
+    minval=1,
+    maxval=12,
+    group="Initial Balance (IB)"
+)
+
+ib_color = input.color(
+    defval=color.blue,
+    title="Màu Dải IB",
+    group="Initial Balance (IB)"
+)
+
+ib_width = input.int(
+    defval=2,
+    title="Độ Rộng Dải IB (px)",
+    minval=1,
+    maxval=4,
+    group="Initial Balance (IB)"
+)
+
+ib_gap_bars = input.int(
+    defval=1,
+    title="Khoảng Cách Dải IB - Nến (Bars)",
+    minval=0,
+    group="Initial Balance (IB)"
+)
+
 // ===== FOOTPRINT TẦNG 1 =====
 // request.footprint() chỉ gọi được 1 lần/script — tham số cố định, không expose input.
 footprint fp = request.footprint(ticks_per_row=1, va_percent=70, imbalance_percent=300)
@@ -265,6 +317,40 @@ var smc.SwingState of_smc_state = smc.f_init_state()
 bool is_new_session = timeframe.change("D")
 float smc_ph = ta.pivothigh(pivot_length, pivot_length)
 float smc_pl = ta.pivotlow(pivot_length, pivot_length)
+
+// ===== INITIAL BALANCE (IB) — TÍNH THEO PHIÊN THẬT, ĐỘC LẬP MODE_CALC =====
+// Chạy mỗi tick (không gate barstate.isconfirmed) để IB High/Low "sống" trong Period đang mở,
+// giống cách prof.ib_high/ib_low cập nhật live trong market_profile.pine.
+var float ib_sess_start_time = na
+var int   ib_periods_in_sess = 0
+var int   ib_last_period_id  = na
+var float ib_high            = na
+var float ib_low             = na
+var bool  ib_locked          = false
+
+float ib_period_ms = ib_period_min * 60000.0
+int   ib_this_period_id = na
+if not is_new_session
+    ib_this_period_id := int(math.floor((time - ib_sess_start_time) / ib_period_ms))
+
+if is_new_session
+    ib_sess_start_time := time
+    ib_periods_in_sess := 1
+    ib_last_period_id  := 0
+    ib_high            := high
+    ib_low             := low
+    ib_locked          := ib_periods_cnt <= 1
+else
+    if ib_this_period_id != ib_last_period_id
+        ib_periods_in_sess += 1
+        ib_last_period_id  := ib_this_period_id
+    if ib_periods_in_sess <= ib_periods_cnt
+        ib_high := math.max(ib_high, high)
+        ib_low  := math.min(ib_low, low)
+        if ib_periods_in_sess == ib_periods_cnt
+            ib_locked := true
+    else
+        ib_locked := true
 
 // ===== BUCKET VOLUME CỦA BAR HIỆN TẠI =====
 [bar_row_ids, bar_buys, bar_sells] = ofcore.f_bucket_bar_rows(fp, price_step)
@@ -430,11 +516,19 @@ f_clear_drawings(array<box> boxes, array<line> lines) =>
 // Vẽ 3 phần theo đúng thứ tự trái→phải: Volume Profile | Siêu Nến | Delta Bar Chart, canh tâm
 // quanh anchor_bar. Siêu nến vẽ được dù không có footprint (chỉ cần OHLC); Volume Profile/Delta
 // cần has_fp_ever.
-f_draw_panel(ofcore.RowProfile profile, int anchor_bar, float o, float h, float l, float c) =>
+f_draw_panel(ofcore.RowProfile profile, int anchor_bar, float o, float h, float l, float c, float ibh, float ibl) =>
     f_clear_drawings(of_boxes, of_lines)
     bool has_candle   = not na(o) and not na(h) and not na(l) and not na(c)
     int  candle_left  = anchor_bar - candle_half_width_bars
     int  candle_right = anchor_bar + candle_half_width_bars
+
+    // Dải IB — đường dọc mỏng (độ rộng tính bằng pixel qua `width`, không phải bar) ngay bên
+    // trái siêu nến, kéo từ IB Low đến IB High, để so sánh trực quan giá hiện tại so với IB.
+    if show_ib and not na(ibh) and not na(ibl)
+        int  ib_x    = candle_left - ib_gap_bars
+        line ib_line = line.new(x1=ib_x, y1=ibl, x2=ib_x, y2=ibh, color=ib_color, width=ib_width, xloc=xloc.bar_index)
+        array.push(of_lines, ib_line)
+
     if has_candle
         bool  is_up         = c >= o
         color candle_bg     = is_up ? candle_up_color : candle_down_color
@@ -499,6 +593,6 @@ f_draw_panel(ofcore.RowProfile profile, int anchor_bar, float o, float h, float 
 
 // Vẽ lại mỗi tick nhưng chỉ ở bar cuối — f_draw_panel xoá-vẽ-lại toàn bộ mỗi lần gọi.
 if barstate.islast
-    f_draw_panel(active_profile, bar_index + anchor_offset_bars, range_open, range_high, range_low, range_close)
+    f_draw_panel(active_profile, bar_index + anchor_offset_bars, range_open, range_high, range_low, range_close, ib_high, ib_low)
 
 plot(na)

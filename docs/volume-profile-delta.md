@@ -60,6 +60,12 @@ buyer/seller + cột delta giữa bằng Volume Profile (trái) + siêu nến (g
 | Hiển Thị | Màu Chữ Delta (`delta_text_color`) | trắng | Màu chữ giá trị delta trên box |
 | Hiển Thị | Cỡ Chữ Delta (`delta_text_size`) | Normal | Tiny/Small/Normal/Large — cùng trade-off cỡ chữ không co giãn theo `price_step`/zoom như `order_flow_bar` |
 | Hiển Thị | Hiện Giá Trị Delta (`show_delta_text`) | true | Tắt để chỉ còn độ dài bar + màu, không hiện số |
+| Initial Balance (IB) | Hiển Thị Dải IB (`show_ib`) | true | Ẩn/hiện dải IB — đường dọc bên trái siêu nến thể hiện range Initial Balance |
+| Initial Balance (IB) | Độ Dài 1 TPO Period (`ib_period_min`) | 30 (phút) | Độ dài 1 TPO Period dùng để tính IB — chuẩn CBOT = 30 phút, giống `market_profile.pine` |
+| Initial Balance (IB) | Số TPO Period Tính IB (`ib_periods_cnt`) | 2 | Số Period đầu phiên gộp thành IB (chuẩn 2×30p = 60 phút đầu phiên) |
+| Initial Balance (IB) | Màu Dải IB (`ib_color`) | xanh dương | Màu đường dọc IB |
+| Initial Balance (IB) | Độ Rộng Dải IB (`ib_width`) | 2 (px) | Độ rộng đường dọc IB tính bằng pixel (tham số `width` của `line.new`, không phải bar) |
+| Initial Balance (IB) | Khoảng Cách Dải IB - Nến (`ib_gap_bars`) | 1 | Khoảng cách (bar) từ dải IB đến mép trái siêu nến, tránh đè lên nhau |
 
 ## Logic Chính
 
@@ -69,6 +75,7 @@ buyer/seller + cột delta giữa bằng Volume Profile (trái) + siêu nến (g
 - **POC/VAL/VAH (`f_calc_poc_val_vah`)**: sort `row_ids` theo giá tăng dần (`array.sort_indices`) vì thứ tự gốc trong `RowProfile` không đảm bảo theo giá (push theo thứ tự gặp trong footprint). POC = hàng có `buy+sell` lớn nhất. Value Area: từ POC, mỗi bước mở rộng sang hàng liền kề (trên hoặc dưới) có volume lớn hơn, tới khi tổng tích lũy ≥ `va_percent`% tổng volume hoặc hết hàng 2 bên (vòng `while`, chặn tối đa `n` vòng).
 - **OHLC siêu nến (`f_calc_range_ohlc`)**: đọc trực tiếp `open`/`high`/`low`/`close` theo offset từ `bar_index` hiện tại (không qua buffer volume) — open/high/low tại `left_bar`, close tại `right_bar`, quét high/low toàn bộ bar giữa 2 biên để lấy cao/thấp nhất. Không bị giới hạn `max_lookback_bars`. Vì offset là biến (series, không phải literal), script gọi `max_bars_back(open/high/low/close, 5000)` ngay sau `indicator()` để ép Pine cấp đủ buffer lịch sử — thiếu dòng này sẽ lỗi runtime `"requested historical offset ... beyond the historical buffer's limit"` khi chạy Bar Replay (Pine tự suy luận buffer dựa trên offset lớn nhất gặp được, suy luận có thể quá nhỏ).
 - **Vẽ (`f_draw_panel`)**: xoá-vẽ-lại toàn bộ mỗi lần gọi (box + line), chỉ chạy ở `barstate.islast`. Thân nến + 2 bóng nến luôn vẽ nếu có OHLC hợp lệ (không cần footprint). Volume Profile + Delta chỉ vẽ nếu `has_fp_ever` và profile không rỗng — mỗi hàng gồm 3 box: 1 box Volume Profile (kéo trái từ `candle_left - gap_profile_bars`, viền `profile_border_color`), 1 box Delta màu (kéo phải từ `candle_right + gap_delta_bars`, viền riêng `delta_border_color` — tách khỏi màu nền để các hàng liền kề không dính vào nhau), và 1 box Delta TEXT trong suốt (`border_color`/`bgcolor` = `color(na)`) đặt tại `delta_tip_x + delta_text_offset_bars` (ngay sau tip của box Delta màu) chỉ dùng để hiện `text=` giá trị delta — dùng `box.new(text=...)` (không dùng `label.new`, vốn canh theo baseline nên lệch lên trên) để Pine tự canh giữa chữ CHÍNH XÁC theo `top`/`bottom` của box, cùng kỹ thuật đã dùng ổn trong `order_flow_bar.pine`.
+- **Dải IB (Initial Balance)**: tính theo đúng chuẩn `market_profile_core.pine`/`market_profile.pine` — gộp `high`/`low` của `ib_periods_cnt` "TPO Period" đầu PHIÊN THẬT (period_id tính theo `time`, không phải theo `mode_calc`), mỗi Period dài `ib_period_min` phút (mặc định 2×30p = 60 phút). Cập nhật mỗi tick (không gate `barstate.isconfirmed`) để `ib_high`/`ib_low` "sống" trong Period đang mở, giống `prof.ib_high`/`ib_low` của `market_profile.pine`; khi đã đủ `ib_periods_cnt` Period, `ib_locked = true` và 2 giá trị đứng yên hết phiên. Vẽ bằng 1 `line.new` dọc duy nhất (x1=x2) từ `ib_low` đến `ib_high`, đặt tại `candle_left - ib_gap_bars`, độ rộng là tham số pixel `width` của `line.new` (không tốn thêm bar ngang) — luôn hiển thị bất kể `mode_calc` đang là Session hay Last HL, vì IB là khái niệm gắn với phiên giao dịch thật, không phải phạm vi tính Volume Profile/Delta.
 
 ## Output / Tín Hiệu
 
@@ -76,6 +83,7 @@ buyer/seller + cột delta giữa bằng Volume Profile (trái) + siêu nến (g
 - Highlight màu (không nhãn text) cho POC và VAL/VAH trên Volume Profile.
 - Siêu nến thể hiện trực quan hình dạng nến (hollow/filled) của cả phạm vi tính đang chọn.
 - Mỗi hàng Delta Bar Chart thể hiện chiều + độ lớn tương đối của `buy - sell`, kèm giá trị số (tuỳ chọn).
+- Dải IB (đường dọc, tuỳ chọn ẩn/hiện) bên trái siêu nến — so sánh trực quan vị trí giao dịch hiện tại so với Initial Balance của phiên.
 - Không có alert condition.
 
 ## Giới Hạn & Lưu Ý
@@ -91,6 +99,11 @@ buyer/seller + cột delta giữa bằng Volume Profile (trái) + siêu nến (g
 
 ## Changelog
 
+- **v1.6 (2026-11-25)**: Theo yêu cầu người dùng thêm so sánh trực quan giá hiện tại với Initial Balance.
+  - Thêm nhóm input "Initial Balance (IB)": `show_ib` (ẩn/hiện), `ib_period_min` (30), `ib_periods_cnt` (2), `ib_color` (xanh dương), `ib_width` (2px), `ib_gap_bars` (1).
+  - Thêm state tracking IB (`ib_high`/`ib_low`/`ib_locked`/`ib_periods_in_sess`) tính theo đúng chuẩn `market_profile_core.pine`/`market_profile.pine` — gộp high/low của `ib_periods_cnt` TPO Period đầu phiên thật, khóa lại sau khi đủ Period, cập nhật mỗi tick, độc lập với `mode_calc`.
+  - `f_draw_panel` nhận thêm 2 tham số `ibh`/`ibl`, vẽ 1 `line.new` dọc (width tính bằng pixel) từ IB Low đến IB High, đặt bên trái siêu nến (`candle_left - ib_gap_bars`).
+  - Backup v1.5 tại `indicators/hist/volume_profile_delta_v1.5.pine`.
 - **v1.5 (2026-11-24)**: Đổi `import anthonydang/smc_core/2` → `anthonydang/smc_core/3`, thêm `import anthonydang/order_flow_core/1 as ofcore`. Thay `type BarRowVol`/`RowProfile` và hàm `f_bucket_bar_rows`/`f_push_bar_buffer`/`f_merge_into_profile`/`f_build_profile_from_buffer` viết tay riêng (lặp code y hệt với `indicators/order_flow_bar.pine`) bằng bản export từ [order_flow_core](order-flow-core.md) v1.0 — không đổi hành vi hiển thị. Backup v1.4 tại `indicators/hist/volume_profile_delta_v1.4.pine`.
 - **v1.4 (2026-11-24)**: Theo phản hồi người dùng sau khi test v1.3 — viền box Delta dính vào nhau (cùng màu nền nên không thấy ranh giới giữa hàng), và chữ delta lệch lên trên so với tâm bar.
   - Thêm input `delta_border_color` (mặc định đen 20% trong suốt) — tách viền box Delta khỏi `delta_pos_color`/`delta_neg_color` (trước đó border_color = bgcolor nên vô hình).
