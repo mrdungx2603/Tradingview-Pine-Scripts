@@ -1,0 +1,458 @@
+//@version=6
+// ─── Anchor Reversal VN30F (1m) — Cảnh báo đảo chiều theo Nến Chủ BODY/ABS ───
+// Phiên bản: 1.1
+// Đặc tả & quy trình: docs/anchor-reversal-vn30f.md
+// Chỉ cảnh báo đảo chiều. Entry/SL/TP chỉ hiển thị tham khảo khi bật i_showTrade.
+// Chỉ đúng trên khung 1m. Mọi giờ tính theo Asia/Ho_Chi_Minh.
+
+import anthonydang/smc_core/3 as smc
+
+indicator(title="Anchor Reversal VN30F (1m)", shorttitle="ANCHOR", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+
+// ═══════════════════════════════════════════════════════════
+// INPUT
+// ═══════════════════════════════════════════════════════════
+grp_vol   = "Sàn Volume (đo từ dữ liệu thật)"
+grp_body  = "Nến Chủ Loại Thân (BODY)"
+grp_abs   = "Nến Chủ Loại Hấp Thụ (ABS)"
+grp_chain = "Gộp Nến Chủ (Chain)"
+grp_conf  = "Xác Nhận Đảo Chiều"
+grp_sess  = "Phiên & Killzone"
+grp_trade = "Tham Khảo Entry/SL/TP & Thống Kê"
+grp_disp  = "Hiển Thị"
+
+i_atrLen        = input.int(20, "Chu kỳ ATR (bar hợp lệ)", minval=2, group=grp_body)
+i_volLen        = input.int(20, "Chu kỳ SMA Volume (bar hợp lệ)", minval=2, group=grp_vol)
+i_volPctile     = input.float(90.0, "Phân vị sàn volume (q)", minval=50, maxval=99.9, step=0.5, group=grp_vol, tooltip="Bar phải có volume lớn hơn phân vị này của L phiên gần nhất mới đủ sàn.")
+i_volSessions   = input.int(20, "Số phiên tính phân vị (L)", minval=1, maxval=60, group=grp_vol)
+
+i_bodyAtrMult   = input.float(1.8, "Hệ số ATR cho thân", minval=0.1, step=0.1, group=grp_body)
+i_bodyMinPts    = input.float(1.5, "Thân tối thiểu (điểm)", minval=0.1, step=0.1, group=grp_body)
+i_bodyRatio     = input.float(0.65, "Tỷ lệ thân / toàn nến", minval=0.1, maxval=1.0, step=0.05, group=grp_body)
+i_volMult       = input.float(2.0, "Hệ số đột biến volume (so SMA)", minval=0.1, step=0.1, group=grp_body)
+
+i_absSpreadAtr  = input.float(0.7, "Range tối đa / ATR", minval=0.1, step=0.1, group=grp_abs)
+i_absCloseRatio = input.float(0.5, "Vị trí close tối thiểu trong range", minval=0.0, maxval=1.0, step=0.05, group=grp_abs)
+i_absRequireSweep = input.bool(true, "Bắt buộc quét swing (tắt = dùng hướng nến)", group=grp_abs)
+
+i_chainMaxGap     = input.int(2, "Số bar xen tối đa giữa 2 anchor", minval=0, group=grp_chain)
+i_chainMaxTrendFvg = input.int(2, "Số FVG cùng chiều chain xen tối đa", minval=0, group=grp_chain)
+i_chainMaxWick    = input.float(0.15, "Râu đối diện tối đa (tỷ lệ range)", minval=0.0, maxval=1.0, step=0.05, group=grp_chain)
+i_chainMaxLen     = input.int(4, "Số anchor tối đa mỗi chain", minval=1, group=grp_chain)
+i_zoneMode        = input.string("Anchor cực trị", "Cách xác định vùng chain", options=["Anchor cực trị", "Anchor đầu tiên"], group=grp_chain)
+
+i_confirmBars   = input.int(5, "Cửa sổ xác nhận (số bar)", minval=1, group=grp_conf)
+i_breakBuffer   = input.float(0.2, "Buffer vượt vùng (điểm)", minval=0.0, step=0.1, group=grp_conf)
+i_useMss        = input.bool(false, "Yêu cầu CHoCH cùng bar xác nhận", group=grp_conf)
+
+i_killzoneOnly  = input.bool(true, "Alert chỉ cho Tier 1", group=grp_sess)
+i_cutoff        = input.string("14:20", "Không tín hiệu mới sau (HH:mm)", group=grp_sess)
+
+i_showTrade     = input.bool(false, "Hiện Entry/SL/TP tham khảo và thống kê", group=grp_trade)
+i_slBuffer      = input.float(0.5, "Buffer SL (điểm)", minval=0.0, step=0.1, group=grp_trade)
+i_maxRiskPts    = input.float(10.0, "Ngưỡng SL rộng (điểm) — vượt thì gắn [WIDE SL], không tính thống kê", minval=0.1, step=0.5, group=grp_trade)
+
+i_showDash      = input.bool(true, "Hiện bảng thống kê", group=grp_disp)
+i_dashPos       = input.string("Top Right", "Vị trí bảng", options=["Top Right", "Bottom Right", "Top Left", "Bottom Left"], group=grp_disp)
+i_chainVisual   = input.string("Giữ lịch sử chain", "Hộp & đường trigger khi chain kết thúc", options=["Giữ lịch sử chain", "Chỉ giữ chain đang chờ"], group=grp_disp, tooltip="Giữ lịch sử: hộp và đường dừng tại bar chain kết thúc, chart vẫn còn các chain cũ. Chỉ giữ chain đang chờ: xoá hộp và đường khi chain kết thúc.")
+
+// ═══════════════════════════════════════════════════════════
+// HẰNG SỐ
+// ═══════════════════════════════════════════════════════════
+MIN_BARS_SESSION = 255     // Số bar hợp lệ của 1 phiên: 150 (sáng) + 105 (chiều)
+ATO_MOD          = 540     // 09:00 — loại khỏi ATR/SMA, không nhận là nến chủ
+ATC_MOD          = 885     // 14:45 — loại khỏi ATR/SMA
+TIMEOUT_MOD      = 865     // 14:25 — đóng tham khảo
+C_RED_BOX        = color.new(color.red, 85)
+C_BLUE_BOX       = color.new(color.blue, 85)
+C_DASH_BG        = #1e222d
+
+// ═══════════════════════════════════════════════════════════
+// BIẾN TOÀN CỤC (thống kê tham khảo)
+// ═══════════════════════════════════════════════════════════
+var array<float>  st_r    = array.new<float>()
+var array<float>  st_pts  = array.new<float>()
+var array<string> st_type = array.new<string>()
+var array<string> st_dir  = array.new<string>()
+var array<string> st_tier = array.new<string>()
+
+// ═══════════════════════════════════════════════════════════
+// HÀM HỖ TRỢ
+// ═══════════════════════════════════════════════════════════
+f_gstats(string key) =>
+    int n = 0
+    int w = 0
+    int t2 = 0
+    int s = 0
+    float sum_r = 0.0
+    int sz = array.size(st_r)
+    if sz > 0
+        for i = 0 to sz - 1
+            string t_type = array.get(st_type, i)
+            string t_dir  = array.get(st_dir, i)
+            string t_tier = array.get(st_tier, i)
+            float r_i     = array.get(st_r, i)
+            bool m = key == "ALL" or key == t_type or key == t_dir or key == t_tier
+            if m
+                n += 1
+                sum_r += r_i
+                if r_i > 0
+                    w += 1
+                if r_i >= 2
+                    t2 += 1
+                if r_i < 0
+                    s += 1
+    float wr    = n > 0 ? 100.0 * w / n : na
+    float t2r   = n > 0 ? 100.0 * t2 / n : na
+    float sr    = n > 0 ? 100.0 * s / n : na
+    float avg_r = n > 0 ? sum_r / n : na
+    [n, wr, t2r, sr, avg_r]
+
+f_stat_row(table tbl, int row, string key, string lbl) =>
+    [n, wr, t2r, sr, avg_r] = f_gstats(key)
+    table.cell(tbl, 0, row, lbl, text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(tbl, 1, row, str.tostring(n), text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(tbl, 2, row, na(wr) ? "-" : str.tostring(wr, "#") + "%", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(tbl, 3, row, na(t2r) ? "-" : str.tostring(t2r, "#") + "%", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(tbl, 4, row, na(sr) ? "-" : str.tostring(sr, "#") + "%", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(tbl, 5, row, na(avg_r) ? "-" : str.tostring(avg_r, "#.00") + "R", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+
+f_pos(string s) =>
+    s == "Bottom Right" ? position.bottom_right : s == "Top Left" ? position.top_left : s == "Bottom Left" ? position.bottom_left : position.top_right
+
+// Xử lý hộp và đường trigger khi chain kết thúc.
+// del_mode = true: xoá hộp và đường. false: đường dừng tại x_end, hộp giữ nguyên.
+f_close_chain_vis(box b, line l, bool del_mode, int x_end) =>
+    if del_mode and not na(b)
+        box.delete(b)
+    if not na(l)
+        if del_mode
+            line.delete(l)
+        else
+            line.set_extend(l, extend.none)
+            line.set_x2(l, x_end)
+    true
+
+// ═══════════════════════════════════════════════════════════
+// THỜI GIAN (múi giờ VN)
+// ═══════════════════════════════════════════════════════════
+int mod_now = hour(time, "Asia/Ho_Chi_Minh") * 60 + minute(time, "Asia/Ho_Chi_Minh")
+array<string> cut_parts = str.split(i_cutoff, ":")
+int cut_mod = int(str.tonumber(array.get(cut_parts, 0))) * 60 + int(str.tonumber(array.get(cut_parts, 1)))
+bool is_valid      = (mod_now > ATO_MOD and mod_now <= 690) or (mod_now >= 780 and mod_now < ATC_MOD)
+bool is_tier1      = (mod_now >= 555 and mod_now <= 630) or (mod_now >= 810 and mod_now <= 860)
+bool before_cutoff = mod_now <= cut_mod
+bool is_1m         = timeframe.in_seconds() == 60
+bool can_signal    = is_1m and is_valid and before_cutoff
+bool is_new_session = timeframe.isminutes and session.isfirstbar_regular
+
+// ═══════════════════════════════════════════════════════════
+// ATR(20) và SMA Volume trên bar hợp lệ
+// ═══════════════════════════════════════════════════════════
+float tr_now = math.max(high - low, math.max(math.abs(high - close[1]), math.abs(low - close[1])))
+var float atr_v = na
+if is_valid
+    atr_v := na(atr_v) ? tr_now : (atr_v * (i_atrLen - 1) + tr_now) / i_atrLen
+
+// ═══════════════════════════════════════════════════════════
+// SÀN VOLUME ĐỘNG (phân vị q của L phiên gần nhất, bar hợp lệ)
+// ═══════════════════════════════════════════════════════════
+var array<float> vol_hist = array.new<float>()
+var float sma_vol_v   = na
+var float vol_floor_v = na
+int vol_cap = i_volSessions * MIN_BARS_SESSION
+int n_h = array.size(vol_hist)
+if is_valid
+    // Tham chiếu tính TRƯỚC khi đưa volume bar hiện tại vào lịch sử
+    if n_h >= i_volLen
+        sma_vol_v := array.avg(array.slice(vol_hist, n_h - i_volLen, n_h))
+    if n_h >= MIN_BARS_SESSION
+        vol_floor_v := array.percentile_nearest_rank(vol_hist, i_volPctile)
+    array.push(vol_hist, volume)
+    if array.size(vol_hist) > vol_cap
+        array.shift(vol_hist)
+
+// ═══════════════════════════════════════════════════════════
+// SMC: cấu trúc (từ smc_core v3) — dùng cho sweep swing và CHoCH
+// ═══════════════════════════════════════════════════════════
+var smc.SwingState st = smc.f_init_state()
+if is_new_session
+    st := smc.f_seed_session(st)
+else if st.seeded
+    st := smc.f_process_bar(st)
+int smc_event = st.event
+float swing_low  = st.trend == 1 ? st.hl_price : st.trend == -1 ? st.ll_price : na
+float swing_high = st.trend == 1 ? st.hh_price : st.trend == -1 ? st.lh_price : na
+
+// ═══════════════════════════════════════════════════════════
+// ĐẶC TRƯNG NẾN
+// ═══════════════════════════════════════════════════════════
+bool fvg_bull = low > high[2] and close[1] > high[2]
+bool fvg_bear = high < low[2] and close[1] < low[2]
+float body_top = math.max(open, close)
+float body_bot = math.min(open, close)
+float body     = body_top - body_bot
+float rng      = high - low
+bool rng_ok    = rng > 0
+bool feat_ok   = can_signal and not na(atr_v) and not na(sma_vol_v) and not na(vol_floor_v)
+bool vol_ok    = feat_ok and volume >= sma_vol_v * i_volMult and volume >= vol_floor_v
+
+// Nến chủ BODY
+bool body_ok   = vol_ok and rng_ok and body > atr_v * i_bodyAtrMult and body >= i_bodyMinPts and body / rng >= i_bodyRatio
+bool body_bear = body_ok and close < open
+bool body_bull = body_ok and close > open
+
+// Nến chủ ABS (nỗ lực bị hấp thụ)
+bool abs_base     = vol_ok and rng_ok and rng <= atr_v * i_absSpreadAtr
+bool abs_bear_dir = i_absRequireSweep ? (not na(swing_low) and low < swing_low) : close < open
+bool abs_bull_dir = i_absRequireSweep ? (not na(swing_high) and high > swing_high) : close > open
+bool abs_bear     = abs_base and abs_bear_dir and (close - low) / rng >= i_absCloseRatio
+bool abs_bull     = abs_base and abs_bull_dir and (high - close) / rng >= i_absCloseRatio
+
+// Ứng viên anchor: -1 = giảm (chờ Long), 1 = tăng (chờ Short)
+int cand_dir = 0
+string cand_type = ""
+if body_bear or abs_bear
+    cand_dir := -1
+    cand_type := body_bear ? "BODY" : "ABS"
+else if body_bull or abs_bull
+    cand_dir := 1
+    cand_type := body_bull ? "BODY" : "ABS"
+
+// ═══════════════════════════════════════════════════════════
+// TRẠNG THÁI CHAIN (tối đa 1 chain đang chờ tại một thời điểm)
+// ═══════════════════════════════════════════════════════════
+var bool ch_on        = false
+var int ch_dir        = 0
+var string ch_type    = ""
+var int ch_n          = 0
+var float ch_zl       = na
+var float ch_zh       = na
+var int ch_last_bar   = 0
+var int ch_bull_fvg   = 0
+var int ch_bear_fvg   = 0
+var string ch_status  = "IDLE"
+var box ch_box        = na
+var line ch_line      = na
+var bool ch_prev_on   = false
+
+// ═══════════════════════════════════════════════════════════
+// TRADE THAM KHẢO (chỉ khi i_showTrade)
+// ═══════════════════════════════════════════════════════════
+var bool tr_on       = false
+var int tr_dir       = 0
+var string tr_type   = ""
+var string tr_tier   = ""
+var float tr_entry   = na
+var float tr_sl      = na
+var float tr_tp1     = na
+var float tr_tp2     = na
+var float tr_risk    = na
+var bool tr_tp1_hit  = false
+
+// ─── Bước 0: theo dõi trade tham khảo (bắt đầu từ bar sau bar xác nhận) ───
+bool tr_sl_hit   = tr_dir == 1 ? low <= tr_sl : high >= tr_sl
+bool tr_tp1_now  = tr_dir == 1 ? high >= tr_tp1 : low <= tr_tp1
+bool tr_tp2_now  = tr_dir == 1 ? high >= tr_tp2 : low <= tr_tp2
+bool tr_timeout  = mod_now >= TIMEOUT_MOD
+float tr_close_r = tr_dir == 1 ? (close - tr_entry) / tr_risk : (tr_entry - close) / tr_risk
+float tr_res = na
+if tr_on
+    if not tr_tp1_hit
+        if tr_sl_hit
+            tr_res := -1.0
+        else if tr_tp2_now
+            tr_res := 2.0
+        else if tr_tp1_now
+            tr_tp1_hit := true
+    else
+        if tr_sl_hit
+            tr_res := 1.0
+        else if tr_tp2_now
+            tr_res := 2.0
+    if na(tr_res) and tr_timeout
+        tr_res := tr_tp1_hit ? 1.0 : tr_close_r
+    if not na(tr_res)
+        array.push(st_r, tr_res)
+        array.push(st_pts, tr_res * tr_risk)
+        array.push(st_type, tr_type)
+        array.push(st_dir, tr_dir == 1 ? "LONG" : "SHORT")
+        array.push(st_tier, tr_tier)
+        if array.size(st_r) > 2000
+            array.shift(st_r)
+            array.shift(st_pts)
+            array.shift(st_type)
+            array.shift(st_dir)
+            array.shift(st_tier)
+        tr_on := false
+        tr_tp1_hit := false
+
+// ─── Bước 1: đếm FVG xen giữa trong chain đang mở ───
+if ch_on
+    if fvg_bull
+        ch_bull_fvg += 1
+    if fvg_bear
+        ch_bear_fvg += 1
+
+// ─── Bước 2: hết cửa sổ, xác nhận đảo chiều ───
+int bars_since = bar_index - ch_last_bar
+bool confirmed_bull = false
+bool confirmed_bear = false
+if ch_on and bars_since > i_confirmBars
+    ch_on := false
+    ch_status := "INVALID"
+if ch_on and can_signal
+    if ch_dir == -1 and close >= ch_zh + i_breakBuffer and (not i_useMss or smc_event == -2)
+        confirmed_bull := true
+    if ch_dir == 1 and close <= ch_zl - i_breakBuffer and (not i_useMss or smc_event == 2)
+        confirmed_bear := true
+
+// Thông tin tín hiệu xác nhận (tính trước khi chain có thể bị thay thế ở bước 4)
+int sig_dir = confirmed_bull ? 1 : -1
+float sig_sl = confirmed_bull ? ch_zl - i_slBuffer : ch_zh + i_slBuffer
+float sig_risk = math.abs(close - sig_sl)
+bool sig_wide = sig_risk > i_maxRiskPts
+string sig_tier = is_tier1 ? "T1" : "T2"
+string sig_name = sig_dir == 1 ? "LONG" : "SHORT"
+string ref_txt = "E " + str.tostring(close, format.mintick) + "  SL " + str.tostring(sig_sl, format.mintick) + "  TP1 " + str.tostring(close + sig_dir * sig_risk, format.mintick) + "  TP2 " + str.tostring(close + sig_dir * 2 * sig_risk, format.mintick) + (sig_wide ? "  [WIDE SL]" : "")
+string sig_extra = ""
+if confirmed_bull or confirmed_bear
+    ch_on := false
+    ch_status := "CONFIRMED"
+    sig_extra := (ch_n > 1 ? " ×" + str.tostring(ch_n) : "") + " " + sig_tier
+    if confirmed_bull
+        label.new(bar_index, low, sig_name + " [" + ch_type + "]" + sig_extra, color=color.green, style=label.style_label_up, textcolor=color.white, size=size.small)
+    else
+        label.new(bar_index, high, sig_name + " [" + ch_type + "]" + sig_extra, color=color.red, style=label.style_label_down, textcolor=color.white, size=size.small)
+    if i_showTrade and not sig_wide and not tr_on
+        tr_on := true
+        tr_dir := sig_dir
+        tr_type := ch_type
+        tr_tier := sig_tier
+        tr_entry := close
+        tr_sl := sig_sl
+        tr_risk := sig_risk
+        tr_tp1 := close + sig_dir * sig_risk
+        tr_tp2 := close + sig_dir * 2 * sig_risk
+        tr_tp1_hit := false
+    if i_showTrade
+        label.new(bar_index, sig_sl, ref_txt, color=color.new(color.gray, 20), style=confirmed_bull ? label.style_label_up : label.style_label_down, textcolor=color.white, size=size.tiny)
+
+// ─── Bước 3: bar không phải anchor đóng ngoài vùng chain thì chain kết thúc (G2 và mục 7.3) ───
+// Bar anchor được kiểm tra G2 ở bước 4 (can_extend), không xử lý ở đây.
+if ch_on and cand_dir == 0
+    if close < ch_zl or close > ch_zh
+        ch_on := false
+        ch_status := "INVALID"
+
+// ─── Bước 4: điều kiện gộp G1–G7 và xử lý anchor ───
+bool same_chain = ch_on and cand_dir == ch_dir and cand_type == ch_type
+int gap_bars    = bar_index - ch_last_bar - 1
+bool g1 = gap_bars <= i_chainMaxGap
+bool g2 = ch_dir == -1 ? close <= ch_zh : close >= ch_zl
+int same_fvg    = ch_dir == -1 ? ch_bear_fvg : ch_bull_fvg
+int opp_fvg     = ch_dir == -1 ? ch_bull_fvg : ch_bear_fvg
+bool g3 = opp_fvg == 0
+bool g4 = same_fvg <= i_chainMaxTrendFvg
+float wick_opp = ch_dir == -1 ? (body_bot - low) / rng : (high - body_top) / rng
+bool g5 = wick_opp <= i_chainMaxWick
+bool body_in = body_bot >= ch_zl and body_top <= ch_zh
+bool g6 = ch_dir == -1 ? (low < ch_zl or body_in) : (high > ch_zh or body_in)
+bool g7 = ch_n < i_chainMaxLen
+bool can_extend = same_chain and g1 and g2 and g3 and g4 and g5 and g6 and g7
+
+bool ext_low  = low < ch_zl
+bool ext_high = high > ch_zh
+bool anchor_evt = false
+float trig_new = cand_dir == -1 ? high + i_breakBuffer : low - i_breakBuffer
+if cand_dir != 0 and can_signal
+    if can_extend
+        ch_n += 1
+        ch_last_bar := bar_index
+        ch_bull_fvg := 0
+        ch_bear_fvg := 0
+        if ch_dir == -1
+            if i_zoneMode == "Anchor cực trị" and ext_low
+                ch_zh := high
+            ch_zl := math.min(ch_zl, low)
+        else
+            if i_zoneMode == "Anchor cực trị" and ext_high
+                ch_zl := low
+            ch_zh := math.max(ch_zh, high)
+        anchor_evt := true
+    else
+        // Chain cũ bị thay bởi chain mới cùng hướng/loại khác: xử lý hộp và đường của chain cũ trước
+        if not na(ch_box)
+            f_close_chain_vis(ch_box, ch_line, i_chainVisual == "Chỉ giữ chain đang chờ", bar_index)
+            ch_box := na
+            ch_line := na
+        ch_on := true
+        ch_dir := cand_dir
+        ch_type := cand_type
+        ch_n := 1
+        ch_last_bar := bar_index
+        ch_zl := low
+        ch_zh := high
+        ch_bull_fvg := 0
+        ch_bear_fvg := 0
+        ch_status := "PENDING"
+        ch_box := box.new(bar_index, high, bar_index, low, border_color=cand_dir == -1 ? color.red : color.blue, bgcolor=cand_dir == -1 ? C_RED_BOX : C_BLUE_BOX, border_style=cand_type == "ABS" ? line.style_dashed : line.style_solid)
+        ch_line := line.new(bar_index, trig_new, bar_index, trig_new, color=cand_dir == -1 ? color.red : color.blue, style=line.style_dashed, extend=extend.right)
+        anchor_evt := true
+    label.new(bar_index, cand_dir == -1 ? low : high, cand_type, color=color.new(color.gray, 70), style=cand_dir == -1 ? label.style_label_up : label.style_label_down, textcolor=color.white, size=size.tiny)
+
+// ─── Bước 5: cập nhật hộp và đường trigger của chain đang mở ───
+float trig_now = ch_dir == -1 ? ch_zh + i_breakBuffer : ch_zl - i_breakBuffer
+if ch_on
+    box.set_right(ch_box, bar_index)
+    box.set_top(ch_box, ch_zh)
+    box.set_bottom(ch_box, ch_zl)
+    line.set_xy1(ch_line, ch_last_bar, trig_now)
+    line.set_xy2(ch_line, bar_index, trig_now)
+
+// ─── Bước 5b: chain vừa kết thúc (xác nhận hoặc vô hiệu) → xử lý hộp và đường theo lựa chọn hiển thị ───
+if ch_prev_on and not ch_on and not na(ch_box)
+    f_close_chain_vis(ch_box, ch_line, i_chainVisual == "Chỉ giữ chain đang chờ", bar_index)
+    ch_box := na
+    ch_line := na
+ch_prev_on := ch_on
+
+// ─── Bước 6: cảnh báo ───
+bool bull_alert   = confirmed_bull and (not i_killzoneOnly or is_tier1)
+bool bear_alert   = confirmed_bear and (not i_killzoneOnly or is_tier1)
+bool anchor_alert = anchor_evt and (not i_killzoneOnly or is_tier1)
+alertcondition(anchor_alert, title="Anchor Detected", message="Anchor Reversal: phát hiện nến chủ hoặc gộp chain. Kiểm tra chart trước khi vào.")
+alertcondition(bull_alert, title="Bullish Reversal Confirmed", message="Anchor Reversal: xác nhận đảo chiều TĂNG (LONG). Kiểm tra vùng chain trên chart.")
+alertcondition(bear_alert, title="Bearish Reversal Confirmed", message="Anchor Reversal: xác nhận đảo chiều GIẢM (SHORT). Kiểm tra vùng chain trên chart.")
+
+// ─── Bước 7: bảng thống kê (chỉ cập nhật bar cuối) ───
+var table dash = table.new(f_pos(i_dashPos), 6, 16, bgcolor=C_DASH_BG, border_width=1, border_color=color.gray)
+string st_txt = ch_on ? "PENDING " + ch_type + " ×" + str.tostring(ch_n) : ch_status
+string tf_txt = is_1m ? "" : " (CẦN KHUNG 1m)"
+if i_showDash and barstate.islast
+    table.cell(dash, 0, 0, "ANCHOR VN30F" + tf_txt, text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(dash, 1, 0, "", bgcolor=C_DASH_BG)
+    table.cell(dash, 0, 1, "Trạng thái", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(dash, 1, 1, st_txt, text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(dash, 0, 2, "Khung giờ", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(dash, 1, 2, is_tier1 ? "Tier 1" : is_valid ? "Tier 2" : "Ngoài phiên", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(dash, 0, 3, "ATR(" + str.tostring(i_atrLen) + ")", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(dash, 1, 3, na(atr_v) ? "-" : str.tostring(atr_v, format.mintick), text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(dash, 0, 4, "SMA Vol(" + str.tostring(i_volLen) + ")", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(dash, 1, 4, na(sma_vol_v) ? "-" : str.tostring(sma_vol_v, format.volume), text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(dash, 0, 5, "Sàn Vol P" + str.tostring(i_volPctile, "#") + "/" + str.tostring(i_volSessions) + "p", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(dash, 1, 5, na(vol_floor_v) ? "chưa đủ dữ liệu" : str.tostring(vol_floor_v, format.volume), text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(dash, 0, 7, "Nhóm", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(dash, 1, 7, "N", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(dash, 2, 7, "Win", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(dash, 3, 7, "TP2", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(dash, 4, 7, "SL", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    table.cell(dash, 5, 7, "Avg R", text_color=color.white, bgcolor=C_DASH_BG, text_size=size.small)
+    f_stat_row(dash, 8, "ALL", "Tổng")
+    f_stat_row(dash, 9, "BODY", "BODY")
+    f_stat_row(dash, 10, "ABS", "ABS")
+    f_stat_row(dash, 11, "T1", "Tier 1")
+    f_stat_row(dash, 12, "T2", "Tier 2")
+    f_stat_row(dash, 13, "LONG", "LONG")
+    f_stat_row(dash, 14, "SHORT", "SHORT")
+    table.cell(dash, 0, 15, "Win = R>0. Trade tham khảo; trade [WIDE SL] không được tính.", text_color=color.gray, bgcolor=C_DASH_BG, text_size=size.tiny)

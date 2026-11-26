@@ -8,6 +8,7 @@
 
 | Tên | File Script | Version | Tài Liệu |
 |---|---|---|---|
+| Anchor Reversal VN30F (1m) | [indicators/anchor_reversal_vn30f.pine](../indicators/anchor_reversal_vn30f.pine) | 1.1 | [anchor-reversal-vn30f.md](anchor-reversal-vn30f.md) |
 | Global Markets Table | [indicators/global_markets_table.pine](../indicators/global_markets_table.pine) | 1.5 | [global-markets-table.md](global-markets-table.md) |
 | LSC Pattern | [indicators/lsc_pattern.pine](../indicators/lsc_pattern.pine) | 1.0 | [lsc-pattern.md](lsc-pattern.md) |
 | Market Profile (Mind over Markets) | [indicators/market_profile.pine](../indicators/market_profile.pine) | 3.5 | [market-profile.md](market-profile.md) |
