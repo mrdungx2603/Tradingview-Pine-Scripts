@@ -1,0 +1,175 @@
+//@version=6
+// Big Aggressor Flow — Bubble Lệnh Mua/Bán Chủ Động Lớn Theo Footprint (kiểu Bookmap)
+//
+// Đọc footprint Tầng 1 (request.footprint, ticks_per_row=1) của từng nến. Mỗi mức giá trong nến có:
+//   - buy_volume: khối lượng khớp theo lệnh mua chủ động (ăn ask)
+//   - sell_volume: khối lượng khớp theo lệnh bán chủ động (đập bid)
+// Mức giá nào có khối lượng chủ động >= large_mult lần trung bình 1 mức giá (tính trên baseline_len
+// nến gần nhất) được vẽ 1 bubble tròn tại đúng mức giá đó trên nến:
+//   - Màu xanh: mua chủ động lớn. Màu đỏ: bán chủ động lớn.
+//   - Kích thước bubble tăng theo khối lượng (4 bậc: nhỏ, vừa, lớn, rất lớn).
+//   - Số bên trong bubble là khối lượng chủ động của mức giá đó.
+// Bubble chỉ vẽ khi nến đã đóng (barstate.isconfirmed) nên không nhấp nháy khi giá đang chạy.
+//
+// Giới hạn: TradingView không cung cấp từng lệnh khớp riêng lẻ hay sổ lệnh (order book). Bubble là
+// khối lượng chủ động tổng hợp tại 1 mức giá trong 1 nến, không phải 1 lệnh đơn. Pine không đọc được
+// lệnh chờ nên không có heatmap sổ lệnh như Bookmap.
+//
+// Chỉ dùng footprint Tầng 1 — symbol/tài khoản không hỗ trợ tick data sẽ KHÔNG vẽ gì.
+//
+// Phiên bản: 1.1
+// Thay đổi v1.1: Thay box chữ nhật bằng bubble tròn (label.style_circle). Kích thước theo khối lượng,
+//        màu xanh/đỏ phân biệt mua/bán chủ động. Bỏ tham số Vẽ Ô và Màu box, thêm Hiển Thị Bubble.
+
+indicator(
+    title="Big Aggressor Flow",
+    shorttitle="BAF",
+    overlay=true,
+    max_labels_count=500
+)
+
+// ===== CẤU HÌNH =====
+grp_cfg = "Cấu Hình"
+
+price_step = input.float(
+    defval=1.0,
+    title="Bước Giá (Price Step)",
+    minval=0.01,
+    group=grp_cfg,
+    tooltip="Độ rộng 1 hàng giá. Nên khớp tick size của mã đang xem."
+)
+
+baseline_len = input.int(
+    defval=50,
+    title="Số Nến Nền So Sánh",
+    minval=5,
+    group=grp_cfg,
+    tooltip="Khối lượng trung bình 1 mức giá được tính trên số nến này."
+)
+
+large_mult = input.float(
+    defval=3.0,
+    title="Hệ Số Lệnh Lớn (x TB mức giá)",
+    minval=1.0,
+    step=0.5,
+    group=grp_cfg,
+    tooltip="Mức giá có khối lượng chủ động >= hệ số này lần trung bình được vẽ bubble."
+)
+
+min_big_vol = input.float(
+    defval=0.0,
+    title="Khối Lượng Tối Thiểu",
+    minval=0.0,
+    group=grp_cfg,
+    tooltip="Ngưỡng tuyệt đối. Bubble phải có khối lượng vượt cả ngưỡng này."
+)
+
+// ===== HIỂN THỊ =====
+grp_draw = "Hiển Thị"
+
+show_bubbles = input.bool(defval=true, title="Vẽ Bubble", group=grp_draw)
+
+draw_bars = input.int(
+    defval=200,
+    title="Số Nến Gần Nhất Vẽ Bubble",
+    minval=1,
+    maxval=5000,
+    group=grp_draw
+)
+
+show_markers = input.bool(defval=true, title="Hiện Tam Giác Đánh Dấu Nến", group=grp_draw)
+
+col_buy  = input.color(defval=color.new(color.green, 0), title="Màu Mua Chủ Động", group=grp_draw)
+col_sell = input.color(defval=color.new(color.red, 0), title="Màu Bán Chủ Động", group=grp_draw)
+
+// ===== FOOTPRINT TẦNG 1 =====
+// request.footprint() chỉ gọi 1 lần/script, đặt ở scope toàn cục.
+footprint fp = request.footprint(ticks_per_row=1, va_percent=70, imbalance_percent=300)
+
+bool has_fp = not na(fp) and not na(fp.rows()) and array.size(fp.rows()) > 0
+
+// ===== LƯỢT 1: TỔNG KHỐI LƯỢNG VÀ SỐ MỨC GIÁ CỦA NẾN =====
+float bar_total = 0.0
+int   bar_rows  = 0
+
+if has_fp
+    array<volume_row> rows_pass1 = fp.rows()
+    bar_rows := array.size(rows_pass1)
+    for i = 0 to bar_rows - 1
+        volume_row row_p1 = array.get(rows_pass1, i)
+        bar_total := bar_total + row_p1.buy_volume() + row_p1.sell_volume()
+
+// Trung bình khối lượng 1 mức giá, làm nền so sánh. ta.sma phải gọi ở scope toàn cục.
+float bar_avg_row = bar_rows > 0 ? bar_total / bar_rows : 0.0
+float baseline    = ta.sma(bar_avg_row, baseline_len)
+float large_thr   = math.max(min_big_vol, large_mult * nz(baseline))
+bool  can_flag    = has_fp and not na(baseline)
+
+// ===== LƯỢT 2: ĐÁNH DẤU MỨC GIÁ CHỦ ĐỘNG LỚN, VẼ BUBBLE =====
+int   big_buy_n    = 0
+int   big_sell_n   = 0
+float big_buy_vol  = 0.0
+float big_sell_vol = 0.0
+
+if can_flag
+    array<volume_row> rows_pass2 = fp.rows()
+    int n_rows2 = array.size(rows_pass2)
+    for i = 0 to n_rows2 - 1
+        volume_row row         = array.get(rows_pass2, i)
+        float      row_buy     = row.buy_volume()
+        float      row_sell    = row.sell_volume()
+        float      row_px      = row.up_price()
+        float      row_lo      = math.floor(row_px / price_step) * price_step
+        float      row_mid     = row_lo + price_step / 2.0
+        bool       is_big_buy  = row_buy > 0 and row_buy >= large_thr
+        bool       is_big_sell = row_sell > 0 and row_sell >= large_thr
+        bool       is_big      = is_big_buy or is_big_sell
+        float      row_vol     = is_big_buy ? row_buy : row_sell
+        color      cell_col    = is_big_buy ? col_buy : col_sell
+        // Tỷ lệ so với ngưỡng quyết định kích thước bubble. Khai báo ở scope for, không trong if.
+        float      ratio       = row_vol / math.max(large_thr, 1e-9)
+        string     bub_size    = ratio < 2.0 ? size.small : ratio < 4.0 ? size.normal : ratio < 7.0 ? size.large : size.huge
+        string     bub_text    = str.tostring(math.round(row_vol))
+        bool       draw_here   = show_bubbles and barstate.isconfirmed and bar_index >= last_bar_index - draw_bars
+
+        big_buy_n    := big_buy_n + (is_big_buy ? 1 : 0)
+        big_sell_n   := big_sell_n + (is_big_sell ? 1 : 0)
+        big_buy_vol  := big_buy_vol + (is_big_buy ? row_buy : 0.0)
+        big_sell_vol := big_sell_vol + (is_big_sell ? row_sell : 0.0)
+
+        if draw_here and is_big
+            label.new(
+                bar_index, row_mid, text=bub_text,
+                style=label.style_circle, size=bub_size,
+                color=color.new(cell_col, 15), textcolor=color.white,
+                tooltip="Khối lượng chủ động: " + bub_text + " tại " + str.tostring(row_mid)
+            )
+
+// ===== ĐÁNH DẤU & CẢNH BÁO (CHỈ NẾN ĐÃ ĐÓNG) =====
+bool buy_flag  = big_buy_n > 0 and barstate.isconfirmed
+bool sell_flag = big_sell_n > 0 and barstate.isconfirmed
+
+plotshape(
+    show_markers and buy_flag,
+    title="Lệnh Mua Lớn",
+    style=shape.triangleup,
+    location=location.belowbar,
+    color=col_buy,
+    size=size.small,
+    text=str.tostring(math.round(big_buy_vol)),
+    textcolor=col_buy
+)
+
+plotshape(
+    show_markers and sell_flag,
+    title="Lệnh Bán Lớn",
+    style=shape.triangledown,
+    location=location.abovebar,
+    color=col_sell,
+    size=size.small,
+    text=str.tostring(math.round(big_sell_vol)),
+    textcolor=col_sell
+)
+
+alertcondition(buy_flag, title="Lệnh Mua Chủ Động Lớn", message="Big Aggressor Flow: có mức giá mua chủ động lớn trong nến vừa đóng")
+alertcondition(sell_flag, title="Lệnh Bán Chủ Động Lớn", message="Big Aggressor Flow: có mức giá bán chủ động lớn trong nến vừa đóng")

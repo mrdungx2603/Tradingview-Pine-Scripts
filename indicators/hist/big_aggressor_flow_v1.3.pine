@@ -1,0 +1,210 @@
+//@version=6
+// Big Aggressor Flow — Bubble Delta Theo Hàng Giá Trong Nến (kiểu Bookmap)
+//
+// Đọc footprint Tầng 1 (request.footprint, ticks_per_row=1). Với mỗi hàng giá trong nến:
+//   delta = buy_volume - sell_volume  (dương: mua chủ động chiếm ưu thế, âm: bán chủ động)
+// Hàng có |delta| >= Ngưỡng Delta Lớn được vẽ 1 hình tròn:
+//   - Xanh nếu delta > 0 (mua chủ động), đỏ nếu delta < 0 (bán chủ động).
+//   - Độ lớn (bán kính) tuyến tính theo |delta|: bán kính ngang = min(Bán Kính Tối Đa,
+//     Hệ Số Bán Kính x |delta| / Ngưỡng Delta Lớn), đơn vị bar.
+//   - Tâm hình tròn đặt đúng mức giá của hàng (trục dọc theo giá).
+//   - Trục dọc của hình tròn quy đổi từ trục ngang qua ATR(14) và Tỷ Lệ Trục Dọc. Đây là ước lượng.
+//
+// Giới hạn:
+//   - Pine không có công cụ vẽ hình tròn như tool trên TradingView. Hình tròn là polyline đa giác 24 đỉnh.
+//   - Trục ngang là bar, làm tròn tới 1 bar, nên bán kính tăng theo bậc bar.
+//   - TradingView không có sổ lệnh hay lệnh khớp riêng lẻ. Delta là tổng hợp trong 1 nến.
+//
+// Chỉ dùng footprint Tầng 1 — symbol/tài khoản không hỗ trợ tick data sẽ KHÔNG vẽ gì.
+//
+// Phiên bản: 1.3
+// Thay đổi v1.3: Bỏ label số khối lượng và bỏ text ở tam giác đánh dấu. Bubble tính theo |delta|
+//        (mua trừ bán) thay vì khối lượng một chiều. Tâm bubble đặt đúng giá hàng.
+
+indicator(
+    title="Big Aggressor Flow",
+    shorttitle="BAF",
+    overlay=true,
+    max_polylines_count=100
+)
+
+// ===== CẤU HÌNH =====
+grp_cfg = "Cấu Hình"
+
+price_step = input.float(
+    defval=1.0,
+    title="Bước Giá (Price Step)",
+    minval=0.01,
+    group=grp_cfg,
+    tooltip="Độ rộng 1 hàng giá. Nên khớp tick size của mã đang xem."
+)
+
+baseline_len = input.int(
+    defval=50,
+    title="Số Nến Nền So Sánh",
+    minval=5,
+    group=grp_cfg,
+    tooltip="Khối lượng trung bình 1 hàng giá được tính trên số nến này."
+)
+
+large_mult = input.float(
+    defval=3.0,
+    title="Hệ Số Delta Lớn (x TB hàng giá)",
+    minval=1.0,
+    step=0.5,
+    group=grp_cfg,
+    tooltip="Hàng có |delta| >= hệ số này lần khối lượng trung bình 1 hàng được vẽ hình tròn."
+)
+
+min_big_vol = input.float(
+    defval=0.0,
+    title="Delta Tối Thiểu",
+    minval=0.0,
+    group=grp_cfg,
+    tooltip="Ngưỡng tuyệt đối. |delta| của hàng phải vượt cả ngưỡng này."
+)
+
+// ===== HIỂN THỊ =====
+grp_draw = "Hiển Thị"
+
+show_bubbles = input.bool(defval=true, title="Vẽ Hình Tròn Delta", group=grp_draw)
+
+draw_bars = input.int(
+    defval=200,
+    title="Số Nến Gần Nhất Vẽ",
+    minval=1,
+    maxval=5000,
+    group=grp_draw
+)
+
+radius_scale = input.float(
+    defval=2.0,
+    title="Bán Kính (bar) Khi |Delta| = Ngưỡng",
+    minval=0.1,
+    step=0.5,
+    group=grp_draw,
+    tooltip="Bán kính ngang (bar) của hình tròn có |delta| đúng bằng ngưỡng. |delta| gấp N lần ngưỡng cho bán kính = N x giá trị này."
+)
+
+max_radius = input.float(
+    defval=10.0,
+    title="Bán Kính Tối Đa (bar)",
+    minval=1.0,
+    group=grp_draw,
+    tooltip="Chặn bán kính để hình tròn rất lớn không che chart."
+)
+
+vert_ratio = input.float(
+    defval=0.25,
+    title="Tỷ Lệ Trục Dọc (ry/rx)",
+    minval=0.01,
+    step=0.05,
+    group=grp_draw,
+    tooltip="Quy đổi bán kính dọc (theo giá) từ bán kính ngang (theo bar) qua ATR(14). Chỉnh cho đến khi hình tròn trông tròn trên màn hình của bạn."
+)
+
+show_markers = input.bool(defval=true, title="Hiện Tam Giác Đánh Dấu Nến", group=grp_draw)
+
+col_buy  = input.color(defval=color.new(color.green, 0), title="Màu Mua Chủ Động (delta > 0)", group=grp_draw)
+col_sell = input.color(defval=color.new(color.red, 0), title="Màu Bán Chủ Động (delta < 0)", group=grp_draw)
+
+// ===== HẰNG & ATR (GLOBAL SCOPE) =====
+int   N_SEG   = 24
+float atr_val = ta.atr(14)
+
+// ===== HÀM: ĐỈNH ĐƯỜNG TRÒN CHO POLYLINE =====
+// Tâm (cx bar, cy giá), bán kính ngang rx (bar), bán kính dọc ry (giá).
+f_circle_pts(int cx, float cy, int rx, float ry, int n) =>
+    array<chart.point> pts = array.new<chart.point>()
+    for k = 0 to n - 1
+        float ang = 2.0 * math.pi * k / n
+        int   px  = cx + int(math.round(rx * math.cos(ang)))
+        float py  = cy + ry * math.sin(ang)
+        array.push(pts, chart.point.from_index(px, py))
+    pts
+
+// ===== FOOTPRINT TẦNG 1 =====
+// request.footprint() chỉ gọi 1 lần/script, đặt ở scope toàn cục.
+footprint fp = request.footprint(ticks_per_row=1, va_percent=70, imbalance_percent=300)
+
+bool has_fp = not na(fp) and not na(fp.rows()) and array.size(fp.rows()) > 0
+
+// ===== LƯỢT 1: TỔNG KHỐI LƯỢNG VÀ SỐ HÀNG CỦA NẾN =====
+float bar_total = 0.0
+int   bar_rows  = 0
+
+if has_fp
+    array<volume_row> rows_pass1 = fp.rows()
+    bar_rows := array.size(rows_pass1)
+    for i = 0 to bar_rows - 1
+        volume_row row_p1 = array.get(rows_pass1, i)
+        bar_total := bar_total + row_p1.buy_volume() + row_p1.sell_volume()
+
+// Trung bình khối lượng 1 hàng giá, làm nền so sánh. ta.sma phải gọi ở scope toàn cục.
+float bar_avg_row = bar_rows > 0 ? bar_total / bar_rows : 0.0
+float baseline    = ta.sma(bar_avg_row, baseline_len)
+float large_thr   = math.max(min_big_vol, large_mult * nz(baseline))
+bool  can_flag    = has_fp and not na(baseline)
+
+// ===== LƯỢT 2: ĐÁNH DẤU HÀNG DELTA LỚN, VẼ HÌNH TRÒN =====
+int   big_buy_n    = 0
+int   big_sell_n   = 0
+
+if can_flag
+    array<volume_row> rows_pass2 = fp.rows()
+    int n_rows2 = array.size(rows_pass2)
+    for i = 0 to n_rows2 - 1
+        volume_row row         = array.get(rows_pass2, i)
+        float      row_buy     = row.buy_volume()
+        float      row_sell    = row.sell_volume()
+        float      row_delta   = row_buy - row_sell
+        float      row_abs     = math.abs(row_delta)
+        float      row_px      = row.up_price()
+        float      row_lo      = math.floor(row_px / price_step) * price_step
+        float      row_mid     = row_lo + price_step / 2.0
+        bool       is_big      = row_abs > 0 and row_abs >= large_thr
+        bool       is_buy      = row_delta > 0
+        color      cell_col    = is_buy ? col_buy : col_sell
+        // Bán kính tuyến tính theo |delta| / ngưỡng, giới hạn bởi max_radius. Khai báo ở scope for.
+        float      ratio       = row_abs / math.max(large_thr, 1e-9)
+        float      rx_raw      = math.min(max_radius, radius_scale * ratio)
+        int        rx_int      = math.max(1, int(math.round(rx_raw)))
+        float      ry_px       = rx_int * atr_val * vert_ratio
+        bool       draw_here   = show_bubbles and barstate.isconfirmed and bar_index >= last_bar_index - draw_bars
+
+        big_buy_n  := big_buy_n + (is_big and is_buy ? 1 : 0)
+        big_sell_n := big_sell_n + (is_big and not is_buy ? 1 : 0)
+
+        if draw_here and is_big
+            polyline.new(
+                f_circle_pts(bar_index, row_mid, rx_int, ry_px, N_SEG),
+                curved=false, closed=true,
+                line_color=color.new(cell_col, 0),
+                fill_color=color.new(cell_col, 70),
+                line_width=1
+            )
+
+// ===== ĐÁNH DẤU & CẢNH BÁO (CHỈ NẾN ĐÃ ĐÓNG) =====
+bool buy_flag  = big_buy_n > 0 and barstate.isconfirmed
+bool sell_flag = big_sell_n > 0 and barstate.isconfirmed
+
+plotshape(
+    show_markers and buy_flag,
+    title="Delta Mua Lớn",
+    style=shape.triangleup,
+    location=location.belowbar,
+    color=col_buy,
+    size=size.small
+)
+
+plotshape(
+    show_markers and sell_flag,
+    title="Delta Bán Lớn",
+    style=shape.triangledown,
+    location=location.abovebar,
+    color=col_sell,
+    size=size.small
+)
+
+alertcondition(buy_flag, title="Delta Mua Chủ Động Lớn", message="Big Aggressor Flow: có hàng giá delta mua lớn trong nến vừa đóng")
+alertcondition(sell_flag, title="Delta Bán Chủ Động Lớn", message="Big Aggressor Flow: có hàng giá delta bán lớn trong nến vừa đóng")

@@ -1,0 +1,120 @@
+//@version=6
+// Big Aggressor Flow — Hình tròn delta theo hàng giá trong nến (kiểu Bookmap)
+// Phiên bản: 1.1
+//
+// Đọc footprint Tầng 1 (request.footprint, ticks_per_row=1). Mỗi hàng giá có delta = mua chủ động - bán chủ động.
+// Hàng có |delta| >= ngưỡng được vẽ hình tròn tại đúng mức giá của hàng, xanh nếu delta > 0, đỏ nếu delta < 0.
+
+indicator(
+    title="Big Aggressor Flow",
+    shorttitle="BAF",
+    overlay=true,
+    max_labels_count=500
+)
+
+// ===== CẤU HÌNH =====
+grp_cfg = "Cấu Hình"
+
+price_step = input.float(defval=1.0, title="Bước Giá (Price Step)", minval=0.01, group=grp_cfg,
+     tooltip="Độ rộng 1 hàng giá. Nên khớp tick size của mã đang xem.")
+
+baseline_len = input.int(defval=50, title="Số Nến Nền So Sánh", minval=5, group=grp_cfg,
+     tooltip="Khối lượng trung bình 1 hàng giá được tính trên số nến này.")
+
+large_mult = input.float(defval=3.0, title="Hệ Số Delta Lớn (x TB hàng giá)", minval=1.0, step=0.5, group=grp_cfg,
+     tooltip="Hàng có |delta| >= hệ số này lần khối lượng trung bình 1 hàng được vẽ hình tròn.")
+
+min_big_vol = input.float(defval=0.0, title="Delta Tối Thiểu", minval=0.0, group=grp_cfg,
+     tooltip="Ngưỡng tuyệt đối. |delta| của hàng phải vượt cả ngưỡng này.")
+
+// ===== HIỂN THỊ =====
+grp_draw = "Hiển Thị"
+
+show_bubbles = input.bool(defval=true, title="Vẽ Hình Tròn Delta", group=grp_draw)
+
+draw_bars = input.int(defval=200, title="Số Nến Gần Nhất Vẽ", minval=1, maxval=5000, group=grp_draw)
+
+opacity_pct = input.int(defval=30, title="Độ Mờ Hình Tròn (Opacity %)", minval=0, maxval=100, group=grp_draw,
+     tooltip="0 = trong suốt hoàn toàn, 100 = đặc hoàn toàn.")
+
+col_buy  = input.color(defval=color.green, title="Màu Delta Dương (mua chủ động)", group=grp_draw)
+col_sell = input.color(defval=color.red, title="Màu Delta Âm (bán chủ động)", group=grp_draw)
+
+show_text = input.bool(defval=true, title="Hiện Giá Trị Delta", group=grp_draw)
+col_text  = input.color(defval=color.white, title="Màu Chữ Delta", group=grp_draw)
+
+text_gap = input.float(defval=0.5, title="Khoảng Cách Chữ (x ATR)", minval=0.0, step=0.1, group=grp_draw,
+     tooltip="Khoảng cách từ tâm hình tròn đến chữ delta, theo đơn vị ATR(14). Delta dương: chữ ở trên hình. Delta âm: chữ ở dưới hình.")
+
+// ATR(14) dùng để đặt chữ delta cách hình tròn.
+float atr_val = nz(ta.atr(14))
+
+// ===== FOOTPRINT TẦNG 1 =====
+footprint fp = request.footprint(ticks_per_row=1, va_percent=70, imbalance_percent=300)
+
+bool has_fp = not na(fp) and not na(fp.rows()) and array.size(fp.rows()) > 0
+
+// ===== LƯỢT 1: TỔNG KHỐI LƯỢNG VÀ SỐ HÀNG CỦA NẾN =====
+float bar_total = 0.0
+int   bar_rows  = 0
+
+if has_fp
+    array<volume_row> rows_pass1 = fp.rows()
+    bar_rows := array.size(rows_pass1)
+    for i = 0 to bar_rows - 1
+        volume_row row_p1 = array.get(rows_pass1, i)
+        bar_total := bar_total + row_p1.buy_volume() + row_p1.sell_volume()
+
+// Trung bình khối lượng 1 hàng giá làm nền so sánh. ta.sma gọi ở scope toàn cục.
+float bar_avg_row = bar_rows > 0 ? bar_total / bar_rows : 0.0
+float baseline    = ta.sma(bar_avg_row, baseline_len)
+float large_thr   = math.max(min_big_vol, large_mult * nz(baseline))
+bool  can_flag    = has_fp and not na(baseline)
+
+// ===== LƯỢT 2: VẼ HÌNH TRÒN CHO HÀNG DELTA LỚN =====
+int big_buy_n  = 0
+int big_sell_n = 0
+
+if can_flag
+    array<volume_row> rows_pass2 = fp.rows()
+    int n_rows2 = array.size(rows_pass2)
+    for i = 0 to n_rows2 - 1
+        volume_row row       = array.get(rows_pass2, i)
+        float      row_delta = row.buy_volume() - row.sell_volume()
+        float      row_abs   = math.abs(row_delta)
+        float      row_lo    = math.floor(row.up_price() / price_step) * price_step
+        float      row_mid   = row_lo + price_step / 2.0
+        bool       is_big    = row_abs > 0 and row_abs >= large_thr
+        bool       is_buy    = row_delta > 0
+        color      cell_col  = is_buy ? col_buy : col_sell
+        float      ratio     = row_abs / math.max(large_thr, 1e-9)
+        string     bub_size  = ratio < 2.0 ? size.small : ratio < 4.0 ? size.normal : ratio < 7.0 ? size.large : size.huge
+        bool       draw_here = show_bubbles and barstate.isconfirmed and bar_index >= last_bar_index - draw_bars
+        string     delta_txt = str.tostring(math.round(row_delta))
+        float      txt_y     = is_buy ? row_mid + atr_val * text_gap : row_mid - atr_val * text_gap
+
+        big_buy_n  := big_buy_n + (is_big and is_buy ? 1 : 0)
+        big_sell_n := big_sell_n + (is_big and not is_buy ? 1 : 0)
+
+        if draw_here and is_big
+            label.new(
+                bar_index, row_mid, text="",
+                xloc=xloc.bar_index, yloc=yloc.price,
+                style=label.style_circle, size=bub_size,
+                color=color.new(cell_col, 100 - opacity_pct),
+                tooltip="Δ giá trị: " + delta_txt + " tại " + str.tostring(row_mid)
+            )
+            if show_text
+                label.new(
+                    bar_index, txt_y, text="Δ " + delta_txt,
+                    xloc=xloc.bar_index, yloc=yloc.price,
+                    style=label.style_none, size=size.small,
+                    textcolor=col_text
+                )
+
+// ===== CẢNH BÁO (CHỈ NẾN ĐÃ ĐÓNG) =====
+bool buy_flag  = big_buy_n > 0 and barstate.isconfirmed
+bool sell_flag = big_sell_n > 0 and barstate.isconfirmed
+
+alertcondition(buy_flag, title="Delta Mua Chủ Động Lớn", message="Big Aggressor Flow: có hàng giá delta mua lớn trong nến vừa đóng")
+alertcondition(sell_flag, title="Delta Bán Chủ Động Lớn", message="Big Aggressor Flow: có hàng giá delta bán lớn trong nến vừa đóng")
