@@ -50,7 +50,7 @@
 | [reports/us30-vn30f-correlation.md](reports/us30-vn30f-correlation.md) | Tương quan US30 phiên trước với VN30F phiên sau theo biên độ: không có lợi thế chung. Chỉ US ≥ +2% đánh ngược có bằng chứng, nhưng tụ ở 2020 và 2022 | [backtests/us30_vn30f/us30_vn30f_backtest.mjs](../backtests/us30_vn30f/us30_vn30f_backtest.mjs) |
 | [reports/us30-streak-vnindex.md](reports/us30-streak-vnindex.md) | US30 giảm 5 phiên liên tiếp: phiên 6 xanh 56,8%, VNINDEX phiên đầu giảm trung bình -0,54% (p = 0,002). Báo cáo HTML: [backtests/us30_streak/report.html](../backtests/us30_streak/report.html) | [backtests/us30_streak/us30_streak_backtest.mjs](../backtests/us30_streak/us30_streak_backtest.mjs) |
 
-| [reports/smc-123-reversal-vn30f.md](reports/smc-123-reversal-vn30f.md) | Đảo chiều 1-2-3: trigger Trendline vs CHoCH + bộ lọc SMC (FVG, độ hồi, VWAP, 2B) trên VN30F1 1m/3m/5m. Chưa có lợi thế ròng chứng minh được | [backtests/smc_123/smc_123_backtest.mjs](../backtests/smc_123/smc_123_backtest.mjs) |
+| [reports/smc-123-reversal-vn30f.md](reports/smc-123-reversal-vn30f.md) | Đảo chiều 1-2-3: trigger Trendline vs CHoCH + bộ lọc SMC (FVG, độ hồi, VWAP, 2B) trên VN30F1M 1m/3m (MySQL, 112 phiên thật). Cấu hình chính K=3 âm có ý nghĩa thống kê; chỉ bộ lọc VWAP có bằng chứng | [backtests/smc_123/smc_123_backtest.mjs](../backtests/smc_123/smc_123_backtest.mjs) |
 Hướng dẫn lấy dữ liệu lịch sử TradingView để làm báo cáo: [tradingview-api-guide.md](tradingview-api-guide.md).
 
 ## Tài Liệu Tham Khảo Khác

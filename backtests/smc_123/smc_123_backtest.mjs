@@ -323,10 +323,13 @@ const FACTORS = {
 };
 
 // ---------- chạy ----------
+// 2026-11-28: đổi nguồn dữ liệu sang MySQL (ohlc_candles, VN30F1M) — full 6 tháng thật
+// (28874 nến 1m, 26/05–26/11/2026) thay cho CSV export TradingView bị giới hạn 5000 nến (~1 tháng).
+// MySQL chỉ có sẵn 1m/1d -> khung 3m được resample từ 1m (gộp mỗi 3 nến theo mốc đồng hồ UTC,
+// xem backtests/smc_123/data/vn30f1m_m3.csv). Chưa resample 5m ở lần chạy này.
 const DATASETS = [
-  { name: '1m', files: ['data/vn301_m1.csv', '../smc_choch/data/vn301_m1.csv'] },
-  { name: '3m', files: ['data/vn301_m3.csv'] },
-  { name: '5m', files: ['data/vn301_m5.csv'] },
+  { name: '1m', files: ['data/vn30f1m_m1.csv'] },
+  { name: '3m', files: ['data/vn30f1m_m3.csv'] },
 ];
 const KS = [3, 5];
 const results = { params: { W, COST, MIN_RET, CONFL, BUFS, MAIN_BUF, KS }, datasets: {} };
